@@ -15,6 +15,43 @@ pub fn path_for(scad: &Path) -> PathBuf {
     scad.with_extension("json")
 }
 
+/// The sets file last used for `scad`, from `<config>/sets-files`.
+pub fn remembered(scad: &Path) -> Option<PathBuf> {
+    let key = scad.canonicalize().ok()?;
+    let text = std::fs::read_to_string(crate::openscad::config_dir()?.join("sets-files")).ok()?;
+    text.lines()
+        .filter_map(|l| l.split_once('\t'))
+        .find(|(k, _)| Path::new(k) == key)
+        .map(|(_, v)| PathBuf::from(v))
+}
+
+/// Records `json` as the sets file for `scad`.
+pub fn remember(scad: &Path, json: &Path) -> Result<()> {
+    let dir = crate::openscad::config_dir().context("no config folder")?;
+    std::fs::create_dir_all(&dir)?;
+    let file = dir.join("sets-files");
+    let key = scad.canonicalize()?;
+    let mut lines: Vec<String> = std::fs::read_to_string(&file)
+        .unwrap_or_default()
+        .lines()
+        .filter(|l| l.split_once('\t').is_some_and(|(k, _)| Path::new(k) != key))
+        .map(String::from)
+        .collect();
+    if json != path_for(&key) {
+        lines.push(format!("{}\t{}", key.display(), json.display()));
+    }
+    std::fs::write(file, lines.join("\n") + "\n")?;
+    Ok(())
+}
+
+/// The sets file to use for `scad`: the remembered one when it still
+/// exists, else `<model>.json` next to the model.
+pub fn file_for(scad: &Path) -> PathBuf {
+    remembered(scad)
+        .filter(|p| p.exists())
+        .unwrap_or_else(|| path_for(scad))
+}
+
 fn read(path: &Path) -> Result<Map<String, Json>> {
     match std::fs::read_to_string(path) {
         Ok(text) => {

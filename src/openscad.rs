@@ -37,6 +37,14 @@ impl Default for Config {
     }
 }
 
+/// `$XDG_CONFIG_HOME/scad-viewer`, else `~/.config/scad-viewer`.
+pub fn config_dir() -> Option<PathBuf> {
+    let base = std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))?;
+    Some(base.join("scad-viewer"))
+}
+
 fn config_path() -> Option<PathBuf> {
     let base = std::env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)

@@ -8,7 +8,7 @@ status: in-progress
 tags: [openscad, 3d-printing, viewer, slicer, rust, egui]
 started: 2026-11-01
 dates_from: "first commit date"
-version: "0.1.4"
+version: "0.1.5"
 ---
 
 # SCAD Viewer
@@ -22,7 +22,7 @@ OpenSCAD does the geometry. SCAD Viewer runs the `openscad` CLI in the backgroun
 - 3D view with orbit, pan and zoom, view presets, wireframe and bed grid.
 - Customizer panel: groups, sliders, dropdowns, switches, text, vectors. Reset per value or all.
 - Groups collapse one by one, or all with one button. A group shows how many of its values you changed.
-- Parameter sets: save, load and delete named sets in `<model>.json`. The file uses the OpenSCAD Customizer format.
+- Parameter sets: save, load and delete named sets in a `.json` file that you pick. The file uses the OpenSCAD Customizer format.
 - Auto render on parameter change (debounced). A new render cancels the old one.
 - Auto reload when the `.scad` file changes on disk. Edited values stay.
 - Export: binary STL, 3MF (with parameters in the metadata), STEP AP214.
@@ -49,7 +49,7 @@ The slicer is for preview only. It has no travel moves, supports, bridges or rea
 | `src/render.rs` | OpenGL shaders and buffers |
 | `src/ui.rs` | Theme, cards, pills, switch, segmented control |
 | `src/params.rs` | Customizer parameter parser |
-| `src/presets.rs` | Parameter sets (`<model>.json`) |
+| `src/presets.rs` | Parameter sets (OpenSCAD `.json` format) |
 | `src/openscad.rs` | Runs `openscad` and reads the STL |
 | `src/mesh.rs` | Indexed mesh, STL reader, checks |
 | `src/export.rs` | STL, 3MF and STEP writers |
@@ -79,7 +79,7 @@ scripts/build.sh --debug    # debug build
 
 ```bash
 scripts/package-deb.sh
-sudo apt install ./dist/scad-viewer_0.1.4_amd64.deb
+sudo apt install ./dist/scad-viewer_0.1.5_amd64.deb
 ```
 
 ## Usage
@@ -126,11 +126,13 @@ OpenSCAD 2021.01 (the Debian package) uses the CGAL backend. CGAL is slow on lar
 
 The **Parameter set** card at the top of the panel holds named sets of values.
 
-- Select a set to load it. **File defaults** sets all values back to the `.scad` defaults.
+- The first line shows the sets file. **Open file** loads sets from any `.json` file. **New file** picks a place and name for a new sets file. It is written on the first save.
+- The app remembers the sets file for each model in `~/.config/scad-viewer/sets-files`. Without one, it uses `<model>.json` next to `<model>.scad`.
+- Select a set to load it. **Model defaults** sets all values back to the `.scad` defaults.
 - **Save** writes the values to the selected set. With no set selected, it asks for a name.
-- **New** saves the values as a new set. **Delete** removes the selected set (click two times).
-- The sets are in `<model>.json` next to `<model>.scad`. OpenSCAD reads the same file: `openscad -p model.json -P big`.
-- The CLI takes `-P name` (and `-p file.json` for a different file). `-D` values apply after the set.
+- **Save as** saves the values as a new set. **Delete** removes the selected set (click two times).
+- The file uses the OpenSCAD Customizer format. OpenSCAD reads it too: `openscad -p sets.json -P big`.
+- The CLI takes `-P name` and `-p file.json`. Without `-p` it uses the file the app remembers, else `<model>.json`. `-D` values apply after the set.
 
 ## Customizer syntax
 

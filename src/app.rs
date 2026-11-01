@@ -108,6 +108,7 @@ pub struct App {
     show_log: bool,
     /// Parameter sets in `<model>.json`.
     sets: Vec<String>,
+    sets_file: PathBuf,
     active_set: Option<String>,
     set_edited: bool,
     /// Name being typed for "Save as".
@@ -167,6 +168,7 @@ impl App {
             grid: true,
             show_log: false,
             sets: Vec::new(),
+            sets_file: PathBuf::new(),
             active_set: None,
             set_edited: false,
             new_set: None,
@@ -190,7 +192,8 @@ impl App {
             Ok(src) => {
                 self.params = params::parse(&src);
                 self.mtime = mtime(&path);
-                self.sets = presets::names(&presets::path_for(&path));
+                self.sets_file = presets::file_for(&path);
+                self.sets = presets::names(&self.sets_file);
                 self.active_set = None;
                 self.new_set = None;
                 self.file = Some(path);
@@ -224,7 +227,7 @@ impl App {
             }
         }
         self.params = fresh;
-        self.sets = presets::names(&presets::path_for(&path));
+        self.sets = presets::names(&self.sets_file);
         self.mtime = mtime(&path);
         self.start_render();
     }
@@ -616,15 +619,64 @@ impl App {
         let Some(file) = self.file.clone() else {
             return;
         };
-        let path = presets::path_for(&file);
+        let mut path = self.sets_file.clone();
         let mut msg: Option<String> = None;
+        let mut switch_to: Option<PathBuf> = None;
         ui::card(ui, |ui| {
             ui::section(ui, "Parameter set");
+            ui.horizontal(|ui| {
+                let name = path
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .into_owned();
+                let exists = path.exists();
+                let text = if exists {
+                    name
+                } else {
+                    format!("{name} (new)")
+                };
+                ui.label(ui::dim(text))
+                    .on_hover_text(path.display().to_string());
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.spacing_mut().button_padding = Vec2::new(8.0, 4.0);
+                    ui.spacing_mut().item_spacing.x = 2.0;
+                    let dir = path
+                        .parent()
+                        .filter(|d| d.is_dir())
+                        .or(file.parent())
+                        .map(|d| d.to_path_buf());
+                    if ui
+                        .add(ui::ghost("New file", false))
+                        .on_hover_text("Choose where to save a new sets file")
+                        .clicked()
+                    {
+                        let mut d = rfd::FileDialog::new()
+                            .add_filter("Parameter sets", &["json"])
+                            .set_file_name(path.file_name().unwrap_or_default().to_string_lossy());
+                        if let Some(dir) = &dir {
+                            d = d.set_directory(dir);
+                        }
+                        switch_to = d.save_file();
+                    }
+                    if ui
+                        .add(ui::ghost("Open file", false))
+                        .on_hover_text("Load sets from a .json file")
+                        .clicked()
+                    {
+                        let mut d = rfd::FileDialog::new().add_filter("Parameter sets", &["json"]);
+                        if let Some(dir) = &dir {
+                            d = d.set_directory(dir);
+                        }
+                        switch_to = d.pick_file();
+                    }
+                });
+            });
             {
                 let label = match &self.active_set {
                     Some(n) if self.set_edited => format!("{n} (edited)"),
                     Some(n) => n.clone(),
-                    None => "File defaults".into(),
+                    None => "Model defaults".into(),
                 };
                 let mut pick: Option<Option<String>> = None;
                 egui::ComboBox::from_id_salt("sets")
@@ -632,7 +684,7 @@ impl App {
                     .width(ui.available_width())
                     .show_ui(ui, |ui| {
                         if ui
-                            .selectable_label(self.active_set.is_none(), "File defaults")
+                            .selectable_label(self.active_set.is_none(), "Model defaults")
                             .clicked()
                         {
                             pick = Some(None);
@@ -689,7 +741,7 @@ impl App {
                     }
                 }
                 if ui
-                    .add(ui::ghost("New", false))
+                    .add(ui::ghost("Save as", false))
                     .on_hover_text("Save the values as a new set")
                     .clicked()
                 {
@@ -761,6 +813,21 @@ impl App {
                 }
             }
         });
+        if let Some(p) = switch_to {
+            if let Err(e) = presets::remember(&file, &p) {
+                msg = Some(format!("Cannot remember the sets file: {e}"));
+            }
+            path = p;
+            self.sets_file = path.clone();
+            self.active_set = None;
+            self.set_edited = false;
+            self.confirm_delete = false;
+            let n = presets::names(&path).len();
+            msg = msg.or(Some(format!(
+                "{n} sets in {}",
+                path.file_name().unwrap_or_default().to_string_lossy()
+            )));
+        }
         if msg.is_some() {
             self.sets = presets::names(&path);
         }

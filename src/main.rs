@@ -26,7 +26,7 @@ Usage:
 
 Parameter sets:
   -P SET      Apply a saved parameter set before the -D values
-  -p FILE     Read sets from FILE (default: FILE.scad with .json)
+  -p FILE     Read sets from FILE (default: the file chosen in the app, else FILE.json)
 
 Environment:
   OPENSCAD       OpenSCAD binary (overrides the saved setting; default: openscad)
@@ -118,7 +118,7 @@ fn parse_batch(args: &[String]) -> Result<Batch> {
         .with_context(|| format!("cannot read {}", file.display()))?;
     let mut params = params::parse(&src);
     if let Some(name) = &set {
-        let path = set_file.unwrap_or_else(|| presets::path_for(&file));
+        let path = set_file.unwrap_or_else(|| presets::file_for(&file));
         for k in presets::apply(&path, name, &mut params)? {
             eprintln!("warning: set '{name}': skipped '{k}'");
         }
