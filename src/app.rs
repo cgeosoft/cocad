@@ -6,6 +6,7 @@ use crate::openscad;
 use crate::params::{self, Param, Value, Widget};
 use crate::render::{self, Renderer, View};
 use crate::slicer::{self, Kind, Settings, Sliced};
+use crate::ui::{self, ACCENT};
 use eframe::egui::{self, Color32, RichText, Vec2};
 use glam::{Mat4, Vec3};
 use std::path::PathBuf;
@@ -14,7 +15,6 @@ use std::sync::mpsc::{Receiver, channel};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
-const ACCENT: Color32 = Color32::from_rgb(0xff, 0x93, 0x00);
 const DEBOUNCE: Duration = Duration::from_millis(350);
 
 #[derive(PartialEq, Clone, Copy)]
@@ -115,7 +115,7 @@ pub struct App {
 
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>, file: Option<PathBuf>, slice: bool) -> App {
-        style(&cc.egui_ctx);
+        ui::theme(&cc.egui_ctx);
         let renderer = cc.gl.as_ref().and_then(|gl| match Renderer::new(gl) {
             Ok(r) => Some(Arc::new(Mutex::new(r))),
             Err(e) => {
@@ -408,77 +408,89 @@ impl App {
     }
 
     fn top_bar(&mut self, ui: &mut egui::Ui) {
-        egui::menu::bar(ui, |ui| {
-            if ui.button("📂 Open").on_hover_text("Ctrl+O").clicked() {
+        ui.horizontal_centered(|ui| {
+            // Brand and file.
+            let (r, _) = ui.allocate_exact_size(Vec2::splat(22.0), egui::Sense::hover());
+            ui.painter().rect_filled(r, 6.0, ui::ACCENT);
+            ui.painter().rect_filled(r.shrink(6.0), 2.0, ui::PANEL);
+            ui.label(RichText::new("SCAD Viewer").size(16.0).strong());
+            if let Some(f) = &self.file {
+                let name = f
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .into_owned();
+                ui.label(RichText::new(name).color(ui::DIM))
+                    .on_hover_text(f.display().to_string());
+            }
+            ui.add_space(12.0);
+            if ui
+                .add(ui::ghost("Open", false))
+                .on_hover_text("Ctrl+O")
+                .clicked()
+            {
                 self.pick_file();
             }
-            let busy = self.job.is_some();
-            if ui
-                .add_enabled(self.file.is_some(), egui::Button::new("⟳ Render"))
-                .on_hover_text("F5")
-                .clicked()
-            {
-                self.start_render();
-            }
-            ui.checkbox(&mut self.auto_render, "Auto");
-            ui.separator();
 
-            let can_export = self.mesh.is_some() && !busy && self.export_rx.is_none();
-            ui.add_enabled_ui(can_export, |ui| {
-                ui.menu_button("💾 Export", |ui| {
-                    for fmt in Format::ALL {
-                        if ui.button(fmt.label()).clicked() {
-                            ui.close_menu();
-                            self.export(fmt);
-                        }
-                    }
-                });
-            });
-            ui.separator();
-
-            ui.selectable_value(&mut self.mode, Mode::Model, "Model");
-            if ui
-                .selectable_value(&mut self.mode, Mode::Slice, "Slice")
-                .clicked()
-                && self.slice_for_rev != self.mesh_rev
-            {
-                self.start_slice();
-            }
-            ui.separator();
-
-            ui.menu_button("👁 View", |ui| {
-                for (label, yaw, pitch) in [
-                    ("Iso", -0.9, 0.55),
-                    ("Top", -std::f32::consts::FRAC_PI_2, 1.5697),
-                    ("Front", -std::f32::consts::FRAC_PI_2, 0.0),
-                    ("Right", 0.0, 0.0),
-                    ("Back", std::f32::consts::FRAC_PI_2, 0.0),
-                    ("Left", std::f32::consts::PI, 0.0),
-                ] {
-                    if ui.button(label).clicked() {
-                        self.set_view(yaw, pitch);
-                        ui.close_menu();
-                    }
-                }
-                ui.separator();
-                if ui.button("Fit (F)").clicked() {
-                    self.fit();
-                    ui.close_menu();
-                }
-                ui.checkbox(&mut self.wireframe, "Wireframe (W)");
-                ui.checkbox(&mut self.grid, "Bed grid");
-                ui.checkbox(&mut self.show_log, "Console");
-            });
-            if ui.button("⚙ Settings").clicked() {
-                self.cfg_edit = Some(self.cfg.clone());
-            }
-
+            // Right side, laid out from the right edge.
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if let Some(f) = &self.file {
-                    ui.label(RichText::new(f.display().to_string()).weak());
+                let busy = self.job.is_some();
+                let can_export = self.mesh.is_some() && !busy && self.export_rx.is_none();
+                ui.add_enabled_ui(can_export, |ui| {
+                    egui::menu::menu_custom_button(ui, ui::primary("Export"), |ui| {
+                        ui.set_min_width(200.0);
+                        for fmt in Format::ALL {
+                            if ui
+                                .add(ui::ghost(fmt.label(), false).min_size(Vec2::new(200.0, 32.0)))
+                                .clicked()
+                            {
+                                ui.close_menu();
+                                self.export(fmt);
+                            }
+                        }
+                    });
+                });
+                if ui
+                    .add_enabled(self.file.is_some(), ui::ghost("Render", false))
+                    .on_hover_text("F5")
+                    .clicked()
+                {
+                    self.start_render();
+                }
+                ui.label(RichText::new("Auto").color(ui::DIM));
+                ui::toggle(ui, &mut self.auto_render)
+                    .on_hover_text("Render when a parameter changes");
+                ui.add_space(8.0);
+                if ui.add(ui::ghost("Console", self.show_log)).clicked() {
+                    self.show_log = !self.show_log;
+                }
+                if ui
+                    .add(ui::ghost("Settings", self.cfg_edit.is_some()))
+                    .clicked()
+                {
+                    self.cfg_edit = Some(self.cfg.clone());
+                }
+
+                // Mode switch in the middle of the remaining space.
+                let free = ui.available_width();
+                ui.add_space(((free - 170.0) / 2.0).max(0.0));
+                let mut mode = self.mode;
+                if ui::segmented(
+                    ui,
+                    &mut mode,
+                    &[(Mode::Slice, "Slice"), (Mode::Model, "Model")],
+                ) {
+                    self.set_mode(mode);
                 }
             });
         });
+    }
+
+    fn set_mode(&mut self, mode: Mode) {
+        self.mode = mode;
+        if mode == Mode::Slice && self.slice_for_rev != self.mesh_rev {
+            self.start_slice();
+        }
     }
 
     fn param_panel(&mut self, ui: &mut egui::Ui) {
@@ -486,10 +498,7 @@ impl App {
             ui.heading("Parameters");
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let any = self.params.iter().any(|p| p.changed());
-                if ui
-                    .add_enabled(any, egui::Button::new("Reset all"))
-                    .clicked()
-                {
+                if ui.add_enabled(any, ui::ghost("Reset all", false)).clicked() {
                     for p in &mut self.params {
                         p.value = p.default.clone();
                     }
@@ -497,13 +506,20 @@ impl App {
                 }
             });
         });
-        ui.separator();
+        ui.add_space(4.0);
         if self.file.is_none() {
-            ui.label("Open a .scad file, or drop one on the window.");
+            ui::card(ui, |ui| {
+                ui.label("Open a .scad file, or drop one on the window.");
+                if ui.add(ui::primary("Open file")).clicked() {
+                    self.pick_file();
+                }
+            });
             return;
         }
         if self.params.is_empty() {
-            ui.label(RichText::new("No Customizer parameters in this file.").weak());
+            ui::card(ui, |ui| {
+                ui.label(ui::dim("No Customizer parameters in this file."))
+            });
         }
 
         let mut changed = false;
@@ -517,24 +533,23 @@ impl App {
                     }
                 }
                 for g in groups {
-                    egui::CollapsingHeader::new(RichText::new(&g).strong())
-                        .default_open(true)
-                        .show(ui, |ui| {
-                            for p in self.params.iter_mut().filter(|p| p.group == g) {
-                                changed |= param_row(ui, p);
-                            }
-                        });
+                    ui::card(ui, |ui| {
+                        ui::section(ui, &g);
+                        ui.add_space(2.0);
+                        for p in self.params.iter_mut().filter(|p| p.group == g) {
+                            changed |= param_row(ui, p);
+                        }
+                    });
+                    ui.add_space(4.0);
                 }
 
                 let defs = params::defines(&self.params);
-                if !defs.is_empty() {
-                    ui.add_space(8.0);
-                    if ui.small_button("Copy as -D arguments").clicked() {
-                        let s: Vec<String> = defs.iter().map(|d| format!("-D '{d}'")).collect();
-                        ui.ctx().copy_text(s.join(" "));
-                        self.toast = Some(("Copied -D arguments".into(), Instant::now()));
-                    }
+                if !defs.is_empty() && ui.add(ui::ghost("Copy as -D arguments", false)).clicked() {
+                    let s: Vec<String> = defs.iter().map(|d| format!("-D '{d}'")).collect();
+                    ui.ctx().copy_text(s.join(" "));
+                    self.toast = Some(("Copied -D arguments".into(), Instant::now()));
                 }
+                ui.add_space(12.0);
             });
         if changed {
             self.dirty_since = Some(Instant::now());
@@ -543,128 +558,135 @@ impl App {
 
     fn slice_panel(&mut self, ui: &mut egui::Ui) {
         ui.heading("Slice preview");
-        ui.label(
-            RichText::new("Rough preview. Not for printing.")
-                .weak()
-                .small(),
-        );
-        ui.separator();
+        ui.label(ui::dim("Rough preview for checking. Not for printing."));
+        ui.add_space(4.0);
         let before = self.settings;
-        let s = &mut self.settings;
-        egui::Grid::new("slice")
-            .num_columns(2)
-            .spacing([8.0, 6.0])
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
             .show(ui, |ui| {
-                ui.label("Layer height");
-                ui.add(
-                    egui::Slider::new(&mut s.layer_height, 0.05..=0.6)
-                        .step_by(0.01)
-                        .suffix(" mm"),
-                );
-                ui.end_row();
-                ui.label("First layer");
-                ui.add(
-                    egui::Slider::new(&mut s.first_layer, 0.05..=0.6)
-                        .step_by(0.01)
-                        .suffix(" mm"),
-                );
-                ui.end_row();
-                ui.label("Line width");
-                ui.add(
-                    egui::Slider::new(&mut s.line_width, 0.2..=1.2)
-                        .step_by(0.01)
-                        .suffix(" mm"),
-                );
-                ui.end_row();
-                ui.label("Walls");
-                ui.add(egui::Slider::new(&mut s.walls, 0..=6));
-                ui.end_row();
-                ui.label("Infill");
-                let mut pct = s.infill * 100.0;
-                if ui
-                    .add(
-                        egui::Slider::new(&mut pct, 0.0..=100.0)
-                            .step_by(1.0)
-                            .suffix(" %"),
-                    )
-                    .changed()
-                {
-                    s.infill = pct / 100.0;
+                if let Some(sl) = &self.sliced {
+                    let st = &sl.stats;
+                    ui::card(ui, |ui| {
+                        ui::section(ui, "Estimate");
+                        ui.label(
+                            RichText::new(fmt_duration(st.seconds))
+                                .size(30.0)
+                                .color(ui::ACCENT),
+                        );
+                        ui.columns(3, |c| {
+                            stat(&mut c[0], &format!("{:.1} g", st.grams), "weight");
+                            stat(&mut c[1], &format!("{:.2} m", st.filament_m), "filament");
+                            stat(&mut c[2], &st.layers.to_string(), "layers");
+                        });
+                    });
+                    ui.add_space(4.0);
+                    ui::card(ui, |ui| {
+                        ui::section(ui, "Layer");
+                        if let Some(l) = sl.layers.get(self.layer) {
+                            ui.horizontal(|ui| {
+                                ui.label(RichText::new(format!("{}", self.layer + 1)).size(22.0));
+                                ui.label(ui::dim(format!(
+                                    "of {}   ·   z = {:.2} mm",
+                                    sl.layers.len(),
+                                    l.z
+                                )));
+                            });
+                        }
+                        ui.add_space(2.0);
+                        egui::Grid::new("legend")
+                            .num_columns(2)
+                            .spacing([16.0, 8.0])
+                            .show(ui, |ui| {
+                                for (i, k) in
+                                    [Kind::OuterWall, Kind::InnerWall, Kind::Infill, Kind::Solid]
+                                        .into_iter()
+                                        .enumerate()
+                                {
+                                    ui.horizontal(|ui| {
+                                        let (r, _) = ui.allocate_exact_size(
+                                            Vec2::new(10.0, 10.0),
+                                            egui::Sense::hover(),
+                                        );
+                                        ui.painter().circle_filled(
+                                            r.center(),
+                                            5.0,
+                                            rgb(render::kind_color(k)),
+                                        );
+                                        ui.label(
+                                            RichText::new(match k {
+                                                Kind::OuterWall => "Outer wall",
+                                                Kind::InnerWall => "Inner wall",
+                                                Kind::Infill => "Sparse infill",
+                                                Kind::Solid => "Solid infill",
+                                            })
+                                            .size(13.0),
+                                        );
+                                    });
+                                    if i % 2 == 1 {
+                                        ui.end_row();
+                                    }
+                                }
+                            });
+                        ui.label(ui::dim("Up/Down or PgUp/PgDn change the layer."));
+                    });
+                    ui.add_space(4.0);
+                } else if self.slice_job.is_some() {
+                    ui::card(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.spinner();
+                            ui.label("Slicing…");
+                        });
+                    });
                 }
-                ui.end_row();
-                ui.label("Top/bottom layers");
-                ui.add(egui::Slider::new(&mut s.solid_layers, 0..=10));
-                ui.end_row();
-                ui.label("Speed");
-                ui.add(
-                    egui::Slider::new(&mut s.speed, 10.0..=300.0)
-                        .step_by(5.0)
-                        .suffix(" mm/s"),
-                );
-                ui.end_row();
+
+                let s = &mut self.settings;
+                ui::card(ui, |ui| {
+                    ui::section(ui, "Print settings");
+                    setting(
+                        ui,
+                        "Layer height",
+                        &mut s.layer_height,
+                        0.05..=0.6,
+                        0.01,
+                        " mm",
+                    );
+                    setting(
+                        ui,
+                        "First layer",
+                        &mut s.first_layer,
+                        0.05..=0.6,
+                        0.01,
+                        " mm",
+                    );
+                    setting(ui, "Line width", &mut s.line_width, 0.2..=1.2, 0.01, " mm");
+                    setting(ui, "Walls", &mut s.walls, 0..=6, 1.0, "");
+                    let mut pct = s.infill * 100.0;
+                    if setting(ui, "Infill", &mut pct, 0.0..=100.0, 1.0, " %") {
+                        s.infill = pct / 100.0;
+                    }
+                    setting(
+                        ui,
+                        "Top and bottom layers",
+                        &mut s.solid_layers,
+                        0..=10,
+                        1.0,
+                        "",
+                    );
+                    setting(ui, "Speed", &mut s.speed, 10.0..=300.0, 5.0, " mm/s");
+                    ui.horizontal(|ui| {
+                        ui.label("Show model ghost");
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui::toggle(ui, &mut self.ghost);
+                        });
+                    });
+                });
+                if let Some(t) = self.slice_time {
+                    ui.add_space(4.0);
+                    ui.label(ui::dim(format!("Sliced in {} ms", t.as_millis())));
+                }
             });
         if self.settings != before {
             self.slice_dirty_since = Some(Instant::now());
-        }
-        ui.checkbox(&mut self.ghost, "Show model ghost");
-        ui.separator();
-
-        if self.slice_job.is_some() {
-            ui.horizontal(|ui| {
-                ui.spinner();
-                ui.label("Slicing…");
-            });
-        }
-        if let Some(sl) = &self.sliced {
-            let st = &sl.stats;
-            egui::Grid::new("stats").num_columns(2).show(ui, |ui| {
-                ui.label("Layers");
-                ui.label(st.layers.to_string());
-                ui.end_row();
-                ui.label("Print time");
-                ui.label(
-                    RichText::new(fmt_duration(st.seconds))
-                        .color(ACCENT)
-                        .strong(),
-                );
-                ui.end_row();
-                ui.label("Filament");
-                ui.label(format!("{:.2} m  ·  {:.1} g", st.filament_m, st.grams));
-                ui.end_row();
-                if let Some(t) = self.slice_time {
-                    ui.label("Sliced in");
-                    ui.label(format!("{} ms", t.as_millis()));
-                    ui.end_row();
-                }
-            });
-            ui.separator();
-            if let Some(l) = sl.layers.get(self.layer) {
-                ui.label(format!(
-                    "Layer {} / {}  ·  z = {:.2} mm",
-                    self.layer + 1,
-                    sl.layers.len(),
-                    l.z
-                ));
-            }
-            ui.add_space(4.0);
-            for k in [Kind::OuterWall, Kind::InnerWall, Kind::Infill, Kind::Solid] {
-                let c = render::kind_color(k);
-                ui.horizontal(|ui| {
-                    let (r, _) = ui.allocate_exact_size(Vec2::new(14.0, 4.0), egui::Sense::hover());
-                    ui.painter().rect_filled(r, 1.0, rgb(c));
-                    ui.label(match k {
-                        Kind::OuterWall => "Outer wall",
-                        Kind::InnerWall => "Inner wall",
-                        Kind::Infill => "Sparse infill",
-                        Kind::Solid => "Solid infill",
-                    });
-                });
-            }
-            ui.label(
-                RichText::new("Up/Down or PgUp/PgDn change the layer.")
-                    .weak()
-                    .small(),
-            );
         }
     }
 
@@ -674,8 +696,8 @@ impl App {
 
         // Background gradient.
         let mut bg = egui::Mesh::default();
-        let top = Color32::from_rgb(0x2a, 0x2d, 0x34);
-        let bottom = Color32::from_rgb(0x12, 0x13, 0x16);
+        let top = Color32::from_rgb(0x26, 0x29, 0x30);
+        let bottom = Color32::from_rgb(0x0e, 0x0f, 0x12);
         bg.colored_vertex(rect.left_top(), top);
         bg.colored_vertex(rect.right_top(), top);
         bg.colored_vertex(rect.right_bottom(), bottom);
@@ -705,9 +727,9 @@ impl App {
             self.fit();
         }
 
+        let layer_max = self.sliced.as_ref().map(|s| s.layers.len()).unwrap_or(0);
+        let slicing = self.mode == Mode::Slice && layer_max > 0;
         if let Some(r) = &self.renderer {
-            let layer_max = self.sliced.as_ref().map(|s| s.layers.len()).unwrap_or(0);
-            let slicing = self.mode == Mode::Slice && layer_max > 0;
             let view = View {
                 mvp: self.cam.matrix(rect.width() / rect.height().max(1.0)),
                 eye: self.cam.eye(),
@@ -737,116 +759,208 @@ impl App {
                 })),
             };
             ui.painter().add(cb);
-
-            if slicing {
-                let strip = egui::Rect::from_min_max(
-                    egui::pos2(rect.right() - 44.0, rect.top() + 40.0),
-                    egui::pos2(rect.right() - 12.0, rect.bottom() - 40.0),
-                );
-                let mut layer = self.layer;
-                ui.scope_builder(egui::UiBuilder::new().max_rect(strip), |ui| {
-                    ui.spacing_mut().slider_width = strip.height();
-                    ui.add(
-                        egui::Slider::new(&mut layer, 0..=layer_max - 1)
-                            .vertical()
-                            .show_value(false),
-                    );
-                });
-                self.layer = layer;
-                ui.painter().text(
-                    egui::pos2(strip.center().x - 8.0, strip.top() - 8.0),
-                    egui::Align2::CENTER_BOTTOM,
-                    format!("{}", self.layer + 1),
-                    egui::FontId::monospace(13.0),
-                    ACCENT,
-                );
-            }
         } else {
             ui.painter().text(
                 rect.center(),
                 egui::Align2::CENTER_CENTER,
                 "OpenGL renderer not available",
                 egui::FontId::proportional(16.0),
-                Color32::LIGHT_RED,
+                ui::DANGER,
             );
         }
 
-        // Overlays.
+        let m = 16.0;
+        // View toolbar, top right.
+        let bar = egui::Rect::from_min_size(
+            egui::pos2(rect.right() - m - 430.0, rect.bottom() - m - 40.0),
+            Vec2::new(430.0, 40.0),
+        );
+        ui.scope_builder(
+            egui::UiBuilder::new()
+                .max_rect(bar)
+                .layout(egui::Layout::right_to_left(egui::Align::Center)),
+            |ui| {
+                egui::Frame::NONE
+                    .fill(ui::glass())
+                    .corner_radius(10)
+                    .inner_margin(egui::Margin::same(4))
+                    .show(ui, |ui| {
+                        ui.spacing_mut().item_spacing.x = 2.0;
+                        ui.spacing_mut().button_padding = Vec2::new(10.0, 5.0);
+                        ui.horizontal(|ui| {
+                            if ui.add(ui::ghost("Grid", self.grid)).clicked() {
+                                self.grid = !self.grid;
+                            }
+                            if ui
+                                .add(ui::ghost("Wire", self.wireframe))
+                                .on_hover_text("W")
+                                .clicked()
+                            {
+                                self.wireframe = !self.wireframe;
+                            }
+                            if ui
+                                .add(ui::ghost("Fit", false))
+                                .on_hover_text("F or double click")
+                                .clicked()
+                            {
+                                self.fit();
+                            }
+                            for (label, yaw, pitch) in [
+                                ("Right", 0.0, 0.0),
+                                ("Front", -std::f32::consts::FRAC_PI_2, 0.0),
+                                ("Top", -std::f32::consts::FRAC_PI_2, 1.5697),
+                                ("Iso", -0.9, 0.55),
+                            ] {
+                                if ui.add(ui::ghost(label, false)).clicked() {
+                                    self.set_view(yaw, pitch);
+                                }
+                            }
+                        });
+                    });
+            },
+        );
+
+        // Layer slider, right edge.
+        if slicing {
+            let strip = egui::Rect::from_min_max(
+                egui::pos2(rect.right() - m - 36.0, rect.top() + 70.0),
+                egui::pos2(rect.right() - m, rect.bottom() - 100.0),
+            );
+            ui.painter()
+                .rect_filled(strip.expand2(Vec2::new(0.0, 14.0)), 18.0, ui::glass());
+            let mut layer = self.layer;
+            ui.scope_builder(egui::UiBuilder::new().max_rect(strip), |ui| {
+                ui.spacing_mut().slider_width = strip.height();
+                ui.spacing_mut().slider_rail_height = 6.0;
+                ui.vertical_centered(|ui| {
+                    ui.add(
+                        egui::Slider::new(&mut layer, 0..=layer_max - 1)
+                            .vertical()
+                            .show_value(false),
+                    );
+                });
+            });
+            self.layer = layer;
+            ui::pill(
+                ui.painter(),
+                egui::pos2(strip.center().x, strip.top() - 22.0),
+                egui::Align2::CENTER_BOTTOM,
+                &format!("{}", self.layer + 1),
+                egui::FontId::proportional(14.0),
+                Color32::BLACK,
+                ui::ACCENT,
+            );
+        }
+
+        // Status, top left.
         let painter = ui.painter_at(rect);
-        let mono = egui::FontId::monospace(12.5);
+        let font = egui::FontId::proportional(13.5);
+        let mut y = rect.top() + m;
         if let Some(job) = &self.job {
             let t = job.started.elapsed().as_secs_f32();
-            let pos = rect.left_top() + Vec2::new(14.0, 14.0);
-            painter.text(
-                pos,
+            let r = ui::pill(
+                &painter,
+                egui::pos2(rect.left() + m, y),
                 egui::Align2::LEFT_TOP,
-                format!("Rendering with OpenSCAD… {t:.1} s"),
-                mono.clone(),
-                ACCENT,
+                &format!("      Rendering with OpenSCAD   {t:.1} s"),
+                font.clone(),
+                ui::TEXT,
+                ui::glass(),
             );
+            let c = egui::pos2(r.left() + 20.0, r.center().y);
+            let a = ui.input(|i| i.time) as f32 * 6.0;
+            let pts: Vec<egui::Pos2> = (0..=16)
+                .map(|k| {
+                    let ang = a + k as f32 / 16.0 * 4.2;
+                    c + Vec2::angled(ang) * 6.0
+                })
+                .collect();
+            painter.add(egui::Shape::line(
+                pts,
+                egui::Stroke::new(2.0_f32, ui::ACCENT),
+            ));
+            y = r.bottom() + 8.0;
         } else if self.dirty_since.is_some() && !self.auto_render {
-            painter.text(
-                rect.left_top() + Vec2::new(14.0, 14.0),
+            let r = ui::pill(
+                &painter,
+                egui::pos2(rect.left() + m, y),
                 egui::Align2::LEFT_TOP,
                 "Parameters changed. Press F5 to render.",
-                mono.clone(),
-                ACCENT,
+                font.clone(),
+                ui::ACCENT,
+                ui::glass(),
             );
+            y = r.bottom() + 8.0;
         }
         if let Some(e) = &self.error {
-            painter.text(
-                rect.left_top() + Vec2::new(14.0, 34.0),
+            ui::pill(
+                &painter,
+                egui::pos2(rect.left() + m, y),
                 egui::Align2::LEFT_TOP,
-                format!("⚠ {e}"),
-                mono.clone(),
-                Color32::from_rgb(0xff, 0x6b, 0x6b),
+                e,
+                font.clone(),
+                Color32::WHITE,
+                Color32::from_rgba_unmultiplied(0x9b, 0x2c, 0x2c, 230),
             );
         }
+
+        // Model info, bottom left.
         if let Some(i) = &self.info {
             let s = i.bounds.size();
             let tris = self.mesh.as_ref().map(|m| m.triangles.len()).unwrap_or(0);
             let mut lines = vec![
-                format!("{:.2} × {:.2} × {:.2} mm", s.x, s.y, s.z),
-                format!("{tris} triangles  ·  {:.2} cm³", i.volume / 1000.0),
+                format!("{:.1} × {:.1} × {:.1} mm", s.x, s.y, s.z),
+                format!("{tris} triangles   ·   {:.2} cm³", i.volume / 1000.0),
             ];
-            if i.open_edges > 0 {
-                lines.push(format!("⚠ {} open edges (not manifold)", i.open_edges));
-            }
             if let Some(t) = self.last_time {
                 lines.push(format!(
-                    "rendered in {:.2} s ({})",
+                    "Rendered in {:.2} s with {}",
                     t.as_secs_f32(),
                     self.engine
                 ));
             }
-            painter.text(
-                rect.left_bottom() + Vec2::new(14.0, -12.0),
+            let r = ui::pill(
+                &painter,
+                rect.left_bottom() + Vec2::new(m, -m),
                 egui::Align2::LEFT_BOTTOM,
-                lines.join("\n"),
-                mono.clone(),
-                Color32::from_gray(170),
+                &lines.join("\n"),
+                font.clone(),
+                ui::DIM,
+                ui::glass(),
             );
-        }
-        if let Some((msg, at)) = &self.toast {
-            if at.elapsed() < Duration::from_secs(4) {
-                painter.text(
-                    rect.center_bottom() + Vec2::new(0.0, -16.0),
-                    egui::Align2::CENTER_BOTTOM,
-                    msg,
-                    egui::FontId::proportional(14.0),
-                    Color32::WHITE,
+            if i.open_edges > 0 {
+                ui::pill(
+                    &painter,
+                    egui::pos2(r.left(), r.top() - 8.0),
+                    egui::Align2::LEFT_BOTTOM,
+                    &format!("{} open edges. The mesh is not closed.", i.open_edges),
+                    font.clone(),
+                    Color32::BLACK,
+                    ui::ACCENT,
                 );
-                ui.ctx().request_repaint_after(Duration::from_millis(200));
             }
         }
-        if self.export_rx.is_some() {
-            painter.text(
-                rect.center_bottom() + Vec2::new(0.0, -16.0),
+
+        // Toast, bottom centre.
+        let toast = if self.export_rx.is_some() {
+            Some("Exporting…".to_string())
+        } else {
+            self.toast
+                .as_ref()
+                .filter(|(_, at)| at.elapsed() < Duration::from_secs(4))
+                .map(|(m, _)| m.clone())
+        };
+        if let Some(msg) = toast {
+            ui::pill(
+                &painter,
+                rect.center_bottom() + Vec2::new(0.0, -m),
                 egui::Align2::CENTER_BOTTOM,
-                "Exporting…",
-                mono,
-                ACCENT,
+                &msg,
+                font,
+                ui::TEXT,
+                ui::glass(),
             );
+            ui.ctx().request_repaint_after(Duration::from_millis(200));
         }
     }
 
@@ -882,14 +996,11 @@ impl App {
             self.wireframe = !self.wireframe;
         }
         if tab {
-            self.mode = if self.mode == Mode::Model {
+            self.set_mode(if self.mode == Mode::Model {
                 Mode::Slice
             } else {
                 Mode::Model
-            };
-            if self.mode == Mode::Slice && self.slice_for_rev != self.mesh_rev {
-                self.start_slice();
-            }
+            });
         }
         if self.mode == Mode::Slice {
             let max = self
@@ -996,13 +1107,29 @@ impl eframe::App for App {
         };
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
 
-        egui::TopBottomPanel::top("top").show(ctx, |ui| self.top_bar(ui));
+        let line = egui::Stroke::new(1.0_f32, ui::LINE);
+        egui::TopBottomPanel::top("top")
+            .exact_height(60.0)
+            .frame(
+                egui::Frame::NONE
+                    .fill(ui::BG)
+                    .inner_margin(egui::Margin::symmetric(18, 0))
+                    .stroke(line),
+            )
+            .show(ctx, |ui| self.top_bar(ui));
         self.settings_window(ctx);
         if self.show_log {
             egui::TopBottomPanel::bottom("log")
                 .resizable(true)
-                .default_height(140.0)
+                .default_height(160.0)
+                .frame(
+                    egui::Frame::NONE
+                        .fill(ui::BG)
+                        .inner_margin(egui::Margin::same(16))
+                        .stroke(line),
+                )
                 .show(ctx, |ui| {
+                    ui::section(ui, "OpenSCAD output");
                     egui::ScrollArea::vertical()
                         .stick_to_bottom(true)
                         .auto_shrink([false, false])
@@ -1012,18 +1139,26 @@ impl eframe::App for App {
                             } else {
                                 &self.log
                             };
-                            ui.label(RichText::new(text).monospace().size(12.0));
+                            ui.label(RichText::new(text).monospace().color(ui::DIM));
                         });
                 });
         }
+        let side = egui::Frame::NONE
+            .fill(ui::PANEL)
+            .inner_margin(egui::Margin::same(18))
+            .stroke(line);
         egui::SidePanel::left("params")
             .resizable(true)
-            .default_width(300.0)
+            .default_width(340.0)
+            .width_range(280.0..=560.0)
+            .frame(side)
             .show(ctx, |ui| self.param_panel(ui));
         if self.mode == Mode::Slice {
             egui::SidePanel::right("slice")
                 .resizable(true)
-                .default_width(280.0)
+                .default_width(320.0)
+                .width_range(280.0..=480.0)
+                .frame(side)
                 .show(ctx, |ui| self.slice_panel(ui));
         }
         egui::CentralPanel::default()
@@ -1041,50 +1176,110 @@ impl eframe::App for App {
     }
 }
 
+/// Label and value on one row, full-width slider below. Returns true on change.
+fn setting<N: egui::emath::Numeric>(
+    ui: &mut egui::Ui,
+    label: &str,
+    v: &mut N,
+    range: std::ops::RangeInclusive<N>,
+    step: f64,
+    suffix: &str,
+) -> bool {
+    let mut changed = false;
+    ui.horizontal(|ui| {
+        ui.label(RichText::new(label).size(14.0));
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let d = decimals(step);
+            changed |= ui
+                .add(
+                    egui::DragValue::new(v)
+                        .range(range.clone())
+                        .speed(step)
+                        .max_decimals(d)
+                        .min_decimals(d)
+                        .suffix(suffix),
+                )
+                .changed();
+        });
+    });
+    ui.spacing_mut().slider_width = ui.available_width();
+    changed |= ui
+        .add(egui::Slider::new(v, range).step_by(step).show_value(false))
+        .changed();
+    ui.add_space(4.0);
+    changed
+}
+
+fn stat(ui: &mut egui::Ui, value: &str, label: &str) {
+    ui.label(RichText::new(value).size(16.0));
+    ui.label(ui::dim(label));
+}
+
 /// One parameter row. Returns true when the value changed.
 fn param_row(ui: &mut egui::Ui, p: &mut Param) -> bool {
     let before = p.value.clone();
     let label = humanize(&p.name);
+    let changed = p.changed();
+    let step = p.step();
+    let decimals = decimals(step);
+
+    ui.add_space(2.0);
     ui.horizontal(|ui| {
-        let text = if p.changed() {
-            RichText::new(&label).color(ACCENT)
-        } else {
-            RichText::new(&label)
-        };
-        let mut r = ui.label(text);
+        if changed {
+            let (r, _) = ui.allocate_exact_size(Vec2::new(6.0, 6.0), egui::Sense::hover());
+            ui.painter().circle_filled(r.center(), 3.0, ui::ACCENT);
+        }
         let hover = if p.description.is_empty() {
             p.name.clone()
         } else {
             format!("{}\n\n{}", p.description, p.name)
         };
-        r = r.on_hover_text(hover);
-        let _ = r;
-        if p.changed() {
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui
-                    .small_button("↺")
+        ui.label(RichText::new(&label).size(14.0))
+            .on_hover_text(hover);
+
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            // Inline value widgets for sliders, numbers and switches.
+            match (&mut p.value, &p.widget) {
+                (Value::Num(n), Widget::Slider { min, max, .. }) => {
+                    ui.add(
+                        egui::DragValue::new(n)
+                            .speed(step)
+                            .range(*min..=*max)
+                            .max_decimals(decimals)
+                            .min_decimals(decimals.min(1)),
+                    );
+                }
+                (Value::Num(n), Widget::Plain) => {
+                    ui.add(egui::DragValue::new(n).speed(step).max_decimals(decimals));
+                }
+                (Value::Bool(b), _) => {
+                    ui::toggle(ui, b);
+                }
+                _ => {}
+            }
+            if changed
+                && ui
+                    .add(egui::Button::new(RichText::new("↺").color(ui::DIM)).frame(false))
                     .on_hover_text(format!("Reset to {}", p.default.to_scad()))
                     .clicked()
-                {
-                    p.value = p.default.clone();
-                }
-            });
-        }
+            {
+                p.value = p.default.clone();
+            }
+        });
     });
     if !p.description.is_empty() {
-        ui.label(RichText::new(&p.description).weak().small());
+        ui.add_space(-6.0);
+        ui.label(ui::dim(&p.description));
     }
 
-    let step = p.step();
-    let decimals = decimals(step);
     let full = ui.available_width();
     match (&mut p.value, &p.widget) {
         (Value::Num(n), Widget::Slider { min, max, .. }) => {
-            ui.spacing_mut().slider_width = (full - 70.0).max(60.0);
+            ui.spacing_mut().slider_width = full;
             ui.add(
                 egui::Slider::new(n, *min..=*max)
                     .step_by(step)
-                    .max_decimals(decimals),
+                    .show_value(false),
             );
         }
         (Value::Num(n), Widget::Dropdown(opts)) => {
@@ -1092,10 +1287,10 @@ fn param_row(ui: &mut egui::Ui, p: &mut Param) -> bool {
                 .iter()
                 .find(|(v, _)| *v == Value::Num(*n))
                 .map(|o| o.1.clone())
-                .unwrap_or(params::Value::Num(*n).to_scad());
+                .unwrap_or(Value::Num(*n).to_scad());
             egui::ComboBox::from_id_salt(&p.name)
                 .selected_text(cur)
-                .width(full - 8.0)
+                .width(full)
                 .show_ui(ui, |ui| {
                     for (v, l) in opts {
                         if let Value::Num(x) = v {
@@ -1103,12 +1298,6 @@ fn param_row(ui: &mut egui::Ui, p: &mut Param) -> bool {
                         }
                     }
                 });
-        }
-        (Value::Num(n), _) => {
-            ui.add(egui::DragValue::new(n).speed(step).max_decimals(decimals));
-        }
-        (Value::Bool(b), _) => {
-            ui.checkbox(b, if *b { "on" } else { "off" });
         }
         (Value::Str(s), Widget::Dropdown(opts)) => {
             let cur = opts
@@ -1118,7 +1307,7 @@ fn param_row(ui: &mut egui::Ui, p: &mut Param) -> bool {
                 .unwrap_or(s.clone());
             egui::ComboBox::from_id_salt(&p.name)
                 .selected_text(cur)
-                .width(full - 8.0)
+                .width(full)
                 .show_ui(ui, |ui| {
                     for (v, l) in opts {
                         if let Value::Str(x) = v {
@@ -1128,7 +1317,9 @@ fn param_row(ui: &mut egui::Ui, p: &mut Param) -> bool {
                 });
         }
         (Value::Str(s), w) => {
-            let mut edit = egui::TextEdit::singleline(s).desired_width(full - 8.0);
+            let mut edit = egui::TextEdit::singleline(s)
+                .desired_width(full)
+                .margin(Vec2::new(10.0, 7.0));
             if let Widget::TextMax(n) = w {
                 edit = edit.char_limit(*n);
             }
@@ -1139,21 +1330,26 @@ fn param_row(ui: &mut egui::Ui, p: &mut Param) -> bool {
                 Widget::Slider { min, max, .. } => *min..=*max,
                 _ => f64::MIN..=f64::MAX,
             };
+            let n = v.len().max(1) as f32;
+            let each = (full - (n - 1.0) * 8.0) / n;
             ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 8.0;
                 for (i, x) in v.iter_mut().enumerate() {
                     let axis = ["x", "y", "z", "w"][i.min(3)];
-                    ui.add(
+                    ui.add_sized(
+                        Vec2::new(each, 30.0),
                         egui::DragValue::new(x)
                             .speed(step)
                             .range(range.clone())
                             .max_decimals(decimals)
-                            .prefix(format!("{axis} ")),
+                            .prefix(format!("{axis}  ")),
                     );
                 }
             });
         }
+        _ => {}
     }
-    ui.add_space(6.0);
+    ui.add_space(4.0);
     p.value != before
 }
 
@@ -1195,21 +1391,4 @@ fn rgb(c: [f32; 3]) -> Color32 {
 
 fn mtime(p: &std::path::Path) -> Option<SystemTime> {
     std::fs::metadata(p).and_then(|m| m.modified()).ok()
-}
-
-fn style(ctx: &egui::Context) {
-    let mut v = egui::Visuals::dark();
-    v.panel_fill = Color32::from_rgb(0x1a, 0x1c, 0x20);
-    v.window_fill = Color32::from_rgb(0x1f, 0x21, 0x26);
-    v.extreme_bg_color = Color32::from_rgb(0x12, 0x13, 0x16);
-    v.selection.bg_fill = Color32::from_rgb(0xb3, 0x5f, 0x00);
-    v.selection.stroke.color = ACCENT;
-    v.hyperlink_color = ACCENT;
-    v.widgets.hovered.bg_stroke.color = ACCENT;
-    v.slider_trailing_fill = true;
-    ctx.set_visuals(v);
-    ctx.style_mut(|s| {
-        s.spacing.item_spacing = Vec2::new(8.0, 5.0);
-        s.spacing.button_padding = Vec2::new(8.0, 3.0);
-    });
 }

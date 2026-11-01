@@ -5,6 +5,7 @@ mod openscad;
 mod params;
 mod render;
 mod slicer;
+mod ui;
 
 use anyhow::{Context, Result, bail};
 use std::path::PathBuf;

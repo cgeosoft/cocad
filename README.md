@@ -8,7 +8,7 @@ status: in-progress
 tags: [openscad, 3d-printing, viewer, slicer, rust, egui]
 started: 2026-11-01
 dates_from: "first commit date"
-version: "0.1.2"
+version: "0.1.3"
 ---
 
 # SCAD Viewer
@@ -45,6 +45,7 @@ The slicer is for preview only. It has no travel moves, supports, bridges or rea
 | `src/main.rs` | CLI and window start |
 | `src/app.rs` | egui application: panels, camera, jobs |
 | `src/render.rs` | OpenGL shaders and buffers |
+| `src/ui.rs` | Theme, cards, pills, switch, segmented control |
 | `src/params.rs` | Customizer parameter parser |
 | `src/openscad.rs` | Runs `openscad` and reads the STL |
 | `src/mesh.rs` | Indexed mesh, STL reader, checks |
@@ -75,7 +76,7 @@ scripts/build.sh --debug    # debug build
 
 ```bash
 scripts/package-deb.sh
-sudo apt install ./dist/scad-viewer_0.1.2_amd64.deb
+sudo apt install ./dist/scad-viewer_0.1.3_amd64.deb
 ```
 
 ## Usage
