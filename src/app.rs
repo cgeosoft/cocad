@@ -930,7 +930,7 @@ impl App {
                 egui::Grid::new("cfg").num_columns(2).spacing([10.0, 8.0]).show(ui, |ui| {
                     ui.label("Binary");
                     ui.horizontal(|ui| {
-                        ui.add(egui::TextEdit::singleline(&mut edit.binary).hint_text("openscad").desired_width(300.0));
+                        ui.add(egui::TextEdit::singleline(&mut edit.binary).hint_text("auto: openscad-nightly, else openscad").desired_width(300.0));
                         if ui.button("Browse").clicked() {
                             if let Some(p) = rfd::FileDialog::new().pick_file() {
                                 edit.binary = p.display().to_string();

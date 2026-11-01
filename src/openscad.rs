@@ -76,11 +76,13 @@ impl Config {
         Ok(())
     }
 
-    /// The binary to run, after the `$OPENSCAD` override.
+    /// The binary to run: `$OPENSCAD`, else the saved value, else
+    /// `openscad-nightly` when it is on the PATH, else `openscad`.
     pub fn binary(&self) -> String {
         match std::env::var("OPENSCAD") {
             Ok(b) if !b.is_empty() => b,
             _ if !self.binary.trim().is_empty() => self.binary.trim().to_string(),
+            _ if on_path("openscad-nightly") => "openscad-nightly".into(),
             _ => "openscad".into(),
         }
     }
@@ -97,6 +99,11 @@ impl Config {
         }
         args
     }
+}
+
+fn on_path(name: &str) -> bool {
+    std::env::var_os("PATH")
+        .is_some_and(|paths| std::env::split_paths(&paths).any(|d| d.join(name).is_file()))
 }
 
 #[derive(Clone, Debug, Default)]

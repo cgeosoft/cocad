@@ -8,7 +8,7 @@ status: in-progress
 tags: [openscad, 3d-printing, viewer, slicer, rust, egui]
 started: 2026-11-01
 dates_from: "first commit date"
-version: "0.1.1"
+version: "0.1.2"
 ---
 
 # SCAD Viewer
@@ -75,7 +75,7 @@ scripts/build.sh --debug    # debug build
 
 ```bash
 scripts/package-deb.sh
-sudo apt install ./dist/scad-viewer_0.1.1_amd64.deb
+sudo apt install ./dist/scad-viewer_0.1.2_amd64.deb
 ```
 
 ## Usage
@@ -110,6 +110,7 @@ scad-viewer slice model.scad --layer-height 0.2 --infill 20 --walls 3
 
 OpenSCAD 2021.01 (the Debian package) uses the CGAL backend. CGAL is slow on large models: `clip-on-case.scad` takes 13 s. OpenSCAD development builds have the Manifold backend, which is much faster.
 
+- With no binary set, SCAD Viewer uses `openscad-nightly` when it is on the PATH, else `openscad`.
 - Open **Settings** to set the OpenSCAD binary (for example a development AppImage) and extra arguments.
 - When the binary supports Manifold, SCAD Viewer adds `--backend=manifold`. Turn this off in Settings, or set your own `--backend` argument.
 - The settings are saved in `~/.config/scad-viewer/config`. The CLI commands use them too.
