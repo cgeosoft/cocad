@@ -3,6 +3,7 @@ mod export;
 mod mesh;
 mod openscad;
 mod params;
+mod presets;
 mod render;
 mod slicer;
 mod ui;
@@ -18,10 +19,14 @@ const USAGE: &str =
 Usage:
   scad-viewer [--slice] [FILE.scad]            Open the viewer (--slice: start in slice view)
   scad-viewer params FILE.scad                 List the Customizer parameters
-  scad-viewer export FILE.scad -o OUT [-D name=value]...
+  scad-viewer export FILE.scad -o OUT [-P SET] [-D name=value]...
                                                Render and write OUT (.stl, .3mf or .step)
-  scad-viewer slice FILE.scad [-D name=value]... [--layer-height MM] [--infill PCT] [--walls N]
+  scad-viewer slice FILE.scad [-P SET] [-D name=value]... [--layer-height MM] [--infill PCT] [--walls N]
                                                Slice and print estimates
+
+Parameter sets:
+  -P SET      Apply a saved parameter set before the -D values
+  -p FILE     Read sets from FILE (default: FILE.scad with .json)
 
 Environment:
   OPENSCAD       OpenSCAD binary (overrides the saved setting; default: openscad)
@@ -82,6 +87,8 @@ fn parse_batch(args: &[String]) -> Result<Batch> {
     let mut file = None;
     let mut out = None;
     let mut defs = Vec::new();
+    let mut set = None;
+    let mut set_file = None;
     let mut settings = slicer::Settings::default();
     let mut it = args.iter();
     while let Some(a) = it.next() {
@@ -93,6 +100,8 @@ fn parse_batch(args: &[String]) -> Result<Batch> {
         match a.as_str() {
             "-o" => out = Some(PathBuf::from(val("-o")?)),
             "-D" => defs.push(val("-D")?),
+            "-P" => set = Some(val("-P")?),
+            "-p" => set_file = Some(PathBuf::from(val("-p")?)),
             "--layer-height" => settings.layer_height = val(a)?.parse()?,
             "--first-layer" => settings.first_layer = val(a)?.parse()?,
             "--line-width" => settings.line_width = val(a)?.parse()?,
@@ -108,6 +117,12 @@ fn parse_batch(args: &[String]) -> Result<Batch> {
     let src = std::fs::read_to_string(&file)
         .with_context(|| format!("cannot read {}", file.display()))?;
     let mut params = params::parse(&src);
+    if let Some(name) = &set {
+        let path = set_file.unwrap_or_else(|| presets::path_for(&file));
+        for k in presets::apply(&path, name, &mut params)? {
+            eprintln!("warning: set '{name}': skipped '{k}'");
+        }
+    }
     for d in &defs {
         params::apply_define(&mut params, d)?;
     }

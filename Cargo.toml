@@ -1,14 +1,15 @@
 [package]
 name = "scad-viewer"
-version = "0.1.3"
+version = "0.1.4"
 edition = "2024"
 
 [dependencies]
 anyhow = "1"
-bytemuck = "1.25.2"
+bytemuck = { version = "1.25.2", features = ["derive"] }
 eframe = { version = "0.31", default-features = false, features = ["glow", "default_fonts", "x11", "wayland"] }
 glam = "0.29"
 rfd = { version = "0.15", default-features = false, features = ["gtk3"] }
+serde_json = { version = "1", features = ["preserve_order"] }
 zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [profile.release]

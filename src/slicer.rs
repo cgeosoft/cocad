@@ -58,6 +58,8 @@ pub struct Path {
 pub struct Layer {
     /// Top of the layer, in model coordinates.
     pub z: f32,
+    /// Layer thickness.
+    pub height: f32,
     pub paths: Vec<Path>,
 }
 
@@ -75,6 +77,7 @@ pub struct Stats {
 pub struct Sliced {
     pub layers: Vec<Layer>,
     pub stats: Stats,
+    pub line_width: f32,
 }
 
 pub fn slice(mesh: &Mesh, s: &Settings) -> Sliced {
@@ -137,6 +140,11 @@ pub fn slice(mesh: &Mesh, s: &Settings) -> Sliced {
                                 li < s.solid_layers as usize || li + (s.solid_layers as usize) >= n;
                             Layer {
                                 z: b.min.z + tops[li],
+                                height: if li == 0 {
+                                    tops[0]
+                                } else {
+                                    tops[li] - tops[li - 1]
+                                },
                                 paths: toolpaths(&loops, li, solid, s),
                             }
                         })
@@ -172,7 +180,11 @@ pub fn slice(mesh: &Mesh, s: &Settings) -> Sliced {
     stats.grams = volume / 1000.0 * s.density as f64;
     // Rough: print moves plus 20% for travel and acceleration, 2 s per layer change.
     stats.seconds = stats.path_mm / s.speed.max(1.0) as f64 * 1.2 + layers.len() as f64 * 2.0;
-    Sliced { layers, stats }
+    Sliced {
+        layers,
+        stats,
+        line_width: s.line_width,
+    }
 }
 
 fn path_len(p: &Path) -> f32 {

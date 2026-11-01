@@ -8,7 +8,7 @@ status: in-progress
 tags: [openscad, 3d-printing, viewer, slicer, rust, egui]
 started: 2026-11-01
 dates_from: "first commit date"
-version: "0.1.3"
+version: "0.1.4"
 ---
 
 # SCAD Viewer
@@ -20,12 +20,14 @@ OpenSCAD does the geometry. SCAD Viewer runs the `openscad` CLI in the backgroun
 ## Features
 
 - 3D view with orbit, pan and zoom, view presets, wireframe and bed grid.
-- Customizer panel: groups, sliders, dropdowns, check boxes, text, vectors. Reset per value or all.
+- Customizer panel: groups, sliders, dropdowns, switches, text, vectors. Reset per value or all.
+- Groups collapse one by one, or all with one button. A group shows how many of its values you changed.
+- Parameter sets: save, load and delete named sets in `<model>.json`. The file uses the OpenSCAD Customizer format.
 - Auto render on parameter change (debounced). A new render cancels the old one.
 - Auto reload when the `.scad` file changes on disk. Edited values stay.
 - Export: binary STL, 3MF (with parameters in the metadata), STEP AP214.
 - STEP export merges coplanar triangles into planar faces. A closed mesh becomes one `FACETED_BREP` solid.
-- Slice preview: layers, outer and inner walls, sparse and solid infill. Layer slider, time, length and weight.
+- Slice preview: layers, outer and inner walls, sparse and solid infill, drawn as solid strands at line width and layer height. Layer slider, time, length and weight.
 - Mesh check: size, volume, triangle count, open edges. Back faces show in purple.
 - CLI for batch export and slicing.
 
@@ -47,6 +49,7 @@ The slicer is for preview only. It has no travel moves, supports, bridges or rea
 | `src/render.rs` | OpenGL shaders and buffers |
 | `src/ui.rs` | Theme, cards, pills, switch, segmented control |
 | `src/params.rs` | Customizer parameter parser |
+| `src/presets.rs` | Parameter sets (`<model>.json`) |
 | `src/openscad.rs` | Runs `openscad` and reads the STL |
 | `src/mesh.rs` | Indexed mesh, STL reader, checks |
 | `src/export.rs` | STL, 3MF and STEP writers |
@@ -76,7 +79,7 @@ scripts/build.sh --debug    # debug build
 
 ```bash
 scripts/package-deb.sh
-sudo apt install ./dist/scad-viewer_0.1.3_amd64.deb
+sudo apt install ./dist/scad-viewer_0.1.4_amd64.deb
 ```
 
 ## Usage
@@ -104,6 +107,7 @@ Batch commands:
 ```bash
 scad-viewer params model.scad
 scad-viewer export model.scad -o model.3mf -D width=80 -D 'shape="square"'
+scad-viewer export model.scad -o big.stl -P big          # saved set 'big' from model.json
 scad-viewer slice model.scad --layer-height 0.2 --infill 20 --walls 3
 ```
 
@@ -117,6 +121,16 @@ OpenSCAD 2021.01 (the Debian package) uses the CGAL backend. CGAL is slow on lar
 - The settings are saved in `~/.config/scad-viewer/config`. The CLI commands use them too.
 - `$OPENSCAD` and `$OPENSCAD_ARGS` override the saved values.
 - The 3D view shows the backend after the render time.
+
+## Parameter sets
+
+The **Parameter set** card at the top of the panel holds named sets of values.
+
+- Select a set to load it. **File defaults** sets all values back to the `.scad` defaults.
+- **Save** writes the values to the selected set. With no set selected, it asks for a name.
+- **New** saves the values as a new set. **Delete** removes the selected set (click two times).
+- The sets are in `<model>.json` next to `<model>.scad`. OpenSCAD reads the same file: `openscad -p model.json -P big`.
+- The CLI takes `-P name` (and `-p file.json` for a different file). `-D` values apply after the set.
 
 ## Customizer syntax
 

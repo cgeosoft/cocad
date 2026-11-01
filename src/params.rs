@@ -41,7 +41,26 @@ impl Value {
     }
 }
 
+/// Equal values, ignoring float noise from slider steps.
+pub fn same(a: &Value, b: &Value) -> bool {
+    let close = |x: f64, y: f64| (x - y).abs() <= 1e-9 * x.abs().max(y.abs()).max(1.0);
+    match (a, b) {
+        (Value::Num(x), Value::Num(y)) => close(*x, *y),
+        (Value::Vec(x), Value::Vec(y)) => {
+            x.len() == y.len() && x.iter().zip(y).all(|(x, y)| close(*x, *y))
+        }
+        _ => a == b,
+    }
+}
+
+/// Removes float noise such as 140.00000000000003.
+pub fn clean(n: f64) -> f64 {
+    let r = (n * 1e9).round() / 1e9;
+    if r == 0.0 { 0.0 } else { r }
+}
+
 fn fmt_num(n: f64) -> String {
+    let n = clean(n);
     if n.fract() == 0.0 && n.abs() < 1e15 {
         format!("{}", n as i64)
     } else {
@@ -75,7 +94,7 @@ pub struct Param {
 
 impl Param {
     pub fn changed(&self) -> bool {
-        self.value != self.default
+        !same(&self.value, &self.default)
     }
 
     /// Step for sliders and drag fields.
@@ -409,6 +428,22 @@ pub fn apply_define(params: &mut [Param], def: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Sets a value from Customizer text. String parameters take the text as is.
+/// Returns false when the text does not fit the parameter type.
+pub fn set_from_text(p: &mut Param, text: &str) -> bool {
+    let v = match &p.default {
+        Value::Str(_) => Some(Value::Str(text.to_string())),
+        _ => parse_value(text.trim()),
+    };
+    match v {
+        Some(v) if std::mem::discriminant(&v) == std::mem::discriminant(&p.default) => {
+            p.value = v;
+            true
+        }
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -484,5 +519,9 @@ after = 1;
         apply_define(&mut p, "width=55").unwrap();
         apply_define(&mut p, "shape=square").unwrap();
         assert_eq!(defines(&p), ["width=55", "shape=\"square\""]);
+        p[0].value = Value::Num(55.0 + 3e-14);
+        assert_eq!(defines(&p)[0], "width=55");
+        p[0].value = Value::Num(40.0 + 3e-14);
+        assert!(!p[0].changed());
     }
 }

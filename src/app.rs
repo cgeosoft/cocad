@@ -4,6 +4,7 @@ use crate::export::{self, Format, Meta};
 use crate::mesh::{Bounds, Mesh};
 use crate::openscad;
 use crate::params::{self, Param, Value, Widget};
+use crate::presets;
 use crate::render::{self, Renderer, View};
 use crate::slicer::{self, Kind, Settings, Sliced};
 use crate::ui::{self, ACCENT};
@@ -105,6 +106,14 @@ pub struct App {
     wireframe: bool,
     grid: bool,
     show_log: bool,
+    /// Parameter sets in `<model>.json`.
+    sets: Vec<String>,
+    active_set: Option<String>,
+    set_edited: bool,
+    /// Name being typed for "Save as".
+    new_set: Option<String>,
+    confirm_delete: bool,
+    collapsed: std::collections::HashSet<String>,
     cfg: openscad::Config,
     cfg_edit: Option<openscad::Config>,
     engine: String,
@@ -157,6 +166,12 @@ impl App {
             wireframe: false,
             grid: true,
             show_log: false,
+            sets: Vec::new(),
+            active_set: None,
+            set_edited: false,
+            new_set: None,
+            confirm_delete: false,
+            collapsed: Default::default(),
             cfg: openscad::Config::load(),
             cfg_edit: None,
             engine: String::new(),
@@ -175,6 +190,9 @@ impl App {
             Ok(src) => {
                 self.params = params::parse(&src);
                 self.mtime = mtime(&path);
+                self.sets = presets::names(&presets::path_for(&path));
+                self.active_set = None;
+                self.new_set = None;
                 self.file = Some(path);
                 self.mesh = None;
                 self.info = None;
@@ -206,6 +224,7 @@ impl App {
             }
         }
         self.params = fresh;
+        self.sets = presets::names(&presets::path_for(&path));
         self.mtime = mtime(&path);
         self.start_render();
     }
@@ -497,6 +516,24 @@ impl App {
         ui.horizontal(|ui| {
             ui.heading("Parameters");
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.spacing_mut().button_padding = Vec2::new(8.0, 5.0);
+                let all_closed = !self.params.is_empty()
+                    && self
+                        .params
+                        .iter()
+                        .all(|p| self.collapsed.contains(&p.group));
+                let label = if all_closed {
+                    "Expand all"
+                } else {
+                    "Collapse all"
+                };
+                if ui.add(ui::ghost(label, false)).clicked() {
+                    if all_closed {
+                        self.collapsed.clear();
+                    } else {
+                        self.collapsed = self.params.iter().map(|p| p.group.clone()).collect();
+                    }
+                }
                 let any = self.params.iter().any(|p| p.changed());
                 if ui.add_enabled(any, ui::ghost("Reset all", false)).clicked() {
                     for p in &mut self.params {
@@ -516,6 +553,10 @@ impl App {
             });
             return;
         }
+        if !self.params.is_empty() {
+            self.sets_bar(ui);
+            ui.add_space(4.0);
+        }
         if self.params.is_empty() {
             ui::card(ui, |ui| {
                 ui.label(ui::dim("No Customizer parameters in this file."))
@@ -533,11 +574,25 @@ impl App {
                     }
                 }
                 for g in groups {
+                    let open = !self.collapsed.contains(&g);
+                    let edited = self
+                        .params
+                        .iter()
+                        .filter(|p| p.group == g && p.changed())
+                        .count();
                     ui::card(ui, |ui| {
-                        ui::section(ui, &g);
-                        ui.add_space(2.0);
-                        for p in self.params.iter_mut().filter(|p| p.group == g) {
-                            changed |= param_row(ui, p);
+                        if ui::group_header(ui, &g, open, edited).clicked() {
+                            if open {
+                                self.collapsed.insert(g.clone());
+                            } else {
+                                self.collapsed.remove(&g);
+                            }
+                        }
+                        if open {
+                            ui.add_space(6.0);
+                            for p in self.params.iter_mut().filter(|p| p.group == g) {
+                                changed |= param_row(ui, p);
+                            }
                         }
                     });
                     ui.add_space(4.0);
@@ -553,6 +608,164 @@ impl App {
             });
         if changed {
             self.dirty_since = Some(Instant::now());
+            self.set_edited = true;
+        }
+    }
+
+    fn sets_bar(&mut self, ui: &mut egui::Ui) {
+        let Some(file) = self.file.clone() else {
+            return;
+        };
+        let path = presets::path_for(&file);
+        let mut msg: Option<String> = None;
+        ui::card(ui, |ui| {
+            ui::section(ui, "Parameter set");
+            {
+                let label = match &self.active_set {
+                    Some(n) if self.set_edited => format!("{n} (edited)"),
+                    Some(n) => n.clone(),
+                    None => "File defaults".into(),
+                };
+                let mut pick: Option<Option<String>> = None;
+                egui::ComboBox::from_id_salt("sets")
+                    .selected_text(label)
+                    .width(ui.available_width())
+                    .show_ui(ui, |ui| {
+                        if ui
+                            .selectable_label(self.active_set.is_none(), "File defaults")
+                            .clicked()
+                        {
+                            pick = Some(None);
+                        }
+                        for n in &self.sets {
+                            if ui
+                                .selectable_label(self.active_set.as_ref() == Some(n), n)
+                                .clicked()
+                            {
+                                pick = Some(Some(n.clone()));
+                            }
+                        }
+                    });
+                if let Some(choice) = pick {
+                    match &choice {
+                        None => {
+                            for p in &mut self.params {
+                                p.value = p.default.clone();
+                            }
+                        }
+                        Some(n) => match presets::apply(&path, n, &mut self.params) {
+                            Ok(skipped) if !skipped.is_empty() => {
+                                msg = Some(format!("Skipped: {}", skipped.join(", ")));
+                            }
+                            Ok(_) => {}
+                            Err(e) => msg = Some(e.to_string()),
+                        },
+                    }
+                    self.active_set = choice;
+                    self.set_edited = false;
+                    self.confirm_delete = false;
+                    self.dirty_since = Some(Instant::now());
+                }
+            }
+            ui.horizontal(|ui| {
+                ui.spacing_mut().button_padding = Vec2::new(10.0, 5.0);
+                ui.spacing_mut().item_spacing.x = 4.0;
+                let save = ui
+                    .add(ui::ghost("Save", false))
+                    .on_hover_text(match &self.active_set {
+                        Some(n) => format!("Save the values to '{n}'"),
+                        None => "Save the values as a new set".into(),
+                    });
+                if save.clicked() {
+                    match self.active_set.clone() {
+                        Some(n) => match presets::save(&path, &n, &self.params) {
+                            Ok(()) => {
+                                self.set_edited = false;
+                                msg = Some(format!("Saved '{n}'"));
+                            }
+                            Err(e) => msg = Some(e.to_string()),
+                        },
+                        None => self.new_set = Some(String::new()),
+                    }
+                }
+                if ui
+                    .add(ui::ghost("New", false))
+                    .on_hover_text("Save the values as a new set")
+                    .clicked()
+                {
+                    self.new_set = Some(String::new());
+                }
+                if let Some(n) = self.active_set.clone() {
+                    let text = if self.confirm_delete {
+                        "Sure?"
+                    } else {
+                        "Delete"
+                    };
+                    let b = egui::Button::new(RichText::new(text).color(ui::DANGER))
+                        .fill(Color32::TRANSPARENT)
+                        .corner_radius(8);
+                    if ui
+                        .add(b)
+                        .on_hover_text(format!("Delete '{n}' from {}", path.display()))
+                        .clicked()
+                    {
+                        if self.confirm_delete {
+                            match presets::delete(&path, &n) {
+                                Ok(()) => {
+                                    msg = Some(format!("Deleted '{n}'"));
+                                    self.active_set = None;
+                                }
+                                Err(e) => msg = Some(e.to_string()),
+                            }
+                            self.confirm_delete = false;
+                        } else {
+                            self.confirm_delete = true;
+                        }
+                    }
+                }
+            });
+
+            if let Some(name) = &mut self.new_set {
+                ui.add_space(4.0);
+                let mut submit = false;
+                let mut cancel = false;
+                ui.horizontal(|ui| {
+                    let r = ui.add(
+                        egui::TextEdit::singleline(name)
+                            .hint_text("Name of the new set")
+                            .desired_width(ui.available_width() - 150.0)
+                            .margin(Vec2::new(10.0, 6.0)),
+                    );
+                    r.request_focus();
+                    submit = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                    cancel = ui.input(|i| i.key_pressed(egui::Key::Escape));
+                    ui.spacing_mut().button_padding = Vec2::new(10.0, 5.0);
+                    submit |= ui
+                        .add_enabled(!name.trim().is_empty(), ui::primary("Save"))
+                        .clicked();
+                    cancel |= ui.add(ui::ghost("Cancel", false)).clicked();
+                });
+                let name = name.trim().to_string();
+                if submit && !name.is_empty() {
+                    match presets::save(&path, &name, &self.params) {
+                        Ok(()) => {
+                            msg = Some(format!("Saved '{name}'"));
+                            self.active_set = Some(name);
+                            self.set_edited = false;
+                        }
+                        Err(e) => msg = Some(e.to_string()),
+                    }
+                    self.new_set = None;
+                } else if cancel {
+                    self.new_set = None;
+                }
+            }
+        });
+        if msg.is_some() {
+            self.sets = presets::names(&path);
+        }
+        if let Some(m) = msg {
+            self.toast = Some((m, Instant::now()));
         }
     }
 
@@ -1350,7 +1563,12 @@ fn param_row(ui: &mut egui::Ui, p: &mut Param) -> bool {
         _ => {}
     }
     ui.add_space(4.0);
-    p.value != before
+    match &mut p.value {
+        Value::Num(n) => *n = params::clean(*n),
+        Value::Vec(v) => v.iter_mut().for_each(|n| *n = params::clean(*n)),
+        _ => {}
+    }
+    !params::same(&p.value, &before)
 }
 
 fn decimals(step: f64) -> usize {

@@ -123,6 +123,202 @@ void main() {
 }
 "#;
 
+const PATH_VS: &str = r#"
+layout(location = 0) in vec3 a_pos;
+layout(location = 1) in vec3 a_nrm;
+layout(location = 2) in vec3 a_col;
+uniform mat4 u_mvp;
+out vec3 v_nrm;
+out vec3 v_col;
+out vec3 v_pos;
+void main() {
+    v_nrm = a_nrm;
+    v_col = a_col;
+    v_pos = a_pos;
+    gl_Position = u_mvp * vec4(a_pos, 1.0);
+}
+"#;
+
+const PATH_FS: &str = r#"
+precision highp float;
+in vec3 v_nrm;
+in vec3 v_col;
+in vec3 v_pos;
+uniform vec3 u_eye;
+uniform float u_tint;
+out vec4 o_color;
+void main() {
+    vec3 n = normalize(v_nrm);
+    vec3 v = normalize(u_eye - v_pos);
+    vec3 key = normalize(vec3(0.45, 0.3, 1.0));
+    float diff = 0.3 + 0.45 * max(dot(n, key), 0.0) + 0.3 * max(dot(n, v), 0.0);
+    float spec = pow(max(dot(n, normalize(key + v)), 0.0), 32.0) * 0.18;
+    o_color = vec4((v_col * diff + vec3(spec)) * u_tint, 1.0);
+}
+"#;
+
+/// One vertex of an extruded toolpath: position, packed normal, color.
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct PathVertex {
+    pos: [f32; 3],
+    nrm: [i8; 4],
+    col: [u8; 4],
+}
+
+/// Toolpaths as solid strands: a top face and two rounded sides per
+/// segment, `line_width` wide and one layer high.
+struct Extrusions {
+    vertices: Vec<PathVertex>,
+    indices: Vec<u32>,
+    /// Index count at the end of each layer.
+    layer_ends: Vec<i32>,
+}
+
+fn extrude(s: &Sliced) -> Extrusions {
+    let mut out = Extrusions {
+        vertices: Vec::new(),
+        indices: Vec::new(),
+        layer_ends: Vec::new(),
+    };
+    let hw = s.line_width * 0.5;
+    let pack = |n: Vec3| {
+        let n = n.normalize_or_zero() * 127.0;
+        [n.x as i8, n.y as i8, n.z as i8, 0]
+    };
+    for layer in &s.layers {
+        let top = layer.z;
+        let bot = layer.z - layer.height * 0.85;
+        for p in &layer.paths {
+            let c = kind_color(p.kind).map(|x| (x * 255.0) as u8);
+            let col = [c[0], c[1], c[2], 255];
+            let n = p.pts.len();
+            let segs = if p.closed { n } else { n.saturating_sub(1) };
+            for i in 0..segs {
+                let (a, b) = (p.pts[i], p.pts[(i + 1) % n]);
+                let d = (b - a).normalize_or_zero();
+                if d == glam::Vec2::ZERO {
+                    continue;
+                }
+                // Extend by half a width so corners join without gaps.
+                let (a, b) = (a - d * hw, b + d * hw);
+                let side = d.perp() * hw;
+                let v3 = |q: glam::Vec2, z: f32| [q.x, q.y, z];
+                let left = Vec3::new(side.x, side.y, 0.0).normalize();
+                let faces: [([[f32; 3]; 4], Vec3); 3] = [
+                    (
+                        [
+                            v3(a + side, top),
+                            v3(a - side, top),
+                            v3(b - side, top),
+                            v3(b + side, top),
+                        ],
+                        Vec3::Z,
+                    ),
+                    (
+                        [
+                            v3(a + side, top),
+                            v3(b + side, top),
+                            v3(b + side, bot),
+                            v3(a + side, bot),
+                        ],
+                        left + Vec3::Z * 0.35,
+                    ),
+                    (
+                        [
+                            v3(b - side, top),
+                            v3(a - side, top),
+                            v3(a - side, bot),
+                            v3(b - side, bot),
+                        ],
+                        -left + Vec3::Z * 0.35,
+                    ),
+                ];
+                for (quad, normal) in faces {
+                    let base = out.vertices.len() as u32;
+                    let nrm = pack(normal);
+                    out.vertices
+                        .extend(quad.iter().map(|&pos| PathVertex { pos, nrm, col }));
+                    out.indices.extend_from_slice(&[
+                        base,
+                        base + 1,
+                        base + 2,
+                        base,
+                        base + 2,
+                        base + 3,
+                    ]);
+                }
+            }
+        }
+        out.layer_ends.push(out.indices.len() as i32);
+    }
+    out
+}
+
+struct PathBuffer {
+    vao: glow::VertexArray,
+    vbo: glow::Buffer,
+    ebo: glow::Buffer,
+}
+
+impl PathBuffer {
+    unsafe fn new(gl: &glow::Context) -> PathBuffer {
+        unsafe {
+            let vao = gl.create_vertex_array().unwrap();
+            let vbo = gl.create_buffer().unwrap();
+            let ebo = gl.create_buffer().unwrap();
+            gl.bind_vertex_array(Some(vao));
+            gl.bind_buffer(glow::ARRAY_BUFFER, Some(vbo));
+            gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, Some(ebo));
+            gl.enable_vertex_attrib_array(0);
+            gl.vertex_attrib_pointer_f32(0, 3, glow::FLOAT, false, 20, 0);
+            gl.enable_vertex_attrib_array(1);
+            gl.vertex_attrib_pointer_f32(1, 3, glow::BYTE, true, 20, 12);
+            gl.enable_vertex_attrib_array(2);
+            gl.vertex_attrib_pointer_f32(2, 3, glow::UNSIGNED_BYTE, true, 20, 16);
+            gl.bind_vertex_array(None);
+            PathBuffer { vao, vbo, ebo }
+        }
+    }
+
+    unsafe fn upload(&self, gl: &glow::Context, e: &Extrusions) {
+        unsafe {
+            gl.bind_vertex_array(Some(self.vao));
+            gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.vbo));
+            gl.buffer_data_u8_slice(
+                glow::ARRAY_BUFFER,
+                bytemuck::cast_slice(&e.vertices),
+                glow::STATIC_DRAW,
+            );
+            gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, Some(self.ebo));
+            gl.buffer_data_u8_slice(
+                glow::ELEMENT_ARRAY_BUFFER,
+                bytemuck::cast_slice(&e.indices),
+                glow::STATIC_DRAW,
+            );
+            gl.bind_vertex_array(None);
+        }
+    }
+
+    /// Draws indices `start..end`.
+    unsafe fn draw(&self, gl: &glow::Context, start: i32, end: i32) {
+        if end > start {
+            unsafe {
+                gl.bind_vertex_array(Some(self.vao));
+                gl.draw_elements(glow::TRIANGLES, end - start, glow::UNSIGNED_INT, start * 4);
+            }
+        }
+    }
+
+    unsafe fn destroy(&self, gl: &glow::Context) {
+        unsafe {
+            gl.delete_vertex_array(self.vao);
+            gl.delete_buffer(self.vbo);
+            gl.delete_buffer(self.ebo);
+        }
+    }
+}
+
 /// What to draw in one frame.
 pub struct View {
     pub mvp: Mat4,
@@ -138,11 +334,12 @@ pub struct View {
 pub struct Renderer {
     mesh_prog: glow::Program,
     line_prog: glow::Program,
+    path_prog: glow::Program,
     mesh: Buffer,
     edges: Buffer,
     grid: Buffer,
-    paths: Buffer,
-    /// Vertex count at the end of each layer in `paths`.
+    paths: PathBuffer,
+    /// Index count at the end of each layer in `paths`.
     layer_ends: Vec<i32>,
     mesh_rev: u64,
     slice_rev: u64,
@@ -191,10 +388,11 @@ impl Renderer {
             Ok(Renderer {
                 mesh_prog: program(gl, version, MESH_VS, MESH_FS)?,
                 line_prog: program(gl, version, LINE_VS, LINE_FS)?,
+                path_prog: program(gl, version, PATH_VS, PATH_FS)?,
                 mesh: Buffer::new(gl),
                 edges: Buffer::new(gl),
                 grid: Buffer::new(gl),
-                paths: Buffer::new(gl),
+                paths: PathBuffer::new(gl),
                 layer_ends: Vec::new(),
                 mesh_rev: u64::MAX,
                 slice_rev: u64::MAX,
@@ -207,7 +405,9 @@ impl Renderer {
         unsafe {
             gl.delete_program(self.mesh_prog);
             gl.delete_program(self.line_prog);
-            for b in [&self.mesh, &self.edges, &self.grid, &self.paths] {
+            gl.delete_program(self.path_prog);
+            self.paths.destroy(gl);
+            for b in [&self.mesh, &self.edges, &self.grid] {
                 b.destroy(gl);
             }
         }
@@ -246,25 +446,13 @@ impl Renderer {
             return;
         }
         self.slice_rev = rev;
-        self.layer_ends.clear();
-        let mut data = Vec::new();
-        if let Some(s) = sliced {
-            for layer in &s.layers {
-                let z = layer.z;
-                for p in &layer.paths {
-                    let c = kind_color(p.kind);
-                    let n = p.pts.len();
-                    let segs = if p.closed { n } else { n.saturating_sub(1) };
-                    for i in 0..segs {
-                        for q in [p.pts[i], p.pts[(i + 1) % n]] {
-                            data.extend_from_slice(&[q.x, q.y, z, c[0], c[1], c[2]]);
-                        }
-                    }
-                }
-                self.layer_ends.push((data.len() / 6) as i32);
-            }
-        }
-        unsafe { self.paths.upload(gl, &data) };
+        let e = sliced.map(extrude).unwrap_or(Extrusions {
+            vertices: Vec::new(),
+            indices: Vec::new(),
+            layer_ends: Vec::new(),
+        });
+        unsafe { self.paths.upload(gl, &e) };
+        self.layer_ends = e.layer_ends;
     }
 
     /// Bed grid around the model: 10 mm cells, brighter every 50 mm, X/Y axes.
@@ -350,10 +538,18 @@ impl Renderer {
                 } else {
                     self.layer_ends[layer - 1]
                 };
-                gl.uniform_1_f32(u(self.line_prog, "u_tint").as_ref(), 0.55);
-                self.paths.draw(gl, glow::LINES, 0, start);
-                gl.uniform_1_f32(u(self.line_prog, "u_tint").as_ref(), 1.15);
-                self.paths.draw(gl, glow::LINES, start, end - start);
+                gl.use_program(Some(self.path_prog));
+                gl.uniform_matrix_4_f32_slice(u(self.path_prog, "u_mvp").as_ref(), false, &mvp);
+                gl.uniform_3_f32(
+                    u(self.path_prog, "u_eye").as_ref(),
+                    view.eye.x,
+                    view.eye.y,
+                    view.eye.z,
+                );
+                gl.uniform_1_f32(u(self.path_prog, "u_tint").as_ref(), 0.8);
+                self.paths.draw(gl, 0, start);
+                gl.uniform_1_f32(u(self.path_prog, "u_tint").as_ref(), 1.1);
+                self.paths.draw(gl, start, end);
             }
 
             if view.show_mesh && self.mesh.count > 0 {

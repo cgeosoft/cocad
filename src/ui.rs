@@ -142,6 +142,48 @@ pub fn section(ui: &mut egui::Ui, text: &str) {
     );
 }
 
+/// Clickable group title with a chevron and a count of edited values.
+pub fn group_header(ui: &mut egui::Ui, title: &str, open: bool, edited: usize) -> egui::Response {
+    let w = ui.available_width();
+    let (rect, resp) = ui.allocate_exact_size(vec2(w, 20.0), Sense::click());
+    let p = ui.painter();
+    let color = if resp.hovered() { TEXT } else { DIM };
+    let galley = p.layout_no_wrap(title.to_uppercase(), FontId::proportional(11.5), color);
+    p.galley(
+        egui::pos2(rect.left(), rect.center().y - galley.size().y / 2.0),
+        galley,
+        color,
+    );
+    if edited > 0 {
+        pill(
+            p,
+            egui::pos2(rect.right() - 26.0, rect.center().y),
+            Align2::RIGHT_CENTER,
+            &format!("{edited} edited"),
+            FontId::proportional(11.0),
+            ACCENT,
+            Color32::from_rgba_unmultiplied(0xff, 0x93, 0x00, 30),
+        );
+    }
+    // Chevron: down when open, right when closed.
+    let c = egui::pos2(rect.right() - 8.0, rect.center().y);
+    let pts = if open {
+        vec![
+            c + vec2(-5.0, -2.5),
+            c + vec2(0.0, 2.5),
+            c + vec2(5.0, -2.5),
+        ]
+    } else {
+        vec![
+            c + vec2(-2.5, -5.0),
+            c + vec2(2.5, 0.0),
+            c + vec2(-2.5, 5.0),
+        ]
+    };
+    p.add(egui::Shape::line(pts, Stroke::new(1.6_f32, color)));
+    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
 pub fn dim(text: impl Into<String>) -> RichText {
     RichText::new(text).color(DIM).size(12.5)
 }
