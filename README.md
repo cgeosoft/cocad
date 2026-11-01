@@ -4,10 +4,11 @@ subtitle: Desktop viewer for OpenSCAD models with Customizer parameters, export 
 slug: scad-viewer
 brand: cgeosoft
 category: software
-status: in-progress
+status: done
 tags: [openscad, 3d-printing, viewer, slicer, rust, egui]
 started: 2026-11-01
-dates_from: "first commit date"
+finished: 2026-11-01
+dates_from: "started: first commit date; finished: Christos marked it complete on 2026-11-01"
 version: "0.1.10"
 site: /b/scad-viewer/
 preview: preview.jpg
