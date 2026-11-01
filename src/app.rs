@@ -4,6 +4,7 @@ use crate::export::{self, Format, Meta};
 use crate::mesh::{Bounds, Mesh};
 use crate::openscad;
 use crate::params::{self, Param, Value, Widget};
+use crate::pathtrace;
 use crate::presets;
 use crate::render::{self, Renderer, View};
 use crate::slicer::{self, Kind, Settings, Sliced};
@@ -22,7 +23,41 @@ const DEBOUNCE: Duration = Duration::from_millis(350);
 enum Mode {
     Model,
     Slice,
+    Photo,
 }
+
+/// What a photo render depends on. A change restarts the render.
+#[derive(Clone, Copy, PartialEq)]
+struct PhotoKey {
+    cam: pathtrace::Camera,
+    look: pathtrace::Look,
+    mesh_rev: u64,
+    size: (usize, usize),
+    samples: u32,
+}
+
+/// Photo render settings shown in the Photo panel.
+struct PhotoSettings {
+    color: [u8; 3],
+    finish: &'static str,
+    layer_lines: bool,
+    studio: pathtrace::Studio,
+    samples: u32,
+    /// Render resolution as a fraction of the view.
+    scale: f32,
+    exposure: f32,
+}
+
+const SWATCHES: [(&str, [u8; 3]); 8] = [
+    ("Orange", [0xff, 0x93, 0x00]),
+    ("CgeoFab", [0xeb, 0x6f, 0x40]),
+    ("Grey", [0x8d, 0x93, 0x9c]),
+    ("Black", [0x26, 0x27, 0x2a]),
+    ("White", [0xee, 0xee, 0xec]),
+    ("Red", [0xc8, 0x2a, 0x2a]),
+    ("Blue", [0x1f, 0x5f, 0xc8]),
+    ("Green", [0x2e, 0x9e, 0x52]),
+];
 
 struct Camera {
     yaw: f32,
@@ -106,6 +141,13 @@ pub struct App {
     wireframe: bool,
     grid: bool,
     show_log: bool,
+    photo: PhotoSettings,
+    photo_job: Option<pathtrace::Job>,
+    photo_key: Option<PhotoKey>,
+    /// Wanted key and when it last changed; the render starts when it settles.
+    photo_want: Option<(PhotoKey, Instant)>,
+    photo_tex: Option<(egui::TextureHandle, u32)>,
+    photo_started: Instant,
     themed: bool,
     /// Parameter sets in `<model>.json`.
     sets: Vec<String>,
@@ -125,7 +167,7 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(cc: &eframe::CreationContext<'_>, file: Option<PathBuf>, slice: bool) -> App {
+    pub fn new(cc: &eframe::CreationContext<'_>, file: Option<PathBuf>, mode: &str) -> App {
         ui::fonts(&cc.egui_ctx);
         let renderer = cc.gl.as_ref().and_then(|gl| match Renderer::new(gl) {
             Ok(r) => Some(Arc::new(Mutex::new(r))),
@@ -149,7 +191,11 @@ impl App {
             mesh_rev: 0,
             info: None,
             fit_pending: true,
-            mode: if slice { Mode::Slice } else { Mode::Model },
+            mode: match mode {
+                "slice" => Mode::Slice,
+                "photo" => Mode::Photo,
+                _ => Mode::Model,
+            },
             settings: Settings::default(),
             sliced: None,
             slice_rev: 0,
@@ -168,6 +214,20 @@ impl App {
             wireframe: false,
             grid: true,
             show_log: false,
+            photo: PhotoSettings {
+                color: [0xff, 0x93, 0x00],
+                finish: "satin",
+                layer_lines: true,
+                studio: pathtrace::Studio::Dark,
+                samples: 256,
+                scale: 1.0,
+                exposure: 1.0,
+            },
+            photo_job: None,
+            photo_key: None,
+            photo_want: None,
+            photo_tex: None,
+            photo_started: Instant::now(),
             themed: false,
             sets: Vec::new(),
             sets_file: PathBuf::new(),
@@ -511,12 +571,16 @@ impl App {
 
                 // Mode switch in the middle of the remaining space.
                 let free = ui.available_width();
-                ui.add_space(((free - 170.0) / 2.0).max(0.0));
+                ui.add_space(((free - 250.0) / 2.0).max(0.0));
                 let mut mode = self.mode;
                 if ui::segmented(
                     ui,
                     &mut mode,
-                    &[(Mode::Slice, "Slice"), (Mode::Model, "Model")],
+                    &[
+                        (Mode::Photo, "Photo"),
+                        (Mode::Slice, "Slice"),
+                        (Mode::Model, "Model"),
+                    ],
                 ) {
                     self.set_mode(mode);
                 }
@@ -852,6 +916,242 @@ impl App {
         }
     }
 
+    fn photo_look(&self) -> pathtrace::Look {
+        let p = &self.photo;
+        let hex = (p.color[0] as u32) << 16 | (p.color[1] as u32) << 8 | p.color[2] as u32;
+        pathtrace::Look {
+            color: pathtrace::srgb(hex),
+            roughness: pathtrace::finish_roughness(p.finish),
+            layer_lines: if p.layer_lines {
+                self.settings.layer_height
+            } else {
+                0.0
+            },
+            studio: p.studio,
+            exposure: p.exposure,
+        }
+    }
+
+    /// Runs the photo render for the current view and draws it over the viewport.
+    fn photo_view(&mut self, ui: &mut egui::Ui, rect: egui::Rect) {
+        let Some(mesh) = self.mesh.clone() else {
+            return;
+        };
+        let ppp = ui.ctx().pixels_per_point() * self.photo.scale;
+        let size = (
+            (rect.width() * ppp) as usize,
+            (rect.height() * ppp) as usize,
+        );
+        if size.0 < 16 || size.1 < 16 {
+            return;
+        }
+        let key = PhotoKey {
+            cam: pathtrace::Camera {
+                eye: self.cam.eye(),
+                target: self.cam.target,
+                fov: Camera::FOV,
+            },
+            look: self.photo_look(),
+            mesh_rev: self.mesh_rev,
+            size,
+            samples: self.photo.samples,
+        };
+        if self.photo_key != Some(key) {
+            // Wait until the camera and settings rest, then start again.
+            match self.photo_want {
+                Some((k, at)) if k == key => {
+                    if at.elapsed() > Duration::from_millis(250) {
+                        self.photo_job = Some(pathtrace::Job::start(
+                            mesh,
+                            key.cam,
+                            key.look,
+                            size.0,
+                            size.1,
+                            key.samples,
+                        ));
+                        self.photo_key = Some(key);
+                        self.photo_tex = None;
+                        self.photo_started = Instant::now();
+                        self.photo_want = None;
+                    }
+                }
+                _ => {
+                    self.photo_job = None;
+                    self.photo_want = Some((key, Instant::now()));
+                }
+            }
+            ui.ctx().request_repaint_after(Duration::from_millis(60));
+        }
+        if let Some(job) = &self.photo_job {
+            let f = job.frame.lock().unwrap();
+            let have = self.photo_tex.as_ref().map(|t| t.1).unwrap_or(0);
+            if f.samples > have && !f.rgba.is_empty() {
+                let img = egui::ColorImage::from_rgba_unmultiplied([f.width, f.height], &f.rgba);
+                match &mut self.photo_tex {
+                    Some((tex, n)) => {
+                        tex.set(img, egui::TextureOptions::LINEAR);
+                        *n = f.samples;
+                    }
+                    None => {
+                        let tex = ui
+                            .ctx()
+                            .load_texture("photo", img, egui::TextureOptions::LINEAR);
+                        self.photo_tex = Some((tex, f.samples));
+                    }
+                }
+            }
+            if f.samples < self.photo.samples {
+                ui.ctx().request_repaint_after(Duration::from_millis(120));
+            }
+        }
+        if let (Some((tex, _)), Some(_)) = (&self.photo_tex, &self.photo_job) {
+            ui.painter().image(
+                tex.id(),
+                rect,
+                egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                Color32::WHITE,
+            );
+        }
+    }
+
+    fn photo_samples(&self) -> u32 {
+        self.photo_job
+            .as_ref()
+            .map(|j| j.frame.lock().unwrap().samples)
+            .unwrap_or(0)
+    }
+
+    fn save_photo(&mut self) {
+        let Some(job) = &self.photo_job else { return };
+        let mut d = rfd::FileDialog::new()
+            .add_filter("PNG image", &["png"])
+            .set_file_name(format!("{}-photo.png", self.stem()));
+        if let Some(dir) = self.file.as_ref().and_then(|f| f.parent()) {
+            d = d.set_directory(dir);
+        }
+        let Some(path) = d.save_file() else { return };
+        let f = job.frame.lock().unwrap();
+        let msg = match pathtrace::save_png(&path, &f) {
+            Ok(()) => format!("Saved {} ({} samples)", path.display(), f.samples),
+            Err(e) => format!("Cannot save: {e}"),
+        };
+        drop(f);
+        self.toast = Some((msg, Instant::now()));
+    }
+
+    fn photo_panel(&mut self, ui: &mut egui::Ui) {
+        ui.heading("Photo");
+        ui.label(ui::dim("Path-traced render of the current view."));
+        ui.add_space(4.0);
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                let samples = self.photo_samples();
+                ui::card(ui, |ui| {
+                    ui::section(ui, "Progress");
+                    let target = self.photo.samples;
+                    let waiting = self.photo_job.is_none() && self.mesh.is_some();
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new(format!("{samples}")).size(22.0));
+                        ui.label(ui::dim(format!("of {target} samples")));
+                    });
+                    ui.add(
+                        egui::ProgressBar::new(samples as f32 / target.max(1) as f32)
+                            .desired_height(6.0)
+                            .fill(ui::ACCENT),
+                    );
+                    let status = if waiting {
+                        "Waiting for the view to rest…".to_string()
+                    } else if samples >= target {
+                        format!(
+                            "Done in {:.0} s",
+                            self.photo_started.elapsed().as_secs_f32()
+                        )
+                    } else {
+                        format!("{:.0} s", self.photo_started.elapsed().as_secs_f32())
+                    };
+                    ui.label(ui::dim(status));
+                    ui.add_space(4.0);
+                    if ui
+                        .add_enabled(samples > 0, ui::primary("Save PNG"))
+                        .clicked()
+                    {
+                        self.save_photo();
+                    }
+                });
+                ui.add_space(4.0);
+
+                let p = &mut self.photo;
+                ui::card(ui, |ui| {
+                    ui::section(ui, "Material");
+                    ui.horizontal_wrapped(|ui| {
+                        ui.spacing_mut().item_spacing = Vec2::new(8.0, 8.0);
+                        for (name, c) in SWATCHES {
+                            let (r, resp) =
+                                ui.allocate_exact_size(Vec2::splat(26.0), egui::Sense::click());
+                            let col = Color32::from_rgb(c[0], c[1], c[2]);
+                            ui.painter().circle_filled(r.center(), 12.0, col);
+                            if p.color == c {
+                                ui.painter().circle_stroke(
+                                    r.center(),
+                                    12.5,
+                                    egui::Stroke::new(2.0_f32, ui::c().text),
+                                );
+                            }
+                            if resp.on_hover_text(name).clicked() {
+                                p.color = c;
+                            }
+                        }
+                        ui.color_edit_button_srgb(&mut p.color);
+                    });
+                    ui.add_space(4.0);
+                    ui.label("Finish");
+                    let mut finish = p.finish;
+                    ui::segmented(
+                        ui,
+                        &mut finish,
+                        &[("matte", "Matte"), ("satin", "Satin"), ("gloss", "Gloss")],
+                    );
+                    p.finish = finish;
+                    ui.horizontal(|ui| {
+                        ui.label("Print layer lines");
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui::toggle(ui, &mut p.layer_lines);
+                        });
+                    });
+                });
+                ui.add_space(4.0);
+                ui::card(ui, |ui| {
+                    ui::section(ui, "Scene");
+                    ui.label("Studio");
+                    let mut studio = p.studio;
+                    ui::segmented(
+                        ui,
+                        &mut studio,
+                        &[
+                            (pathtrace::Studio::Dark, "Dark"),
+                            (pathtrace::Studio::Light, "Light"),
+                        ],
+                    );
+                    p.studio = studio;
+                    ui.add_space(4.0);
+                    setting(ui, "Exposure", &mut p.exposure, 0.3..=3.0, 0.05, "");
+                });
+                ui.add_space(4.0);
+                ui::card(ui, |ui| {
+                    ui::section(ui, "Quality");
+                    setting(ui, "Samples", &mut p.samples, 16..=2048, 16.0, "");
+                    ui.label("Resolution");
+                    let mut scale = if p.scale < 0.75 { 0 } else { 1 };
+                    ui::segmented(ui, &mut scale, &[(0, "Half"), (1, "Full")]);
+                    p.scale = if scale == 0 { 0.5 } else { 1.0 };
+                    ui.label(ui::dim(
+                        "Move the view to start again. The render uses all cores.",
+                    ));
+                });
+            });
+    }
+
     fn slice_panel(&mut self, ui: &mut egui::Ui) {
         ui.heading("Slice preview");
         ui.label(ui::dim("Rough preview for checking. Not for printing."));
@@ -1065,6 +1365,13 @@ impl App {
             );
         }
 
+        if self.mode == Mode::Photo {
+            self.photo_view(ui, rect);
+        } else {
+            self.photo_job = None;
+            self.photo_key = None;
+        }
+
         let m = 16.0;
         // View toolbar, top right.
         let bar = egui::Rect::from_min_size(
@@ -1270,6 +1577,13 @@ impl App {
                 i.key_pressed(egui::Key::S),
             )
         });
+        if ctx.input(|i| i.key_pressed(egui::Key::P)) {
+            self.set_mode(if self.mode == Mode::Photo {
+                Mode::Model
+            } else {
+                Mode::Photo
+            });
+        }
         if f5 {
             self.start_render();
         }
@@ -1457,6 +1771,14 @@ impl eframe::App for App {
             .width_range(280.0..=560.0)
             .frame(side)
             .show(ctx, |ui| self.param_panel(ui));
+        if self.mode == Mode::Photo {
+            egui::SidePanel::right("photo")
+                .resizable(true)
+                .default_width(320.0)
+                .width_range(280.0..=480.0)
+                .frame(side)
+                .show(ctx, |ui| self.photo_panel(ui));
+        }
         if self.mode == Mode::Slice {
             egui::SidePanel::right("slice")
                 .resizable(true)

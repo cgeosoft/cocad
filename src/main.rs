@@ -18,7 +18,7 @@ const USAGE: &str =
     "SCAD Viewer: view OpenSCAD models, edit Customizer parameters, export and preview slices.
 
 Usage:
-  scad-viewer [--slice] [FILE.scad]            Open the viewer (--slice: start in slice view)
+  scad-viewer [--slice|--photo] [FILE.scad]    Open the viewer (start in slice or photo view)
   scad-viewer params FILE.scad                 List the Customizer parameters
   scad-viewer export FILE.scad -o OUT [-P SET] [-D name=value]...
                                                Render and write OUT (.stl, .3mf or .step)
@@ -55,13 +55,14 @@ fn main() -> Result<()> {
         Some("export") => cmd_export(&args[1..]),
         Some("slice") => cmd_slice(&args[1..]),
         Some("photo") => cmd_photo(&args[1..]),
-        Some("--slice") => gui(args.get(1).map(PathBuf::from), true),
+        Some(m @ ("--slice" | "--photo")) => gui(args.get(1).map(PathBuf::from), &m[2..]),
         Some(a) if a.starts_with('-') => bail!("unknown option {a}\n\n{USAGE}"),
-        file => gui(file.map(PathBuf::from), false),
+        file => gui(file.map(PathBuf::from), "model"),
     }
 }
 
-fn gui(file: Option<PathBuf>, slice: bool) -> Result<()> {
+fn gui(file: Option<PathBuf>, mode: &str) -> Result<()> {
+    let mode = mode.to_string();
     let options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
             .with_inner_size([1400.0, 900.0])
@@ -77,7 +78,7 @@ fn gui(file: Option<PathBuf>, slice: bool) -> Result<()> {
     eframe::run_native(
         "SCAD Viewer",
         options,
-        Box::new(move |cc| Ok(Box::new(app::App::new(cc, file, slice)))),
+        Box::new(move |cc| Ok(Box::new(app::App::new(cc, file, &mode)))),
     )
     .map_err(|e| anyhow::anyhow!("{e}"))
 }

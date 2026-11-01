@@ -8,7 +8,7 @@ status: in-progress
 tags: [openscad, 3d-printing, viewer, slicer, rust, egui]
 started: 2026-11-01
 dates_from: "first commit date"
-version: "0.1.7"
+version: "0.1.8"
 showcase: true
 ---
 
@@ -29,6 +29,7 @@ OpenSCAD does the geometry. SCAD Viewer runs the `openscad` CLI in the backgroun
 - Export: binary STL, 3MF (with parameters in the metadata), STEP AP214.
 - STEP export merges coplanar triangles into planar faces. A closed mesh becomes one `FACETED_BREP` solid.
 - Slice preview: layers, outer and inner walls, sparse infill, and top and bottom skin, drawn as rounded strands at line width and layer height. Layer slider, time, length and weight.
+- Photo render: a path tracer renders the current view as a photo. Plastic material in 8 colors or any color, matte, satin or gloss finish, printed layer lines, dark or light studio. Save as PNG.
 - Mesh check: size, volume, triangle count, open edges. Back faces show in purple.
 - CLI for batch export and slicing.
 - Dark and light themes. **System** follows the desktop. The top bar has a quick Dark/Light switch; Settings has all three.
@@ -57,6 +58,7 @@ The slicer is for preview only. Skin goes on each area that has no material in o
 | `src/mesh.rs` | Indexed mesh, STL reader, checks |
 | `src/export.rs` | STL, 3MF and STEP writers |
 | `src/slicer.rs` | Preview slicer |
+| `src/pathtrace.rs` | Path tracer for photo renders (BVH, plastic material, studio light) |
 | `examples/` | Test models (see below) |
 | `scripts/` | Build and packaging scripts |
 | `packaging/` | Desktop entry, icon, MIME type for the `.deb` |
@@ -82,7 +84,7 @@ scripts/build.sh --debug    # debug build
 
 ```bash
 scripts/package-deb.sh
-sudo apt install ./dist/scad-viewer_0.1.7_amd64.deb
+sudo apt install ./dist/scad-viewer_0.1.8_amd64.deb
 ```
 
 ## Usage
@@ -90,6 +92,7 @@ sudo apt install ./dist/scad-viewer_0.1.7_amd64.deb
 ```bash
 scad-viewer model.scad
 scad-viewer --slice model.scad
+scad-viewer --photo model.scad
 ```
 
 | Input | Action |
@@ -103,6 +106,7 @@ scad-viewer --slice model.scad
 | Dark / Light button | Switch the theme |
 | `W` | Wireframe |
 | `S` | Model or slice view |
+| `P` | Photo view |
 | Up / Down, PgUp / PgDn | Change the slice layer |
 | Ctrl+O | Open a file. You can also drop a file on the window. |
 
@@ -113,7 +117,20 @@ scad-viewer params model.scad
 scad-viewer export model.scad -o model.3mf -D width=80 -D 'shape="square"'
 scad-viewer export model.scad -o big.stl -P big          # saved set 'big' from model.json
 scad-viewer slice model.scad --layer-height 0.2 --infill 20 --walls 3
+scad-viewer photo model.scad -o model.png --size 1600x1200 --samples 256 --color eb6f40 --finish satin --layer-lines
 ```
+
+## Photo render
+
+The **Photo** view path-traces the current camera view on all CPU cores. The image gets cleaner with each sample. When you move the view or change a setting, the render waits until the view rests, then starts again.
+
+- **Material**: 8 color swatches or a color picker. Finish: matte, satin or gloss plastic.
+- **Print layer lines**: ripples the sides at the slice layer height, so the part looks printed.
+- **Studio**: dark or light backdrop with a soft key light and floor shadows. Exposure adjusts the brightness.
+- **Quality**: samples per pixel (16 to 2048) and full or half resolution.
+- **Save PNG** writes the image at the current sample count.
+
+The `photo` CLI command renders the iso view to a PNG without the window.
 
 ## OpenSCAD engine
 
