@@ -4,3 +4,6 @@
 *.[mM][pP]4 filter=lfs diff=lfs merge=lfs -text
 *.[sS][tT][lL] filter=lfs diff=lfs merge=lfs -text
 *.3[mM][fF] filter=lfs diff=lfs merge=lfs -text
+# README images: plain git, so GitHub shows them without LFS
+images/** -filter -diff -merge -text
+/preview.jpg -filter -diff -merge -text

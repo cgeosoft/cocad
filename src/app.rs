@@ -712,8 +712,6 @@ impl App {
                 } else {
                     format!("{name} (new)")
                 };
-                ui.label(ui::dim(text))
-                    .on_hover_text(path.display().to_string());
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.spacing_mut().button_padding = Vec2::new(8.0, 4.0);
                     ui.spacing_mut().item_spacing.x = 2.0;
@@ -746,6 +744,11 @@ impl App {
                         }
                         switch_to = d.pick_file();
                     }
+                    // The name gets the space the buttons leave, cut short when needed.
+                    ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                        ui.add(egui::Label::new(ui::dim(text)).truncate())
+                            .on_hover_text(path.display().to_string());
+                    });
                 });
             });
             {
