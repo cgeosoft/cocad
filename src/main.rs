@@ -63,6 +63,8 @@ fn gui(file: Option<PathBuf>, slice: bool) -> Result<()> {
             .with_min_inner_size([800.0, 500.0])
             .with_app_id("scad-viewer")
             .with_title("SCAD Viewer"),
+        // Window position and size, panel widths: ~/.local/share/scad-viewer.
+        persist_window: true,
         depth_buffer: 24,
         multisampling: 4,
         ..Default::default()

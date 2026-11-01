@@ -1108,19 +1108,7 @@ impl App {
             );
             ui.painter()
                 .rect_filled(strip.expand2(Vec2::new(0.0, 14.0)), 18.0, ui::glass());
-            let mut layer = self.layer;
-            ui.scope_builder(egui::UiBuilder::new().max_rect(strip), |ui| {
-                ui.spacing_mut().slider_width = strip.height();
-                ui.spacing_mut().slider_rail_height = 6.0;
-                ui.vertical_centered(|ui| {
-                    ui.add(
-                        egui::Slider::new(&mut layer, 0..=layer_max - 1)
-                            .vertical()
-                            .show_value(false),
-                    );
-                });
-            });
-            self.layer = layer;
+            self.layer = ui::vertical_slider(ui, strip, self.layer, layer_max);
             ui::pill(
                 ui.painter(),
                 egui::pos2(strip.center().x, strip.top() - 22.0),
@@ -1313,6 +1301,7 @@ impl App {
         let mut open = true;
         let mut action = None;
         egui::Window::new("OpenSCAD")
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .open(&mut open)
             .collapsible(false)
             .resizable(false)

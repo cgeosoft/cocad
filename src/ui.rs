@@ -91,6 +91,8 @@ pub fn theme(ctx: &egui::Context) {
     w.inactive.fg_stroke = Stroke::new(1.0_f32, Color32::from_rgb(0xc8, 0xcc, 0xd2));
     w.hovered.bg_stroke = Stroke::new(1.0_f32, Color32::from_rgb(0x44, 0x4a, 0x54));
     w.active.bg_stroke = Stroke::new(1.0_f32, ACCENT);
+    // Always dark, also when the desktop theme is light.
+    ctx.set_theme(egui::ThemePreference::Dark);
     ctx.set_visuals(v);
 
     ctx.style_mut(|s| {
@@ -262,6 +264,59 @@ pub fn segmented<T: PartialEq + Copy>(
             });
         });
     changed
+}
+
+/// Vertical slider for `0..count`, drawn centred in `rect`. Bottom is 0.
+/// Drag or click to set; the mouse wheel over it steps one value.
+pub fn vertical_slider(ui: &mut egui::Ui, rect: Rect, value: usize, count: usize) -> usize {
+    let max = count.saturating_sub(1);
+    let mut value = value.min(max);
+    let resp = ui.interact(rect, ui.id().with("vslider"), Sense::click_and_drag());
+    let track = rect.shrink2(vec2(0.0, 10.0));
+    if let Some(p) = resp
+        .interact_pointer_pos()
+        .filter(|_| resp.is_pointer_button_down_on())
+    {
+        let t = ((track.bottom() - p.y) / track.height()).clamp(0.0, 1.0);
+        value = (t * max as f32).round() as usize;
+    }
+    if resp.hovered() {
+        let wheel = ui.input(|i| i.raw_scroll_delta.y);
+        if wheel > 0.0 {
+            value = (value + 1).min(max);
+        } else if wheel < 0.0 {
+            value = value.saturating_sub(1);
+        }
+    }
+    let x = rect.center().x;
+    let t = if max == 0 {
+        1.0
+    } else {
+        value as f32 / max as f32
+    };
+    let y = track.bottom() - t * track.height();
+    let p = ui.painter();
+    p.rect_filled(
+        Rect::from_min_max(
+            egui::pos2(x - 3.0, track.top()),
+            egui::pos2(x + 3.0, track.bottom()),
+        ),
+        3.0,
+        INPUT,
+    );
+    p.rect_filled(
+        Rect::from_min_max(egui::pos2(x - 3.0, y), egui::pos2(x + 3.0, track.bottom())),
+        3.0,
+        ACCENT,
+    );
+    let active = resp.hovered() || resp.dragged();
+    p.circle_filled(
+        egui::pos2(x, y),
+        if active { 10.0 } else { 9.0 },
+        Color32::WHITE,
+    );
+    p.circle_stroke(egui::pos2(x, y), 9.0, Stroke::new(2.0_f32, ACCENT));
+    value
 }
 
 /// Filled accent button.

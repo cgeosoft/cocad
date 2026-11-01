@@ -181,14 +181,24 @@ fn extrude(s: &Sliced) -> Extrusions {
         indices: Vec::new(),
         layer_ends: Vec::new(),
     };
-    let hw = s.line_width * 0.5;
+    // Slightly narrower than the line width, so neighbour lines show a seam.
+    let hw = s.line_width * 0.45;
     let pack = |n: Vec3| {
         let n = n.normalize_or_zero() * 127.0;
         [n.x as i8, n.y as i8, n.z as i8, 0]
     };
+    // Rounded cross-section: (across, down, normal across, normal up).
+    // `across` is in half widths from the centre line, `down` in layer heights.
+    const PROFILE: [(f32, f32, f32, f32); 5] = [
+        (1.0, 0.85, 1.0, -0.1),
+        (0.8, 0.2, 0.75, 0.65),
+        (0.0, 0.0, 0.0, 1.0),
+        (-0.8, 0.2, -0.75, 0.65),
+        (-1.0, 0.85, -1.0, -0.1),
+    ];
     for layer in &s.layers {
         let top = layer.z;
-        let bot = layer.z - layer.height * 0.85;
+        let h = layer.height;
         for p in &layer.paths {
             let c = kind_color(p.kind).map(|x| (x * 255.0) as u8);
             let col = [c[0], c[1], c[2], 255];
@@ -202,51 +212,22 @@ fn extrude(s: &Sliced) -> Extrusions {
                 }
                 // Extend by half a width so corners join without gaps.
                 let (a, b) = (a - d * hw, b + d * hw);
-                let side = d.perp() * hw;
-                let v3 = |q: glam::Vec2, z: f32| [q.x, q.y, z];
-                let left = Vec3::new(side.x, side.y, 0.0).normalize();
-                let faces: [([[f32; 3]; 4], Vec3); 3] = [
-                    (
-                        [
-                            v3(a + side, top),
-                            v3(a - side, top),
-                            v3(b - side, top),
-                            v3(b + side, top),
-                        ],
-                        Vec3::Z,
-                    ),
-                    (
-                        [
-                            v3(a + side, top),
-                            v3(b + side, top),
-                            v3(b + side, bot),
-                            v3(a + side, bot),
-                        ],
-                        left + Vec3::Z * 0.35,
-                    ),
-                    (
-                        [
-                            v3(b - side, top),
-                            v3(a - side, top),
-                            v3(a - side, bot),
-                            v3(b - side, bot),
-                        ],
-                        -left + Vec3::Z * 0.35,
-                    ),
-                ];
-                for (quad, normal) in faces {
-                    let base = out.vertices.len() as u32;
-                    let nrm = pack(normal);
-                    out.vertices
-                        .extend(quad.iter().map(|&pos| PathVertex { pos, nrm, col }));
-                    out.indices.extend_from_slice(&[
-                        base,
-                        base + 1,
-                        base + 2,
-                        base,
-                        base + 2,
-                        base + 3,
-                    ]);
+                let left = d.perp();
+                let base = out.vertices.len() as u32;
+                for end in [a, b] {
+                    for &(across, down, na, nu) in &PROFILE {
+                        let q = end + left * (across * hw);
+                        let nrm = pack(Vec3::new(left.x * na, left.y * na, nu));
+                        out.vertices.push(PathVertex {
+                            pos: [q.x, q.y, top - down * h],
+                            nrm,
+                            col,
+                        });
+                    }
+                }
+                for k in 0..4u32 {
+                    let (a0, a1, b0, b1) = (base + k, base + k + 1, base + 5 + k, base + 5 + k + 1);
+                    out.indices.extend_from_slice(&[a0, b0, b1, a0, b1, a1]);
                 }
             }
         }

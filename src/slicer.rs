@@ -122,40 +122,25 @@ pub fn slice(mesh: &Mesh, s: &Settings) -> Sliced {
     }
 
     let n = cuts.len();
-    let layers: Vec<Layer> = std::thread::scope(|scope| {
-        let threads = std::thread::available_parallelism()
-            .map(|n| n.get())
-            .unwrap_or(4)
-            .min(16);
-        let chunk = n.div_ceil(threads).max(1);
-        let handles: Vec<_> = (0..n)
-            .step_by(chunk)
-            .map(|start| {
-                let (cuts, buckets, tops) = (&cuts, &buckets, &tops);
-                scope.spawn(move || {
-                    (start..(start + chunk).min(n))
-                        .map(|li| {
-                            let loops = cut(mesh, &buckets[li], cuts[li]);
-                            let solid =
-                                li < s.solid_layers as usize || li + (s.solid_layers as usize) >= n;
-                            Layer {
-                                z: b.min.z + tops[li],
-                                height: if li == 0 {
-                                    tops[0]
-                                } else {
-                                    tops[li] - tops[li - 1]
-                                },
-                                paths: toolpaths(&loops, li, solid, s),
-                            }
-                        })
-                        .collect::<Vec<_>>()
-                })
-            })
-            .collect();
-        handles
-            .into_iter()
-            .flat_map(|h| h.join().unwrap())
-            .collect()
+    // Stage 1: outlines and walls of every layer.
+    let geo: Vec<(Vec<Vec<Vec2>>, Vec<Path>, Vec<Vec<Vec2>>)> = par_map(n, |li| {
+        let loops = cut(mesh, &buckets[li], cuts[li]);
+        let (walls, inner) = walls(&loops, s);
+        (loops, walls, inner)
+    });
+    // Stage 2: infill. Skin goes where the layers above or below have no material.
+    let layers: Vec<Layer> = par_map(n, |li| {
+        let mut paths = geo[li].1.clone();
+        paths.extend(infill(&geo, li, s));
+        Layer {
+            z: b.min.z + tops[li],
+            height: if li == 0 {
+                tops[0]
+            } else {
+                tops[li] - tops[li - 1]
+            },
+            paths,
+        }
     });
 
     let mut stats = Stats {
@@ -333,7 +318,30 @@ fn offset(p: &[Vec2], d: f32) -> Option<Vec<Vec2>> {
     Some(out)
 }
 
-fn toolpaths(loops: &[Vec<Vec2>], layer: usize, solid: bool, s: &Settings) -> Vec<Path> {
+/// Runs `f` for 0..n on all cores and keeps the order.
+fn par_map<T: Send>(n: usize, f: impl Fn(usize) -> T + Sync) -> Vec<T> {
+    let threads = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4)
+        .min(16);
+    let chunk = n.div_ceil(threads).max(1);
+    std::thread::scope(|scope| {
+        let f = &f;
+        let handles: Vec<_> = (0..n)
+            .step_by(chunk)
+            .map(|start| {
+                scope.spawn(move || (start..(start + chunk).min(n)).map(f).collect::<Vec<_>>())
+            })
+            .collect();
+        handles
+            .into_iter()
+            .flat_map(|h| h.join().unwrap())
+            .collect()
+    })
+}
+
+/// Wall loops, and the region inside the walls that gets infill.
+fn walls(loops: &[Vec<Vec2>], s: &Settings) -> (Vec<Path>, Vec<Vec<Vec2>>) {
     let lw = s.line_width;
     let mut paths = Vec::new();
     let mut inner: Vec<Vec<Vec2>> = loops.to_vec();
@@ -342,12 +350,13 @@ fn toolpaths(loops: &[Vec<Vec2>], layer: usize, solid: bool, s: &Settings) -> Ve
         let mut next = Vec::new();
         for lp in loops {
             if let Some(o) = offset(lp, d) {
+                let kind = if w == 0 {
+                    Kind::OuterWall
+                } else {
+                    Kind::InnerWall
+                };
                 paths.push(Path {
-                    kind: if w == 0 {
-                        Kind::OuterWall
-                    } else {
-                        Kind::InnerWall
-                    },
+                    kind,
                     pts: o,
                     closed: true,
                 });
@@ -358,44 +367,43 @@ fn toolpaths(loops: &[Vec<Vec2>], layer: usize, solid: bool, s: &Settings) -> Ve
         }
         inner = next;
     }
-
-    let density = if solid { 1.0 } else { s.infill };
-    if density > 0.0 && !inner.is_empty() {
-        let spacing = lw / density.clamp(0.01, 1.0);
-        let angle = if layer % 2 == 0 { 45f32 } else { -45f32 }.to_radians();
-        let kind = if solid { Kind::Solid } else { Kind::Infill };
-        for seg in hatch(&inner, angle, spacing) {
-            paths.push(Path {
-                kind,
-                pts: seg.to_vec(),
-                closed: false,
-            });
-        }
-    }
-    paths
+    (paths, inner)
 }
 
-/// Parallel lines at `angle`, clipped to the region (even-odd rule).
-fn hatch(loops: &[Vec<Vec2>], angle: f32, spacing: f32) -> Vec<[Vec2; 2]> {
-    let rot = Vec2::from_angle(-angle);
-    let back = Vec2::from_angle(angle);
-    let r: Vec<Vec<Vec2>> = loops
-        .iter()
-        .map(|l| l.iter().map(|p| rot.rotate(*p)).collect())
-        .collect();
-    let (mut ymin, mut ymax) = (f32::MAX, f32::MIN);
-    for p in r.iter().flatten() {
-        ymin = ymin.min(p.y);
-        ymax = ymax.max(p.y);
+/// Loops turned by an angle, with the y range of each loop.
+struct Shape {
+    loops: Vec<(Vec<Vec2>, f32, f32)>,
+}
+
+impl Shape {
+    fn new(loops: &[Vec<Vec2>], rot: Vec2) -> Shape {
+        Shape {
+            loops: loops
+                .iter()
+                .map(|l| {
+                    let r: Vec<Vec2> = l.iter().map(|p| rot.rotate(*p)).collect();
+                    let (lo, hi) = r.iter().fold((f32::MAX, f32::MIN), |(lo, hi), p| {
+                        (lo.min(p.y), hi.max(p.y))
+                    });
+                    (r, lo, hi)
+                })
+                .collect(),
+        }
     }
-    let mut out = Vec::new();
-    // Lines sit on a fixed grid so they line up from layer to layer.
-    let mut k = (ymin / spacing).ceil();
-    let mut xs = Vec::new();
-    while k * spacing <= ymax {
-        let y = k * spacing;
-        xs.clear();
-        for lp in &r {
+
+    fn y_range(&self) -> (f32, f32) {
+        self.loops.iter().fold((f32::MAX, f32::MIN), |(lo, hi), l| {
+            (lo.min(l.1), hi.max(l.2))
+        })
+    }
+
+    /// Inside intervals on the line at `y` (even-odd rule), sorted.
+    fn scan(&self, y: f32) -> Vec<(f32, f32)> {
+        let mut xs = Vec::new();
+        for (lp, lo, hi) in &self.loops {
+            if y < *lo || y > *hi {
+                continue;
+            }
             let n = lp.len();
             for i in 0..n {
                 let (a, b) = (lp[i], lp[(i + 1) % n]);
@@ -405,17 +413,113 @@ fn hatch(loops: &[Vec<Vec2>], angle: f32, spacing: f32) -> Vec<[Vec2; 2]> {
             }
         }
         xs.sort_by(f32::total_cmp);
-        for pair in xs.chunks_exact(2) {
-            if pair[1] - pair[0] > 1e-3 {
-                out.push([
-                    back.rotate(Vec2::new(pair[0], y)),
-                    back.rotate(Vec2::new(pair[1], y)),
-                ]);
-            }
+        xs.chunks_exact(2)
+            .map(|p| (p[0], p[1]))
+            .filter(|(a, b)| b > a)
+            .collect()
+    }
+}
+
+fn intersect(a: &[(f32, f32)], b: &[(f32, f32)]) -> Vec<(f32, f32)> {
+    let (mut i, mut j, mut out) = (0, 0, Vec::new());
+    while i < a.len() && j < b.len() {
+        let (lo, hi) = (a[i].0.max(b[j].0), a[i].1.min(b[j].1));
+        if hi > lo {
+            out.push((lo, hi));
         }
-        k += 1.0;
+        if a[i].1 < b[j].1 { i += 1 } else { j += 1 }
     }
     out
+}
+
+fn subtract(a: &[(f32, f32)], b: &[(f32, f32)]) -> Vec<(f32, f32)> {
+    let mut out = Vec::new();
+    for &(mut lo, hi) in a {
+        for &(blo, bhi) in b {
+            if bhi <= lo || blo >= hi {
+                continue;
+            }
+            if blo > lo {
+                out.push((lo, blo));
+            }
+            lo = lo.max(bhi);
+        }
+        if hi > lo {
+            out.push((lo, hi));
+        }
+    }
+    out
+}
+
+/// Sparse infill and top/bottom skin for layer `li`. A spot is skin when one
+/// of the `solid_layers` layers above or below has no material there.
+fn infill(
+    geo: &[(Vec<Vec<Vec2>>, Vec<Path>, Vec<Vec<Vec2>>)],
+    li: usize,
+    s: &Settings,
+) -> Vec<Path> {
+    let inner = &geo[li].2;
+    if inner.is_empty() {
+        return Vec::new();
+    }
+    let lw = s.line_width;
+    let angle = if li % 2 == 0 { 45f32 } else { -45f32 }.to_radians();
+    let (rot, back) = (Vec2::from_angle(-angle), Vec2::from_angle(angle));
+    let cur = Shape::new(inner, rot);
+
+    // The neighbour layers; a missing one (past the model) means no material.
+    let k = s.solid_layers as usize;
+    let mut open = false;
+    let mut near = Vec::new();
+    for d in 1..=k {
+        for j in [li.checked_sub(d), Some(li + d).filter(|&j| j < geo.len())] {
+            match j {
+                Some(j) => near.push(Shape::new(&geo[j].0, rot)),
+                None => open = true,
+            }
+        }
+    }
+    // Intervals at `y` that have material in all neighbour layers.
+    let core = |y: f32, cur: &[(f32, f32)]| -> Vec<(f32, f32)> {
+        if open {
+            return Vec::new();
+        }
+        near.iter()
+            .fold(cur.to_vec(), |acc, sh| intersect(&acc, &sh.scan(y)))
+    };
+
+    let mut paths = Vec::new();
+    let mut emit = |kind: Kind, y: f32, (a, b): (f32, f32)| {
+        if b - a > lw * 0.3 {
+            paths.push(Path {
+                kind,
+                pts: vec![back.rotate(Vec2::new(a, y)), back.rotate(Vec2::new(b, y))],
+                closed: false,
+            });
+        }
+    };
+    let (ymin, ymax) = cur.y_range();
+    // Lines sit on fixed grids so they line up from layer to layer.
+    let mut y = (ymin / lw).ceil() * lw;
+    while y <= ymax {
+        let c = cur.scan(y);
+        for iv in subtract(&c, &core(y, &c)) {
+            emit(Kind::Solid, y, iv);
+        }
+        y += lw;
+    }
+    if s.infill > 0.0 {
+        let spacing = lw / s.infill.clamp(0.01, 1.0);
+        let mut y = (ymin / spacing).ceil() * spacing;
+        while y <= ymax {
+            let c = cur.scan(y);
+            for iv in core(y, &c) {
+                emit(Kind::Infill, y, iv);
+            }
+            y += spacing;
+        }
+    }
+    paths
 }
 
 #[cfg(test)]
@@ -444,24 +548,28 @@ mod tests {
         assert!(r.stats.grams > 0.5 && r.stats.grams < 1.24);
     }
 
+    fn square(x0: f32, y0: f32, x1: f32, y1: f32) -> Vec<Vec2> {
+        vec![
+            Vec2::new(x0, y0),
+            Vec2::new(x1, y0),
+            Vec2::new(x1, y1),
+            Vec2::new(x0, y1),
+        ]
+    }
+
     #[test]
     fn hole_gets_walls_and_no_infill() {
-        let outer = vec![
-            Vec2::ZERO,
-            Vec2::new(20., 0.),
-            Vec2::new(20., 20.),
-            Vec2::new(0., 20.),
-        ];
-        let hole = vec![
-            Vec2::new(5., 5.),
-            Vec2::new(5., 15.),
-            Vec2::new(15., 15.),
-            Vec2::new(15., 5.),
-        ];
-        let paths = toolpaths(&[outer, hole], 0, true, &Settings::default());
-        let outer_walls = paths.iter().filter(|p| p.kind == Kind::OuterWall).count();
-        assert_eq!(outer_walls, 2);
-        for p in paths.iter().filter(|p| p.kind == Kind::Solid) {
+        let outer = square(0., 0., 20., 20.);
+        let mut hole = square(5., 5., 15., 15.);
+        hole.reverse();
+        let s = Settings::default();
+        let (walls, inner) = walls(&[outer.clone(), hole.clone()], &s);
+        assert_eq!(
+            walls.iter().filter(|p| p.kind == Kind::OuterWall).count(),
+            2
+        );
+        let geo = vec![(vec![outer, hole], walls, inner)];
+        for p in infill(&geo, 0, &s) {
             let mid = (p.pts[0] + p.pts[1]) * 0.5;
             assert!(
                 !(mid.x > 5.5 && mid.x < 14.5 && mid.y > 5.5 && mid.y < 14.5),
@@ -471,14 +579,44 @@ mod tests {
     }
 
     #[test]
-    fn hatch_fills_square() {
-        let sq = vec![
-            Vec2::ZERO,
-            Vec2::new(10., 0.),
-            Vec2::new(10., 10.),
-            Vec2::new(0., 10.),
-        ];
-        let lines = hatch(&[sq], 0.0, 1.0);
-        assert_eq!(lines.len(), 10);
+    fn intervals() {
+        let a = [(0.0, 10.0), (20.0, 30.0)];
+        let b = [(5.0, 25.0)];
+        assert_eq!(intersect(&a, &b), [(5.0, 10.0), (20.0, 25.0)]);
+        assert_eq!(subtract(&a, &b), [(0.0, 5.0), (25.0, 30.0)]);
+    }
+
+    /// A 20 mm block with a 10 mm deep pocket: the pocket floor must get top skin.
+    #[test]
+    fn pocket_floor_gets_top_skin() {
+        let s = Settings::default();
+        let outer = square(0., 0., 20., 20.);
+        let mut pocket = square(5., 5., 15., 15.);
+        pocket.reverse();
+        // 20 layers: 0..9 solid block, 10..19 with the pocket.
+        let layer = |with_pocket: bool| {
+            let loops = if with_pocket {
+                vec![outer.clone(), pocket.clone()]
+            } else {
+                vec![outer.clone()]
+            };
+            let (w, inner) = walls(&loops, &s);
+            (loops, w, inner)
+        };
+        let geo: Vec<_> = (0..20).map(|i| layer(i >= 10)).collect();
+        let in_pocket = |p: &Path| {
+            let m = (p.pts[0] + p.pts[1]) * 0.5;
+            m.x > 6.0 && m.x < 14.0 && m.y > 6.0 && m.y < 14.0
+        };
+        // Layer 9 is the pocket floor: solid under the pocket.
+        let floor = infill(&geo, 9, &s);
+        assert!(floor.iter().any(|p| p.kind == Kind::Solid && in_pocket(p)));
+        assert!(!floor.iter().any(|p| p.kind == Kind::Infill && in_pocket(p)));
+        // Layer 4 is deep inside: sparse only.
+        let mid = infill(&geo, 4, &s);
+        assert!(mid.iter().all(|p| p.kind == Kind::Infill));
+        // Layer 15 is beside the pocket, far from the top: sparse only.
+        let wall = infill(&geo, 14, &s);
+        assert!(wall.iter().all(|p| p.kind == Kind::Infill));
     }
 }

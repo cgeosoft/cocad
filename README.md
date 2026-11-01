@@ -8,7 +8,8 @@ status: in-progress
 tags: [openscad, 3d-printing, viewer, slicer, rust, egui]
 started: 2026-11-01
 dates_from: "first commit date"
-version: "0.1.5"
+version: "0.1.6"
+showcase: true
 ---
 
 # SCAD Viewer
@@ -27,11 +28,12 @@ OpenSCAD does the geometry. SCAD Viewer runs the `openscad` CLI in the backgroun
 - Auto reload when the `.scad` file changes on disk. Edited values stay.
 - Export: binary STL, 3MF (with parameters in the metadata), STEP AP214.
 - STEP export merges coplanar triangles into planar faces. A closed mesh becomes one `FACETED_BREP` solid.
-- Slice preview: layers, outer and inner walls, sparse and solid infill, drawn as solid strands at line width and layer height. Layer slider, time, length and weight.
+- Slice preview: layers, outer and inner walls, sparse infill, and top and bottom skin, drawn as rounded strands at line width and layer height. Layer slider, time, length and weight.
 - Mesh check: size, volume, triangle count, open edges. Back faces show in purple.
 - CLI for batch export and slicing.
+- The window position and size, and the panel widths, are kept between runs (`~/.local/share/scad-viewer/app.ron`).
 
-The slicer is for preview only. It has no travel moves, supports, bridges or real top-surface detection. It does not write G-code.
+The slicer is for preview only. Skin goes on each area that has no material in one of the top/bottom layers above or below it. It has no travel moves, supports or bridges, and it does not write G-code.
 
 ## Stack
 
@@ -79,7 +81,7 @@ scripts/build.sh --debug    # debug build
 
 ```bash
 scripts/package-deb.sh
-sudo apt install ./dist/scad-viewer_0.1.5_amd64.deb
+sudo apt install ./dist/scad-viewer_0.1.6_amd64.deb
 ```
 
 ## Usage
