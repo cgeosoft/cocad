@@ -106,6 +106,7 @@ pub struct App {
     wireframe: bool,
     grid: bool,
     show_log: bool,
+    themed: bool,
     /// Parameter sets in `<model>.json`.
     sets: Vec<String>,
     sets_file: PathBuf,
@@ -125,7 +126,7 @@ pub struct App {
 
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>, file: Option<PathBuf>, slice: bool) -> App {
-        ui::theme(&cc.egui_ctx);
+        ui::fonts(&cc.egui_ctx);
         let renderer = cc.gl.as_ref().and_then(|gl| match Renderer::new(gl) {
             Ok(r) => Some(Arc::new(Mutex::new(r))),
             Err(e) => {
@@ -167,6 +168,7 @@ impl App {
             wireframe: false,
             grid: true,
             show_log: false,
+            themed: false,
             sets: Vec::new(),
             sets_file: PathBuf::new(),
             active_set: None,
@@ -434,7 +436,7 @@ impl App {
             // Brand and file.
             let (r, _) = ui.allocate_exact_size(Vec2::splat(22.0), egui::Sense::hover());
             ui.painter().rect_filled(r, 6.0, ui::ACCENT);
-            ui.painter().rect_filled(r.shrink(6.0), 2.0, ui::PANEL);
+            ui.painter().rect_filled(r.shrink(6.0), 2.0, ui::c().panel);
             ui.label(RichText::new("SCAD Viewer").size(16.0).strong());
             if let Some(f) = &self.file {
                 let name = f
@@ -442,7 +444,7 @@ impl App {
                     .unwrap_or_default()
                     .to_string_lossy()
                     .into_owned();
-                ui.label(RichText::new(name).color(ui::DIM))
+                ui.label(RichText::new(name).color(ui::c().dim))
                     .on_hover_text(f.display().to_string());
             }
             ui.add_space(12.0);
@@ -479,12 +481,26 @@ impl App {
                 {
                     self.start_render();
                 }
-                ui.label(RichText::new("Auto").color(ui::DIM));
+                ui.label(RichText::new("Auto").color(ui::c().dim));
                 ui::toggle(ui, &mut self.auto_render)
                     .on_hover_text("Render when a parameter changes");
                 ui.add_space(8.0);
                 if ui.add(ui::ghost("Console", self.show_log)).clicked() {
                     self.show_log = !self.show_log;
+                }
+                let next = if ui::is_dark() { "light" } else { "dark" };
+                if ui
+                    .add(ui::ghost(
+                        if ui::is_dark() { "Light" } else { "Dark" },
+                        false,
+                    ))
+                    .on_hover_text(format!(
+                        "Switch to the {next} theme. Settings has System too."
+                    ))
+                    .clicked()
+                {
+                    self.cfg.theme = next.into();
+                    let _ = self.cfg.save();
                 }
                 if ui
                     .add(ui::ghost("Settings", self.cfg_edit.is_some()))
@@ -753,7 +769,7 @@ impl App {
                     } else {
                         "Delete"
                     };
-                    let b = egui::Button::new(RichText::new(text).color(ui::DANGER))
+                    let b = egui::Button::new(RichText::new(text).color(ui::c().danger))
                         .fill(Color32::TRANSPARENT)
                         .corner_radius(8);
                     if ui
@@ -976,8 +992,7 @@ impl App {
 
         // Background gradient.
         let mut bg = egui::Mesh::default();
-        let top = Color32::from_rgb(0x26, 0x29, 0x30);
-        let bottom = Color32::from_rgb(0x0e, 0x0f, 0x12);
+        let [top, bottom] = ui::c().view;
         bg.colored_vertex(rect.left_top(), top);
         bg.colored_vertex(rect.right_top(), top);
         bg.colored_vertex(rect.right_bottom(), bottom);
@@ -1022,6 +1037,7 @@ impl App {
             let (mesh, mesh_rev) = (self.mesh.clone(), self.mesh_rev);
             let (sliced, slice_rev) = (self.sliced.clone(), self.slice_rev);
             let bounds = self.info.as_ref().map(|i| i.bounds);
+            let dark = ui::is_dark();
             let r = r.clone();
             let cb = egui::PaintCallback {
                 rect,
@@ -1034,7 +1050,7 @@ impl App {
                         min: Vec3::splat(-50.0),
                         max: Vec3::splat(50.0),
                     });
-                    r.set_grid(gl, b.min, b.max);
+                    r.set_grid(gl, b.min, b.max, dark);
                     r.paint(gl, &view);
                 })),
             };
@@ -1045,7 +1061,7 @@ impl App {
                 egui::Align2::CENTER_CENTER,
                 "OpenGL renderer not available",
                 egui::FontId::proportional(16.0),
-                ui::DANGER,
+                ui::c().danger,
             );
         }
 
@@ -1132,7 +1148,7 @@ impl App {
                 egui::Align2::LEFT_TOP,
                 &format!("      Rendering with OpenSCAD   {t:.1} s"),
                 font.clone(),
-                ui::TEXT,
+                ui::c().text,
                 ui::glass(),
             );
             let c = egui::pos2(r.left() + 20.0, r.center().y);
@@ -1193,7 +1209,7 @@ impl App {
                 egui::Align2::LEFT_BOTTOM,
                 &lines.join("\n"),
                 font.clone(),
-                ui::DIM,
+                ui::c().dim,
                 ui::glass(),
             );
             if i.open_edges > 0 {
@@ -1225,7 +1241,7 @@ impl App {
                 egui::Align2::CENTER_BOTTOM,
                 &msg,
                 font,
-                ui::TEXT,
+                ui::c().text,
                 ui::glass(),
             );
             ui.ctx().request_repaint_after(Duration::from_millis(200));
@@ -1300,13 +1316,23 @@ impl App {
         };
         let mut open = true;
         let mut action = None;
-        egui::Window::new("OpenSCAD")
+        egui::Window::new("Settings")
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .open(&mut open)
             .collapsible(false)
             .resizable(false)
             .default_width(460.0)
             .show(ctx, |ui| {
+                ui::section(ui, "Appearance");
+                let mut theme: &str = match edit.theme.as_str() {
+                    "dark" => "dark",
+                    "light" => "light",
+                    _ => "system",
+                };
+                ui::segmented(ui, &mut theme, &[("system", "System"), ("dark", "Dark"), ("light", "Light")]);
+                edit.theme = theme.to_string();
+                ui.add_space(8.0);
+                ui::section(ui, "OpenSCAD");
                 egui::Grid::new("cfg").num_columns(2).spacing([10.0, 8.0]).show(ui, |ui| {
                     ui.label("Binary");
                     ui.horizontal(|ui| {
@@ -1365,6 +1391,15 @@ impl App {
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        let dark = match self.cfg.theme.as_str() {
+            "dark" => true,
+            "light" => false,
+            _ => ctx.system_theme().is_none_or(|t| t == egui::Theme::Dark),
+        };
+        if dark != ui::is_dark() || !self.themed {
+            ui::apply(ctx, dark);
+            self.themed = true;
+        }
         self.poll(ctx);
         self.shortcuts(ctx);
         let title = match &self.file {
@@ -1376,12 +1411,12 @@ impl eframe::App for App {
         };
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
 
-        let line = egui::Stroke::new(1.0_f32, ui::LINE);
+        let line = egui::Stroke::new(1.0_f32, ui::c().line);
         egui::TopBottomPanel::top("top")
             .exact_height(60.0)
             .frame(
                 egui::Frame::NONE
-                    .fill(ui::BG)
+                    .fill(ui::c().bg)
                     .inner_margin(egui::Margin::symmetric(18, 0))
                     .stroke(line),
             )
@@ -1393,7 +1428,7 @@ impl eframe::App for App {
                 .default_height(160.0)
                 .frame(
                     egui::Frame::NONE
-                        .fill(ui::BG)
+                        .fill(ui::c().bg)
                         .inner_margin(egui::Margin::same(16))
                         .stroke(line),
                 )
@@ -1408,12 +1443,12 @@ impl eframe::App for App {
                             } else {
                                 &self.log
                             };
-                            ui.label(RichText::new(text).monospace().color(ui::DIM));
+                            ui.label(RichText::new(text).monospace().color(ui::c().dim));
                         });
                 });
         }
         let side = egui::Frame::NONE
-            .fill(ui::PANEL)
+            .fill(ui::c().panel)
             .inner_margin(egui::Margin::same(18))
             .stroke(line);
         egui::SidePanel::left("params")
@@ -1528,7 +1563,7 @@ fn param_row(ui: &mut egui::Ui, p: &mut Param) -> bool {
             }
             if changed
                 && ui
-                    .add(egui::Button::new(RichText::new("↺").color(ui::DIM)).frame(false))
+                    .add(egui::Button::new(RichText::new("↺").color(ui::c().dim)).frame(false))
                     .on_hover_text(format!("Reset to {}", p.default.to_scad()))
                     .clicked()
             {

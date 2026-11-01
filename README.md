@@ -8,7 +8,7 @@ status: in-progress
 tags: [openscad, 3d-printing, viewer, slicer, rust, egui]
 started: 2026-11-01
 dates_from: "first commit date"
-version: "0.1.6"
+version: "0.1.7"
 showcase: true
 ---
 
@@ -31,6 +31,7 @@ OpenSCAD does the geometry. SCAD Viewer runs the `openscad` CLI in the backgroun
 - Slice preview: layers, outer and inner walls, sparse infill, and top and bottom skin, drawn as rounded strands at line width and layer height. Layer slider, time, length and weight.
 - Mesh check: size, volume, triangle count, open edges. Back faces show in purple.
 - CLI for batch export and slicing.
+- Dark and light themes. **System** follows the desktop. The top bar has a quick Dark/Light switch; Settings has all three.
 - The window position and size, and the panel widths, are kept between runs (`~/.local/share/scad-viewer/app.ron`).
 
 The slicer is for preview only. Skin goes on each area that has no material in one of the top/bottom layers above or below it. It has no travel moves, supports or bridges, and it does not write G-code.
@@ -49,7 +50,7 @@ The slicer is for preview only. Skin goes on each area that has no material in o
 | `src/main.rs` | CLI and window start |
 | `src/app.rs` | egui application: panels, camera, jobs |
 | `src/render.rs` | OpenGL shaders and buffers |
-| `src/ui.rs` | Theme, cards, pills, switch, segmented control |
+| `src/ui.rs` | Dark and light palettes, cards, pills, switch, sliders, segmented control |
 | `src/params.rs` | Customizer parameter parser |
 | `src/presets.rs` | Parameter sets (OpenSCAD `.json` format) |
 | `src/openscad.rs` | Runs `openscad` and reads the STL |
@@ -81,7 +82,7 @@ scripts/build.sh --debug    # debug build
 
 ```bash
 scripts/package-deb.sh
-sudo apt install ./dist/scad-viewer_0.1.6_amd64.deb
+sudo apt install ./dist/scad-viewer_0.1.7_amd64.deb
 ```
 
 ## Usage
@@ -98,7 +99,8 @@ scad-viewer --slice model.scad
 | Wheel | Zoom |
 | Double click, `F` | Fit the model |
 | `F5` | Render now |
-| Settings button | OpenSCAD binary, arguments, Manifold |
+| Settings button | Theme (System, Dark, Light), OpenSCAD binary, arguments, Manifold |
+| Dark / Light button | Switch the theme |
 | `W` | Wireframe |
 | `S` | Model or slice view |
 | Up / Down, PgUp / PgDn | Change the slice layer |

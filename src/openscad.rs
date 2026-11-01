@@ -25,6 +25,8 @@ pub struct Config {
     pub args: String,
     /// Add `--backend=manifold` when the binary supports it.
     pub manifold: bool,
+    /// UI theme: "system", "dark" or "light".
+    pub theme: String,
 }
 
 impl Default for Config {
@@ -33,6 +35,7 @@ impl Default for Config {
             binary: String::new(),
             args: String::new(),
             manifold: true,
+            theme: "system".into(),
         }
     }
 }
@@ -63,6 +66,7 @@ impl Config {
                         "openscad" => c.binary = v,
                         "openscad_args" => c.args = v,
                         "manifold" => c.manifold = v != "false",
+                        "theme" => c.theme = v,
                         _ => {}
                     }
                 }
@@ -77,8 +81,8 @@ impl Config {
         std::fs::write(
             &path,
             format!(
-                "openscad = {}\nopenscad_args = {}\nmanifold = {}\n",
-                self.binary, self.args, self.manifold
+                "openscad = {}\nopenscad_args = {}\nmanifold = {}\ntheme = {}\n",
+                self.binary, self.args, self.manifold, self.theme
             ),
         )?;
         Ok(())

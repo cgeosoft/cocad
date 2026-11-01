@@ -5,18 +5,73 @@ use eframe::egui::{
     Stroke, TextStyle, vec2,
 };
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 pub const ACCENT: Color32 = Color32::from_rgb(0xff, 0x93, 0x00);
-pub const ACCENT_DIM: Color32 = Color32::from_rgb(0x8a, 0x52, 0x08);
-pub const BG: Color32 = Color32::from_rgb(0x0f, 0x11, 0x14);
-pub const PANEL: Color32 = Color32::from_rgb(0x15, 0x17, 0x1b);
-pub const CARD: Color32 = Color32::from_rgb(0x1c, 0x1f, 0x24);
-pub const INPUT: Color32 = Color32::from_rgb(0x26, 0x2a, 0x31);
-pub const INPUT_HOVER: Color32 = Color32::from_rgb(0x2f, 0x34, 0x3c);
-pub const LINE: Color32 = Color32::from_rgb(0x2a, 0x2e, 0x35);
-pub const TEXT: Color32 = Color32::from_rgb(0xe8, 0xea, 0xed);
-pub const DIM: Color32 = Color32::from_rgb(0x8d, 0x93, 0x9c);
-pub const DANGER: Color32 = Color32::from_rgb(0xff, 0x6b, 0x6b);
+
+/// Colors of one theme.
+pub struct Palette {
+    pub bg: Color32,
+    pub panel: Color32,
+    pub card: Color32,
+    pub input: Color32,
+    pub input_hover: Color32,
+    pub line: Color32,
+    pub text: Color32,
+    pub dim: Color32,
+    pub danger: Color32,
+    pub selection: Color32,
+    pub glass: Color32,
+    /// Viewport gradient, top and bottom.
+    pub view: [Color32; 2],
+}
+
+const DARK: Palette = Palette {
+    bg: Color32::from_rgb(0x0f, 0x11, 0x14),
+    panel: Color32::from_rgb(0x15, 0x17, 0x1b),
+    card: Color32::from_rgb(0x1c, 0x1f, 0x24),
+    input: Color32::from_rgb(0x26, 0x2a, 0x31),
+    input_hover: Color32::from_rgb(0x2f, 0x34, 0x3c),
+    line: Color32::from_rgb(0x2a, 0x2e, 0x35),
+    text: Color32::from_rgb(0xe8, 0xea, 0xed),
+    dim: Color32::from_rgb(0x8d, 0x93, 0x9c),
+    danger: Color32::from_rgb(0xff, 0x6b, 0x6b),
+    selection: Color32::from_rgb(0x8a, 0x52, 0x08),
+    glass: Color32::from_rgba_premultiplied(0x12, 0x14, 0x17, 215),
+    view: [
+        Color32::from_rgb(0x26, 0x29, 0x30),
+        Color32::from_rgb(0x0e, 0x0f, 0x12),
+    ],
+};
+
+const LIGHT: Palette = Palette {
+    bg: Color32::from_rgb(0xff, 0xff, 0xff),
+    panel: Color32::from_rgb(0xf6, 0xf7, 0xf9),
+    card: Color32::from_rgb(0xff, 0xff, 0xff),
+    input: Color32::from_rgb(0xec, 0xee, 0xf2),
+    input_hover: Color32::from_rgb(0xe1, 0xe4, 0xea),
+    line: Color32::from_rgb(0xe2, 0xe5, 0xea),
+    text: Color32::from_rgb(0x1c, 0x1f, 0x24),
+    dim: Color32::from_rgb(0x6b, 0x72, 0x80),
+    danger: Color32::from_rgb(0xd0, 0x3b, 0x3b),
+    selection: Color32::from_rgb(0xff, 0xd8, 0xa6),
+    glass: Color32::from_rgba_premultiplied(0xf5, 0xf6, 0xf8, 230),
+    view: [
+        Color32::from_rgb(0xf2, 0xf4, 0xf7),
+        Color32::from_rgb(0xc9, 0xcf, 0xd8),
+    ],
+};
+
+static IS_DARK: AtomicBool = AtomicBool::new(true);
+
+pub fn is_dark() -> bool {
+    IS_DARK.load(Ordering::Relaxed)
+}
+
+/// The palette of the current theme.
+pub fn c() -> &'static Palette {
+    if is_dark() { &DARK } else { &LIGHT }
+}
 
 /// System UI fonts to try, in order. The egui fonts stay as fallback for symbols.
 const FONTS: &[&str] = &[
@@ -26,7 +81,8 @@ const FONTS: &[&str] = &[
     "/usr/share/fonts/opentype/cantarell/Cantarell-VF.otf",
 ];
 
-pub fn theme(ctx: &egui::Context) {
+/// Loads the UI font. Call once.
+pub fn fonts(ctx: &egui::Context) {
     let mut fonts = egui::FontDefinitions::default();
     if let Some(bytes) = FONTS.iter().find_map(|p| std::fs::read(p).ok()) {
         fonts
@@ -39,30 +95,39 @@ pub fn theme(ctx: &egui::Context) {
             .insert(0, "ui".into());
     }
     ctx.set_fonts(fonts);
+}
 
+/// Applies the dark or light theme.
+pub fn apply(ctx: &egui::Context, dark: bool) {
+    IS_DARK.store(dark, Ordering::Relaxed);
+    let p = c();
     let r = |n: u8| CornerRadius::same(n);
-    let mut v = egui::Visuals::dark();
-    v.panel_fill = PANEL;
-    v.window_fill = CARD;
-    v.window_stroke = Stroke::new(1.0_f32, LINE);
+    let mut v = if dark {
+        egui::Visuals::dark()
+    } else {
+        egui::Visuals::light()
+    };
+    v.panel_fill = p.panel;
+    v.window_fill = p.card;
+    v.window_stroke = Stroke::new(1.0_f32, p.line);
     v.window_corner_radius = r(14);
     v.menu_corner_radius = r(10);
     v.window_shadow = egui::Shadow {
         offset: [0, 10],
         blur: 30,
         spread: 0,
-        color: Color32::from_black_alpha(140),
+        color: Color32::from_black_alpha(if dark { 140 } else { 40 }),
     };
     v.popup_shadow = egui::Shadow {
         offset: [0, 6],
         blur: 18,
         spread: 0,
-        color: Color32::from_black_alpha(120),
+        color: Color32::from_black_alpha(if dark { 120 } else { 35 }),
     };
-    v.extreme_bg_color = INPUT;
-    v.faint_bg_color = CARD;
-    v.override_text_color = Some(TEXT);
-    v.selection.bg_fill = ACCENT_DIM;
+    v.extreme_bg_color = p.input;
+    v.faint_bg_color = p.card;
+    v.override_text_color = Some(p.text);
+    v.selection.bg_fill = p.selection;
     v.selection.stroke = Stroke::new(1.0_f32, ACCENT);
     v.hyperlink_color = ACCENT;
     v.slider_trailing_fill = true;
@@ -70,29 +135,46 @@ pub fn theme(ctx: &egui::Context) {
     v.striped = false;
 
     let w = &mut v.widgets;
-    w.noninteractive.bg_fill = CARD;
-    w.noninteractive.weak_bg_fill = CARD;
-    w.noninteractive.bg_stroke = Stroke::new(1.0_f32, LINE);
-    w.noninteractive.fg_stroke = Stroke::new(1.0_f32, TEXT);
+    w.noninteractive.bg_fill = p.card;
+    w.noninteractive.weak_bg_fill = p.card;
+    w.noninteractive.bg_stroke = Stroke::new(1.0_f32, p.line);
+    w.noninteractive.fg_stroke = Stroke::new(1.0_f32, p.text);
     w.noninteractive.corner_radius = r(8);
     for (s, fill) in [
-        (&mut w.inactive, INPUT),
-        (&mut w.hovered, INPUT_HOVER),
-        (&mut w.active, INPUT_HOVER),
-        (&mut w.open, INPUT_HOVER),
+        (&mut w.inactive, p.input),
+        (&mut w.hovered, p.input_hover),
+        (&mut w.active, p.input_hover),
+        (&mut w.open, p.input_hover),
     ] {
         s.bg_fill = fill;
         s.weak_bg_fill = fill;
         s.bg_stroke = Stroke::NONE;
         s.corner_radius = r(8);
         s.expansion = 0.0;
-        s.fg_stroke = Stroke::new(1.5_f32, TEXT);
+        s.fg_stroke = Stroke::new(1.5_f32, p.text);
     }
-    w.inactive.fg_stroke = Stroke::new(1.0_f32, Color32::from_rgb(0xc8, 0xcc, 0xd2));
-    w.hovered.bg_stroke = Stroke::new(1.0_f32, Color32::from_rgb(0x44, 0x4a, 0x54));
+    w.inactive.fg_stroke = Stroke::new(
+        1.0_f32,
+        if dark {
+            Color32::from_rgb(0xc8, 0xcc, 0xd2)
+        } else {
+            Color32::from_rgb(0x3a, 0x40, 0x48)
+        },
+    );
+    w.hovered.bg_stroke = Stroke::new(
+        1.0_f32,
+        if dark {
+            Color32::from_rgb(0x44, 0x4a, 0x54)
+        } else {
+            Color32::from_rgb(0xc4, 0xc9, 0xd1)
+        },
+    );
     w.active.bg_stroke = Stroke::new(1.0_f32, ACCENT);
-    // Always dark, also when the desktop theme is light.
-    ctx.set_theme(egui::ThemePreference::Dark);
+    ctx.set_theme(if dark {
+        egui::ThemePreference::Dark
+    } else {
+        egui::ThemePreference::Light
+    });
     ctx.set_visuals(v);
 
     ctx.style_mut(|s| {
@@ -124,7 +206,7 @@ pub fn theme(ctx: &egui::Context) {
 /// Rounded surface with padding.
 pub fn card<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
     egui::Frame::NONE
-        .fill(CARD)
+        .fill(c().card)
         .corner_radius(12)
         .inner_margin(Margin::same(16))
         .show(ui, |ui| {
@@ -139,7 +221,7 @@ pub fn section(ui: &mut egui::Ui, text: &str) {
     ui.label(
         RichText::new(text.to_uppercase())
             .size(11.5)
-            .color(DIM)
+            .color(c().dim)
             .extra_letter_spacing(1.2),
     );
 }
@@ -149,7 +231,7 @@ pub fn group_header(ui: &mut egui::Ui, title: &str, open: bool, edited: usize) -
     let w = ui.available_width();
     let (rect, resp) = ui.allocate_exact_size(vec2(w, 20.0), Sense::click());
     let p = ui.painter();
-    let color = if resp.hovered() { TEXT } else { DIM };
+    let color = if resp.hovered() { c().text } else { c().dim };
     let galley = p.layout_no_wrap(title.to_uppercase(), FontId::proportional(11.5), color);
     p.galley(
         egui::pos2(rect.left(), rect.center().y - galley.size().y / 2.0),
@@ -187,7 +269,7 @@ pub fn group_header(ui: &mut egui::Ui, title: &str, open: bool, edited: usize) -
 }
 
 pub fn dim(text: impl Into<String>) -> RichText {
-    RichText::new(text).color(DIM).size(12.5)
+    RichText::new(text).color(c().dim).size(12.5)
 }
 
 /// Text on a rounded translucent background, drawn straight on a painter.
@@ -209,7 +291,7 @@ pub fn pill(
 }
 
 pub fn glass() -> Color32 {
-    Color32::from_rgba_unmultiplied(0x15, 0x17, 0x1b, 215)
+    c().glass
 }
 
 /// iOS-style switch.
@@ -221,7 +303,11 @@ pub fn toggle(ui: &mut egui::Ui, on: &mut bool) -> egui::Response {
         resp.mark_changed();
     }
     let t = ui.ctx().animate_bool_responsive(resp.id, *on);
-    let off = if resp.hovered() { INPUT_HOVER } else { INPUT };
+    let off = if resp.hovered() {
+        c().input_hover
+    } else {
+        c().input
+    };
     let fill = lerp_color(off, ACCENT, t);
     let p = ui.painter();
     p.rect_filled(rect, 11.0, fill);
@@ -243,7 +329,7 @@ pub fn segmented<T: PartialEq + Copy>(
 ) -> bool {
     let mut changed = false;
     egui::Frame::NONE
-        .fill(INPUT)
+        .fill(c().input)
         .corner_radius(10)
         .inner_margin(Margin::same(3))
         .show(ui, |ui| {
@@ -251,7 +337,8 @@ pub fn segmented<T: PartialEq + Copy>(
             ui.horizontal(|ui| {
                 for (v, label) in options {
                     let sel = *value == *v;
-                    let text = RichText::new(*label).color(if sel { Color32::BLACK } else { DIM });
+                    let text =
+                        RichText::new(*label).color(if sel { Color32::BLACK } else { c().dim });
                     let b = egui::Button::new(text)
                         .fill(if sel { ACCENT } else { Color32::TRANSPARENT })
                         .corner_radius(8)
@@ -302,7 +389,7 @@ pub fn vertical_slider(ui: &mut egui::Ui, rect: Rect, value: usize, count: usize
             egui::pos2(x + 3.0, track.bottom()),
         ),
         3.0,
-        INPUT,
+        c().input,
     );
     p.rect_filled(
         Rect::from_min_max(egui::pos2(x - 3.0, y), egui::pos2(x + 3.0, track.bottom())),
@@ -328,7 +415,7 @@ pub fn primary(text: &str) -> egui::Button<'static> {
 
 /// Borderless icon-ish button for toolbars.
 pub fn ghost(text: &str, active: bool) -> egui::Button<'static> {
-    let color = if active { ACCENT } else { TEXT };
+    let color = if active { ACCENT } else { c().text };
     egui::Button::new(RichText::new(text.to_string()).color(color))
         .fill(if active {
             Color32::from_rgba_unmultiplied(0xff, 0x93, 0x00, 28)

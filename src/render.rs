@@ -324,7 +324,7 @@ pub struct Renderer {
     layer_ends: Vec<i32>,
     mesh_rev: u64,
     slice_rev: u64,
-    grid_key: (i32, i32, i32, i32),
+    grid_key: (i32, i32, i32, i32, bool),
 }
 
 unsafe fn program(
@@ -377,7 +377,7 @@ impl Renderer {
                 layer_ends: Vec::new(),
                 mesh_rev: u64::MAX,
                 slice_rev: u64::MAX,
-                grid_key: (0, 0, 0, -1),
+                grid_key: (0, 0, 0, -1, true),
             })
         }
     }
@@ -437,7 +437,7 @@ impl Renderer {
     }
 
     /// Bed grid around the model: 10 mm cells, brighter every 50 mm, X/Y axes.
-    pub fn set_grid(&mut self, gl: &glow::Context, min: Vec3, max: Vec3) {
+    pub fn set_grid(&mut self, gl: &glow::Context, min: Vec3, max: Vec3, dark: bool) {
         let snap = |v: f32, up: bool| -> i32 {
             let s = if up {
                 (v / 10.0).ceil()
@@ -452,12 +452,13 @@ impl Renderer {
             snap(min.y - pad, false),
             snap(max.x + pad, true),
             snap(max.y + pad, true),
+            dark,
         );
         if key == self.grid_key {
             return;
         }
         self.grid_key = key;
-        let (x0, y0, x1, y1) = key;
+        let (x0, y0, x1, y1, _) = key;
         let z = min.z.min(0.0) - 0.01;
         let mut d = Vec::new();
         let mut line = |a: [f32; 2], b: [f32; 2], c: [f32; 3]| {
@@ -465,8 +466,11 @@ impl Renderer {
                 a[0], a[1], z, c[0], c[1], c[2], b[0], b[1], z, c[0], c[1], c[2],
             ]);
         };
-        let minor = [0.22, 0.23, 0.26];
-        let major = [0.34, 0.35, 0.39];
+        let (minor, major) = if dark {
+            ([0.22, 0.23, 0.26], [0.34, 0.35, 0.39])
+        } else {
+            ([0.70, 0.72, 0.76], [0.55, 0.58, 0.63])
+        };
         for x in (x0..=x1).step_by(10) {
             if x != 0 {
                 line(
