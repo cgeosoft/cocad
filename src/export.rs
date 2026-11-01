@@ -198,15 +198,14 @@ fn planar_faces(mesh: &Mesh) -> Vec<Face> {
             let t = mesh.triangles[i];
             for k in 0..3 {
                 let (a, b) = (t[k], t[(k + 1) % 3]);
-                if let Some(&j) = edge_tri.get(&(b, a)) {
-                    if patch[j] == usize::MAX
-                        && normals[j].dot(sn) > 0.999_999
-                        && (plane_d(j) - sd).abs() < 1e-4
-                    {
-                        patch[j] = pid;
-                        members.push(j);
-                        stack.push(j);
-                    }
+                if let Some(&j) = edge_tri.get(&(b, a))
+                    && patch[j] == usize::MAX
+                    && normals[j].dot(sn) > 0.999_999
+                    && (plane_d(j) - sd).abs() < 1e-4
+                {
+                    patch[j] = pid;
+                    members.push(j);
+                    stack.push(j);
                 }
             }
         }

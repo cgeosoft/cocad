@@ -2,6 +2,13 @@
 name = "scad-viewer"
 version = "0.1.10"
 edition = "2024"
+description = "OpenSCAD model viewer with Customizer parameters, STL/3MF/STEP export, slice preview and photo renders"
+authors = ["Christos Georgiou <christos@cgeosoft.com>"]
+license = "MIT"
+repository = "https://github.com/cgeosoft/scad-viewer"
+readme = "README.md"
+keywords = ["openscad", "3d-printing", "cad", "viewer", "slicer"]
+categories = ["graphics", "visualization"]
 
 [dependencies]
 anyhow = "1"

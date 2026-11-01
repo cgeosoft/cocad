@@ -1,3 +1,7 @@
+// Release builds on Windows open no console window; the CLI commands attach
+// to the console that started them.
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+
 mod app;
 mod export;
 mod mesh;
@@ -42,6 +46,13 @@ Settings are saved in $XDG_CONFIG_HOME/scad-viewer/config (Settings window in th
 
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    #[cfg(windows)]
+    if args.first().is_some_and(|a| {
+        a.starts_with('-') && a != "--slice" && a != "--photo"
+            || matches!(a.as_str(), "params" | "export" | "slice" | "photo")
+    }) {
+        attach_console();
+    }
     match args.first().map(String::as_str) {
         Some("-h" | "--help") => {
             print!("{USAGE}");
@@ -309,4 +320,16 @@ fn cmd_photo(args: &[String]) -> Result<()> {
         out.display()
     );
     Ok(())
+}
+
+#[cfg(windows)]
+fn attach_console() {
+    unsafe extern "system" {
+        fn AttachConsole(process_id: u32) -> i32;
+    }
+    const ATTACH_PARENT_PROCESS: u32 = u32::MAX;
+    // SAFETY: plain Win32 call without pointers; failure only means no console.
+    unsafe {
+        AttachConsole(ATTACH_PARENT_PROCESS);
+    }
 }

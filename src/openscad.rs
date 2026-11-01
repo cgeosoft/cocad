@@ -40,19 +40,24 @@ impl Default for Config {
     }
 }
 
-/// `$XDG_CONFIG_HOME/scad-viewer`, else `~/.config/scad-viewer`.
+/// Per-user settings folder: `%APPDATA%\scad-viewer` on Windows,
+/// `~/Library/Application Support/scad-viewer` on macOS, else
+/// `$XDG_CONFIG_HOME/scad-viewer` or `~/.config/scad-viewer`.
 pub fn config_dir() -> Option<PathBuf> {
-    let base = std::env::var_os("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))?;
+    let base = if cfg!(windows) {
+        PathBuf::from(std::env::var_os("APPDATA")?)
+    } else if cfg!(target_os = "macos") {
+        PathBuf::from(std::env::var_os("HOME")?).join("Library/Application Support")
+    } else {
+        std::env::var_os("XDG_CONFIG_HOME")
+            .map(PathBuf::from)
+            .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))?
+    };
     Some(base.join("scad-viewer"))
 }
 
 fn config_path() -> Option<PathBuf> {
-    let base = std::env::var_os("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))?;
-    Some(base.join("scad-viewer").join("config"))
+    Some(config_dir()?.join("config"))
 }
 
 impl Config {
@@ -88,14 +93,13 @@ impl Config {
         Ok(())
     }
 
-    /// The binary to run: `$OPENSCAD`, else the saved value, else
-    /// `openscad-nightly` when it is on the PATH, else `openscad`.
+    /// The binary to run: `$OPENSCAD`, else the saved value, else the
+    /// first OpenSCAD found (nightly first), else `openscad`.
     pub fn binary(&self) -> String {
         match std::env::var("OPENSCAD") {
             Ok(b) if !b.is_empty() => b,
             _ if !self.binary.trim().is_empty() => self.binary.trim().to_string(),
-            _ if on_path("openscad-nightly") => "openscad-nightly".into(),
-            _ => "openscad".into(),
+            _ => detected().to_string(),
         }
     }
 
@@ -113,9 +117,73 @@ impl Config {
     }
 }
 
-fn on_path(name: &str) -> bool {
-    std::env::var_os("PATH")
-        .is_some_and(|paths| std::env::split_paths(&paths).any(|d| d.join(name).is_file()))
+/// Looks for OpenSCAD once: on the PATH, then in the usual install places.
+fn detected() -> &'static str {
+    static FOUND: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    FOUND.get_or_init(|| {
+        // On Windows openscad.com is the console build: it reports errors.
+        let exts: &[&str] = if cfg!(windows) {
+            &[".com", ".exe"]
+        } else {
+            &[""]
+        };
+        let paths: Vec<PathBuf> = std::env::var_os("PATH")
+            .map(|p| std::env::split_paths(&p).collect())
+            .unwrap_or_default();
+        for name in ["openscad-nightly", "openscad"] {
+            for dir in &paths {
+                for ext in exts {
+                    if dir.join(format!("{name}{ext}")).is_file() {
+                        return format!("{name}{ext}");
+                    }
+                }
+            }
+        }
+        let known: &[&str] = if cfg!(windows) {
+            &[
+                r"C:\Program Files\OpenSCAD (Nightly)\openscad.com",
+                r"C:\Program Files\OpenSCAD\openscad.com",
+                r"C:\Program Files\OpenSCAD (Nightly)\openscad.exe",
+                r"C:\Program Files\OpenSCAD\openscad.exe",
+            ]
+        } else if cfg!(target_os = "macos") {
+            &[
+                "/Applications/OpenSCAD (Nightly).app/Contents/MacOS/OpenSCAD",
+                "/Applications/OpenSCAD.app/Contents/MacOS/OpenSCAD",
+                "/opt/homebrew/bin/openscad",
+                "/usr/local/bin/openscad",
+            ]
+        } else {
+            &[]
+        };
+        known
+            .iter()
+            .find(|p| Path::new(p).is_file())
+            .map_or_else(|| "openscad".to_string(), |p| p.to_string())
+    })
+}
+
+/// A command that does not open a console window on Windows.
+fn command(binary: &str) -> Command {
+    #[allow(unused_mut)]
+    let mut cmd = Command::new(binary);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    cmd
+}
+
+/// Absolute path without the Windows `\\?\` prefix, which OpenSCAD cannot read.
+pub fn absolute(p: &Path) -> std::io::Result<PathBuf> {
+    let full = p.canonicalize()?;
+    let text = full.to_string_lossy();
+    Ok(match text.strip_prefix(r"\\?\") {
+        Some(rest) if !rest.starts_with("UNC") => PathBuf::from(rest),
+        _ => full,
+    })
 }
 
 #[derive(Clone, Debug, Default)]
@@ -133,7 +201,7 @@ pub fn probe(binary: &str) -> Probe {
         return p.clone();
     }
     let run = |arg: &str| {
-        Command::new(binary)
+        command(binary)
             .arg(arg)
             .stdin(Stdio::null())
             .output()
@@ -184,9 +252,9 @@ pub fn render(
     let log_path = out.with_extension("log");
     let log_file = std::fs::File::create(&log_path)?;
 
-    let file = file.canonicalize()?;
+    let file = absolute(file)?;
     let binary = cfg.binary();
-    let mut cmd = Command::new(&binary);
+    let mut cmd = command(&binary);
     cmd.args(cfg.args())
         .arg("-o")
         .arg(&out)

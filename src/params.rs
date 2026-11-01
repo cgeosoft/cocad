@@ -164,12 +164,12 @@ pub fn parse(src: &str) -> Vec<Param> {
 
         // Track braces and block comments outside of strings.
         let code = strip_line_comment(line);
-        if let Some(start) = find_outside_string(code, "/*") {
-            if find_outside_string(&code[start..], "*/").is_none() {
-                depth += brace_delta(&code[..start]);
-                in_block = true;
-                continue;
-            }
+        if let Some(start) = find_outside_string(code, "/*")
+            && find_outside_string(&code[start..], "*/").is_none()
+        {
+            depth += brace_delta(&code[..start]);
+            in_block = true;
+            continue;
         }
         depth += brace_delta(code);
         if depth < 0 {

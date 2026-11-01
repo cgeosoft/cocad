@@ -123,7 +123,7 @@ pub fn slice(mesh: &Mesh, s: &Settings) -> Sliced {
 
     let n = cuts.len();
     // Stage 1: outlines and walls of every layer.
-    let geo: Vec<(Vec<Vec<Vec2>>, Vec<Path>, Vec<Vec<Vec2>>)> = par_map(n, |li| {
+    let geo: Vec<LayerGeo> = par_map(n, |li| {
         let loops = cut(mesh, &buckets[li], cuts[li]);
         let (walls, inner) = walls(&loops, s);
         (loops, walls, inner)
@@ -318,6 +318,9 @@ fn offset(p: &[Vec2], d: f32) -> Option<Vec<Vec2>> {
     Some(out)
 }
 
+/// One layer before infill: outline loops, wall paths, region inside the walls.
+type LayerGeo = (Vec<Vec<Vec2>>, Vec<Path>, Vec<Vec<Vec2>>);
+
 /// Runs `f` for 0..n on all cores and keeps the order.
 fn par_map<T: Send>(n: usize, f: impl Fn(usize) -> T + Sync) -> Vec<T> {
     let threads = std::thread::available_parallelism()
@@ -413,7 +416,9 @@ impl Shape {
             }
         }
         xs.sort_by(f32::total_cmp);
-        xs.chunks_exact(2)
+        xs.as_chunks::<2>()
+            .0
+            .iter()
             .map(|p| (p[0], p[1]))
             .filter(|(a, b)| b > a)
             .collect()
@@ -453,17 +458,13 @@ fn subtract(a: &[(f32, f32)], b: &[(f32, f32)]) -> Vec<(f32, f32)> {
 
 /// Sparse infill and top/bottom skin for layer `li`. A spot is skin when one
 /// of the `solid_layers` layers above or below has no material there.
-fn infill(
-    geo: &[(Vec<Vec<Vec2>>, Vec<Path>, Vec<Vec<Vec2>>)],
-    li: usize,
-    s: &Settings,
-) -> Vec<Path> {
+fn infill(geo: &[LayerGeo], li: usize, s: &Settings) -> Vec<Path> {
     let inner = &geo[li].2;
     if inner.is_empty() {
         return Vec::new();
     }
     let lw = s.line_width;
-    let angle = if li % 2 == 0 { 45f32 } else { -45f32 }.to_radians();
+    let angle = if li.is_multiple_of(2) { 45f32 } else { -45f32 }.to_radians();
     let (rot, back) = (Vec2::from_angle(-angle), Vec2::from_angle(angle));
     let cur = Shape::new(inner, rot);
 

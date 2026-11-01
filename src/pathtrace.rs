@@ -319,11 +319,11 @@ impl Scene {
             if node.count > 0 {
                 for i in node.start..node.start + node.count {
                     let tri = &self.tris[i as usize];
-                    if let Some((t, u, v)) = intersect(tri, o, d) {
-                        if t < t_best {
-                            t_best = t;
-                            best = Some((t, i as usize, u, v));
-                        }
+                    if let Some((t, u, v)) = intersect(tri, o, d)
+                        && t < t_best
+                    {
+                        t_best = t;
+                        best = Some((t, i as usize, u, v));
                     }
                 }
             } else if sp + 2 <= stack.len() {
@@ -615,11 +615,12 @@ fn flat_faces(mesh: &Mesh, face_n: &[Vec3]) -> Vec<bool> {
             k += 1;
             let t = mesh.triangles[i];
             for e in 0..3 {
-                if let Some(&j) = edge_face.get(&(t[(e + 1) % 3], t[e])) {
-                    if group[j] == usize::MAX && face_n[j].dot(face_n[seed]) > 0.99999 {
-                        group[j] = seed;
-                        members.push(j);
-                    }
+                if let Some(&j) = edge_face.get(&(t[(e + 1) % 3], t[e]))
+                    && group[j] == usize::MAX
+                    && face_n[j].dot(face_n[seed]) > 0.99999
+                {
+                    group[j] = seed;
+                    members.push(j);
                 }
             }
         }

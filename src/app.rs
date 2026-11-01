@@ -295,10 +295,10 @@ impl App {
         };
         let mut fresh = params::parse(&src);
         for p in &mut fresh {
-            if let Some(old) = self.params.iter().find(|o| o.name == p.name && o.changed()) {
-                if std::mem::discriminant(&old.value) == std::mem::discriminant(&p.value) {
-                    p.value = old.value.clone();
-                }
+            if let Some(old) = self.params.iter().find(|o| o.name == p.name && o.changed())
+                && std::mem::discriminant(&old.value) == std::mem::discriminant(&p.value)
+            {
+                p.value = old.value.clone();
             }
         }
         self.params = fresh;
@@ -355,64 +355,64 @@ impl App {
     }
 
     fn poll(&mut self, ctx: &egui::Context) {
-        if let Some(job) = &self.job {
-            if let Ok(r) = job.rx.try_recv() {
-                self.job = None;
+        if let Some(job) = &self.job
+            && let Ok(r) = job.rx.try_recv()
+        {
+            self.job = None;
+            match r {
+                Ok(out) => {
+                    let m = out.mesh;
+                    self.info = m.bounds().map(|bounds| MeshInfo {
+                        bounds,
+                        volume: m.volume().abs(),
+                        open_edges: m.open_edges(),
+                    });
+                    self.mesh = Some(Arc::new(m));
+                    self.mesh_rev += 1;
+                    self.log = out.log;
+                    self.last_time = Some(out.elapsed);
+                    self.error = None;
+                    if self.fit_pending {
+                        self.fit();
+                        self.fit_pending = false;
+                    }
+                    if self.mode == Mode::Slice {
+                        self.start_slice();
+                    }
+                }
+                Err(e) if e == "cancelled" => {}
+                Err(e) => {
+                    self.log = e.clone();
+                    self.error = Some(e.lines().next().unwrap_or("").to_string());
+                }
+            }
+        }
+        if let Some(rx) = &self.slice_job
+            && let Ok((rev, sliced, t)) = rx.try_recv()
+        {
+            self.slice_job = None;
+            if rev == self.mesh_rev {
+                let first = self.sliced.is_none();
+                let n = sliced.layers.len();
+                self.sliced = Some(Arc::new(sliced));
+                self.slice_rev += 1;
+                self.slice_time = Some(t);
+                if first || self.layer >= n {
+                    self.layer = n.saturating_sub(1);
+                }
+            }
+        }
+        if let Some(rx) = &self.export_rx
+            && let Ok(r) = rx.try_recv()
+        {
+            self.export_rx = None;
+            self.toast = Some((
                 match r {
-                    Ok(out) => {
-                        let m = out.mesh;
-                        self.info = m.bounds().map(|bounds| MeshInfo {
-                            bounds,
-                            volume: m.volume().abs(),
-                            open_edges: m.open_edges(),
-                        });
-                        self.mesh = Some(Arc::new(m));
-                        self.mesh_rev += 1;
-                        self.log = out.log;
-                        self.last_time = Some(out.elapsed);
-                        self.error = None;
-                        if self.fit_pending {
-                            self.fit();
-                            self.fit_pending = false;
-                        }
-                        if self.mode == Mode::Slice {
-                            self.start_slice();
-                        }
-                    }
-                    Err(e) if e == "cancelled" => {}
-                    Err(e) => {
-                        self.log = e.clone();
-                        self.error = Some(e.lines().next().unwrap_or("").to_string());
-                    }
-                }
-            }
-        }
-        if let Some(rx) = &self.slice_job {
-            if let Ok((rev, sliced, t)) = rx.try_recv() {
-                self.slice_job = None;
-                if rev == self.mesh_rev {
-                    let first = self.sliced.is_none();
-                    let n = sliced.layers.len();
-                    self.sliced = Some(Arc::new(sliced));
-                    self.slice_rev += 1;
-                    self.slice_time = Some(t);
-                    if first || self.layer >= n {
-                        self.layer = n.saturating_sub(1);
-                    }
-                }
-            }
-        }
-        if let Some(rx) = &self.export_rx {
-            if let Ok(r) = rx.try_recv() {
-                self.export_rx = None;
-                self.toast = Some((
-                    match r {
-                        Ok(p) => format!("Saved {}", p.display()),
-                        Err(e) => format!("Export failed: {e}"),
-                    },
-                    Instant::now(),
-                ));
-            }
+                    Ok(p) => format!("Saved {}", p.display()),
+                    Err(e) => format!("Export failed: {e}"),
+                },
+                Instant::now(),
+            ));
         }
 
         // Watch the file for outside edits.
@@ -1786,11 +1786,10 @@ impl App {
                     ui.label("Binary");
                     ui.horizontal(|ui| {
                         ui.add(egui::TextEdit::singleline(&mut edit.binary).hint_text("auto: openscad-nightly, else openscad").desired_width(300.0));
-                        if ui.button("Browse").clicked() {
-                            if let Some(p) = rfd::FileDialog::new().pick_file() {
+                        if ui.button("Browse").clicked()
+                            && let Some(p) = rfd::FileDialog::new().pick_file() {
                                 edit.binary = p.display().to_string();
                             }
-                        }
                     });
                     ui.end_row();
                     ui.label("Extra arguments");
