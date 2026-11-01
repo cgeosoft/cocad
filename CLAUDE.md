@@ -8,7 +8,7 @@ SCAD Viewer (cgeosoft). A Rust desktop app that shows OpenSCAD models, edits Cus
 
 - `README.md` - write-up with front matter (see the NoteBook skill `project-repo`, `frontmatter.md`).
 - `src/` - the app. See the layout table in `README.md`.
-- `examples/demo-box.scad` - test model that uses every Customizer widget.
+- `examples/` - test models. `scripts/test-models.sh` runs them all. `// expect: error` marks models that must fail.
 - `scripts/build.sh` - tests and release build. `scripts/package-deb.sh` - `.deb` in `dist/`.
 - `packaging/` - desktop entry, icon and MIME type for the `.deb`.
 

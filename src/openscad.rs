@@ -230,7 +230,13 @@ pub fn render(
     let _ = std::fs::remove_file(&out);
 
     if !status.success() {
-        bail!("OpenSCAD failed ({status})\n{log}");
+        // Lead with OpenSCAD's own reason when there is one.
+        let reason = log
+            .lines()
+            .find(|l| l.starts_with("ERROR") || l.contains("top level object"))
+            .map(|l| l.trim().to_string())
+            .unwrap_or_else(|| format!("OpenSCAD failed ({status})"));
+        bail!("{reason}\n{log}");
     }
     let data = match data {
         Ok(d) => d,

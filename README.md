@@ -57,7 +57,7 @@ The slicer is for preview only. Skin goes on each area that has no material in o
 | `src/mesh.rs` | Indexed mesh, STL reader, checks |
 | `src/export.rs` | STL, 3MF and STEP writers |
 | `src/slicer.rs` | Preview slicer |
-| `examples/` | Demo model with every Customizer widget |
+| `examples/` | Test models (see below) |
 | `scripts/` | Build and packaging scripts |
 | `packaging/` | Desktop entry, icon, MIME type for the `.deb` |
 
@@ -156,7 +156,26 @@ label = "Hi";          // [10]
 $fn = 64;
 ```
 
+## Test models
+
+`scripts/test-models.sh` renders every model in `examples/`, exports STL, 3MF and STEP, and slices it. Use `--release` for speed, or give model files to test only those.
+
+| Model | Tests |
+|---|---|
+| `demo-box.scad` | Every Customizer widget type, text, hull |
+| `gear.scad` | Involute teeth from polygon math, many facets |
+| `knob.scad` | rotate_extrude, ribs, D-shaft bore, text |
+| `vase.scad` | linear_extrude with twist and scale, sloped walls, 450 layers |
+| `bracket.scad` | Holes, slots, a gusset, overhangs |
+| `honeycomb-tray.scad` | Many holes per layer, thin webs, `include <lib/hex.scad>` |
+| `open-mesh.scad` | Open mesh: open-edge warning, STEP as an open shell |
+| `flat-2d.scad` | 2D only: must fail with a clear error |
+| `empty.scad` | No geometry: must fail with a clear error |
+
+Models with `// expect: error` on the first line must fail.
+
 ## Checks
 
-- `cargo test`: parser, mesh, STL round trip, STEP faces, 3MF zip, slicer.
+- `cargo test`: parser, mesh, STL round trip, STEP faces, 3MF zip, parameter sets, slicer skin.
+- `scripts/test-models.sh`: all models in `examples/` through render, export and slice.
 - The STEP export of `examples/demo-box.scad` loads in OpenCASCADE as one valid solid. Its volume is the same as the STL volume.
