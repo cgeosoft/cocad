@@ -43,10 +43,22 @@ struct PhotoSettings {
     layer_lines: bool,
     studio: pathtrace::Studio,
     samples: u32,
-    /// Render resolution as a fraction of the view.
-    scale: f32,
+    /// Output image size in pixels.
+    width: usize,
+    height: usize,
     exposure: f32,
 }
+
+const RESOLUTIONS: [(&str, usize, usize); 8] = [
+    ("HD 720p", 1280, 720),
+    ("Full HD 1080p", 1920, 1080),
+    ("QHD 1440p", 2560, 1440),
+    ("4K UHD", 3840, 2160),
+    ("Site preview 4:3", 1600, 1200),
+    ("Square 1:1", 1080, 1080),
+    ("Portrait 4:5", 1080, 1350),
+    ("Story 9:16", 1080, 1920),
+];
 
 const SWATCHES: [(&str, [u8; 3]); 8] = [
     ("Orange", [0xff, 0x93, 0x00]),
@@ -220,7 +232,8 @@ impl App {
                 layer_lines: true,
                 studio: pathtrace::Studio::Dark,
                 samples: 256,
-                scale: 1.0,
+                width: 1920,
+                height: 1080,
                 exposure: 1.0,
             },
             photo_job: None,
@@ -547,20 +560,6 @@ impl App {
                 ui.add_space(8.0);
                 if ui.add(ui::ghost("Console", self.show_log)).clicked() {
                     self.show_log = !self.show_log;
-                }
-                let next = if ui::is_dark() { "light" } else { "dark" };
-                if ui
-                    .add(ui::ghost(
-                        if ui::is_dark() { "Light" } else { "Dark" },
-                        false,
-                    ))
-                    .on_hover_text(format!(
-                        "Switch to the {next} theme. Settings has System too."
-                    ))
-                    .clicked()
-                {
-                    self.cfg.theme = next.into();
-                    let _ = self.cfg.save();
                 }
                 if ui
                     .add(ui::ghost("Settings", self.cfg_edit.is_some()))
@@ -937,19 +936,15 @@ impl App {
         let Some(mesh) = self.mesh.clone() else {
             return;
         };
-        let ppp = ui.ctx().pixels_per_point() * self.photo.scale;
-        let size = (
-            (rect.width() * ppp) as usize,
-            (rect.height() * ppp) as usize,
-        );
-        if size.0 < 16 || size.1 < 16 {
-            return;
-        }
+        let size = (self.photo.width, self.photo.height);
+        let frame = photo_frame(rect, size);
+        // Same framing as the view: scale the field of view to the frame height.
+        let fov = 2.0 * ((Camera::FOV * 0.5).tan() * frame.height() / rect.height()).atan();
         let key = PhotoKey {
             cam: pathtrace::Camera {
                 eye: self.cam.eye(),
                 target: self.cam.target,
-                fov: Camera::FOV,
+                fov,
             },
             look: self.photo_look(),
             mesh_rev: self.mesh_rev,
@@ -1004,14 +999,50 @@ impl App {
                 ui.ctx().request_repaint_after(Duration::from_millis(120));
             }
         }
+        // Dim the view outside the frame, then draw the render into it.
+        let shade = if ui::is_dark() {
+            Color32::from_black_alpha(170)
+        } else {
+            Color32::from_black_alpha(90)
+        };
+        let p = ui.painter();
+        for r in [
+            egui::Rect::from_min_max(rect.min, egui::pos2(rect.max.x, frame.min.y)),
+            egui::Rect::from_min_max(egui::pos2(rect.min.x, frame.max.y), rect.max),
+            egui::Rect::from_min_max(
+                egui::pos2(rect.min.x, frame.min.y),
+                egui::pos2(frame.min.x, frame.max.y),
+            ),
+            egui::Rect::from_min_max(
+                egui::pos2(frame.max.x, frame.min.y),
+                egui::pos2(rect.max.x, frame.max.y),
+            ),
+        ] {
+            p.rect_filled(r, 0.0, shade);
+        }
         if let (Some((tex, _)), Some(_)) = (&self.photo_tex, &self.photo_job) {
-            ui.painter().image(
+            p.image(
                 tex.id(),
-                rect,
+                frame,
                 egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
                 Color32::WHITE,
             );
         }
+        p.rect_stroke(
+            frame,
+            0.0,
+            egui::Stroke::new(1.0_f32, ui::ACCENT.gamma_multiply(0.7)),
+            egui::StrokeKind::Outside,
+        );
+        ui::pill(
+            p,
+            egui::pos2(frame.center().x, frame.top() - 6.0),
+            egui::Align2::CENTER_BOTTOM,
+            &format!("{} × {}", size.0, size.1),
+            egui::FontId::proportional(12.5),
+            ui::c().text,
+            ui::glass(),
+        );
     }
 
     fn photo_samples(&self) -> u32 {
@@ -1091,6 +1122,12 @@ impl App {
                                 ui.allocate_exact_size(Vec2::splat(26.0), egui::Sense::click());
                             let col = Color32::from_rgb(c[0], c[1], c[2]);
                             ui.painter().circle_filled(r.center(), 12.0, col);
+                            // Outline, so black and white swatches show on both themes.
+                            ui.painter().circle_stroke(
+                                r.center(),
+                                12.0,
+                                egui::Stroke::new(1.0_f32, ui::c().line),
+                            );
                             if p.color == c {
                                 ui.painter().circle_stroke(
                                     r.center(),
@@ -1141,10 +1178,51 @@ impl App {
                 ui::card(ui, |ui| {
                     ui::section(ui, "Quality");
                     setting(ui, "Samples", &mut p.samples, 16..=2048, 16.0, "");
+                    ui.add_space(4.0);
                     ui.label("Resolution");
-                    let mut scale = if p.scale < 0.75 { 0 } else { 1 };
-                    ui::segmented(ui, &mut scale, &[(0, "Half"), (1, "Full")]);
-                    p.scale = if scale == 0 { 0.5 } else { 1.0 };
+                    let current = RESOLUTIONS
+                        .iter()
+                        .find(|r| r.1 == p.width && r.2 == p.height)
+                        .map_or("Custom".to_string(), |r| r.0.to_string());
+                    egui::ComboBox::from_id_salt("resolution")
+                        .selected_text(current)
+                        .width(ui.available_width())
+                        .show_ui(ui, |ui| {
+                            for (name, w, h) in RESOLUTIONS {
+                                let sel = p.width == w && p.height == h;
+                                if ui
+                                    .selectable_label(sel, format!("{name}   {w} × {h}"))
+                                    .clicked()
+                                {
+                                    p.width = w;
+                                    p.height = h;
+                                }
+                            }
+                        });
+                    ui.horizontal(|ui| {
+                        ui.add(
+                            egui::DragValue::new(&mut p.width)
+                                .range(64..=8192)
+                                .speed(8)
+                                .suffix(" px"),
+                        );
+                        ui.label(ui::dim("×"));
+                        ui.add(
+                            egui::DragValue::new(&mut p.height)
+                                .range(64..=8192)
+                                .speed(8)
+                                .suffix(" px"),
+                        );
+                        if ui
+                            .add(ui::ghost("Swap", false))
+                            .on_hover_text("Landscape or portrait")
+                            .clicked()
+                        {
+                            std::mem::swap(&mut p.width, &mut p.height);
+                        }
+                    });
+                    let mp = (p.width * p.height) as f32 / 1e6;
+                    ui.label(ui::dim(format!("{mp:.1} megapixels")));
                     ui.label(ui::dim(
                         "Move the view to start again. The render uses all cores.",
                     ));
@@ -1705,7 +1783,12 @@ impl App {
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        let dark = match self.cfg.theme.as_str() {
+        // The Settings window previews its theme before it is saved.
+        let theme = self
+            .cfg_edit
+            .as_ref()
+            .map_or(self.cfg.theme.as_str(), |e| e.theme.as_str());
+        let dark = match theme {
             "dark" => true,
             "light" => false,
             _ => ctx.system_theme().is_none_or(|t| t == egui::Theme::Dark),
@@ -2022,4 +2105,16 @@ fn rgb(c: [f32; 3]) -> Color32 {
 
 fn mtime(p: &std::path::Path) -> Option<SystemTime> {
     std::fs::metadata(p).and_then(|m| m.modified()).ok()
+}
+
+/// The largest rectangle with the image's aspect ratio inside the view, with a margin.
+fn photo_frame(view: egui::Rect, size: (usize, usize)) -> egui::Rect {
+    let area = view.shrink(28.0);
+    let aspect = size.0 as f32 / size.1.max(1) as f32;
+    let (w, h) = if area.width() / area.height() > aspect {
+        (area.height() * aspect, area.height())
+    } else {
+        (area.width(), area.width() / aspect)
+    };
+    egui::Rect::from_center_size(area.center(), Vec2::new(w, h))
 }

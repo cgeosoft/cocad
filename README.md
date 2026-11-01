@@ -8,7 +8,7 @@ status: in-progress
 tags: [openscad, 3d-printing, viewer, slicer, rust, egui]
 started: 2026-11-01
 dates_from: "first commit date"
-version: "0.1.8"
+version: "0.1.9"
 showcase: true
 ---
 
@@ -32,7 +32,7 @@ OpenSCAD does the geometry. SCAD Viewer runs the `openscad` CLI in the backgroun
 - Photo render: a path tracer renders the current view as a photo. Plastic material in 8 colors or any color, matte, satin or gloss finish, printed layer lines, dark or light studio. Save as PNG.
 - Mesh check: size, volume, triangle count, open edges. Back faces show in purple.
 - CLI for batch export and slicing.
-- Dark and light themes. **System** follows the desktop. The top bar has a quick Dark/Light switch; Settings has all three.
+- Dark and soft light themes. Choose System, Dark or Light in **Settings**. System follows the desktop.
 - The window position and size, and the panel widths, are kept between runs (`~/.local/share/scad-viewer/app.ron`).
 
 The slicer is for preview only. Skin goes on each area that has no material in one of the top/bottom layers above or below it. It has no travel moves, supports or bridges, and it does not write G-code.
@@ -84,7 +84,7 @@ scripts/build.sh --debug    # debug build
 
 ```bash
 scripts/package-deb.sh
-sudo apt install ./dist/scad-viewer_0.1.8_amd64.deb
+sudo apt install ./dist/scad-viewer_0.1.9_amd64.deb
 ```
 
 ## Usage
@@ -103,7 +103,6 @@ scad-viewer --photo model.scad
 | Double click, `F` | Fit the model |
 | `F5` | Render now |
 | Settings button | Theme (System, Dark, Light), OpenSCAD binary, arguments, Manifold |
-| Dark / Light button | Switch the theme |
 | `W` | Wireframe |
 | `S` | Model or slice view |
 | `P` | Photo view |
@@ -127,8 +126,9 @@ The **Photo** view path-traces the current camera view on all CPU cores. The ima
 - **Material**: 8 color swatches or a color picker. Finish: matte, satin or gloss plastic.
 - **Print layer lines**: ripples the sides at the slice layer height, so the part looks printed.
 - **Studio**: dark or light backdrop with a soft key light and floor shadows. Exposure adjusts the brightness.
-- **Quality**: samples per pixel (16 to 2048) and full or half resolution.
-- **Save PNG** writes the image at the current sample count.
+- **Quality**: samples per pixel (16 to 2048) and the image size. Presets: 720p, 1080p, 1440p, 4K, site preview 4:3 (1600 × 1200), square, portrait 4:5 and story 9:16. Width and height can also be typed, and **Swap** turns landscape into portrait.
+- The view dims everything outside the image frame, so you see what the render will show.
+- **Save PNG** writes the image at its full size and the current sample count.
 
 The `photo` CLI command renders the iso view to a PNG without the window.
 
