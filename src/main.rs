@@ -23,7 +23,11 @@ Usage:
                                                Slice and print estimates
 
 Environment:
-  OPENSCAD    OpenSCAD binary to use (default: openscad on the PATH)
+  OPENSCAD       OpenSCAD binary (overrides the saved setting; default: openscad)
+  OPENSCAD_ARGS  Extra OpenSCAD arguments (overrides the saved setting)
+
+Settings are saved in $XDG_CONFIG_HOME/scad-viewer/config (Settings window in the app).
+--backend=manifold is added when the OpenSCAD binary supports it.
 ";
 
 fn main() -> Result<()> {
@@ -116,7 +120,12 @@ fn parse_batch(args: &[String]) -> Result<Batch> {
 
 fn render(b: &Batch) -> Result<mesh::Mesh> {
     let cancel = Arc::new(AtomicBool::new(false));
-    let out = openscad::render(&b.file, &params::defines(&b.params), &cancel)?;
+    let out = openscad::render(
+        &openscad::Config::load(),
+        &b.file,
+        &params::defines(&b.params),
+        &cancel,
+    )?;
     let bb = out.mesh.bounds().unwrap();
     let s = bb.size();
     eprintln!(

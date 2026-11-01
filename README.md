@@ -92,6 +92,7 @@ scad-viewer --slice model.scad
 | Wheel | Zoom |
 | Double click, `F` | Fit the model |
 | `F5` | Render now |
+| Settings button | OpenSCAD binary, arguments, Manifold |
 | `W` | Wireframe |
 | `S` | Model or slice view |
 | Up / Down, PgUp / PgDn | Change the slice layer |
@@ -105,7 +106,15 @@ scad-viewer export model.scad -o model.3mf -D width=80 -D 'shape="square"'
 scad-viewer slice model.scad --layer-height 0.2 --infill 20 --walls 3
 ```
 
-Set `OPENSCAD` to use a different OpenSCAD binary, for example a nightly build with the Manifold backend.
+## OpenSCAD engine
+
+OpenSCAD 2021.01 (the Debian package) uses the CGAL backend. CGAL is slow on large models: `clip-on-case.scad` takes 13 s. OpenSCAD development builds have the Manifold backend, which is much faster.
+
+- Open **Settings** to set the OpenSCAD binary (for example a development AppImage) and extra arguments.
+- When the binary supports Manifold, SCAD Viewer adds `--backend=manifold`. Turn this off in Settings, or set your own `--backend` argument.
+- The settings are saved in `~/.config/scad-viewer/config`. The CLI commands use them too.
+- `$OPENSCAD` and `$OPENSCAD_ARGS` override the saved values.
+- The 3D view shows the backend after the render time.
 
 ## Customizer syntax
 

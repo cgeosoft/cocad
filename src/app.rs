@@ -105,6 +105,9 @@ pub struct App {
     wireframe: bool,
     grid: bool,
     show_log: bool,
+    cfg: openscad::Config,
+    cfg_edit: Option<openscad::Config>,
+    engine: String,
     renderer: Option<Arc<Mutex<Renderer>>>,
     toast: Option<(String, Instant)>,
     export_rx: Option<Receiver<Result<PathBuf, String>>>,
@@ -154,6 +157,9 @@ impl App {
             wireframe: false,
             grid: true,
             show_log: false,
+            cfg: openscad::Config::load(),
+            cfg_edit: None,
+            engine: String::new(),
             renderer,
             toast: None,
             export_rx: None,
@@ -216,8 +222,15 @@ impl App {
         let cancel = Arc::new(AtomicBool::new(false));
         let (tx, rx) = channel();
         let c = cancel.clone();
+        let cfg = self.cfg.clone();
+        let manifold = cfg.args().iter().any(|a| a == "--backend=manifold");
+        self.engine = if manifold {
+            "Manifold".into()
+        } else {
+            "CGAL".into()
+        };
         std::thread::spawn(move || {
-            let r = openscad::render(&file, &defines, &c).map_err(|e| e.to_string());
+            let r = openscad::render(&cfg, &file, &defines, &c).map_err(|e| e.to_string());
             let _ = tx.send(r);
         });
         self.job = Some(RenderJob {
@@ -456,6 +469,9 @@ impl App {
                 ui.checkbox(&mut self.grid, "Bed grid");
                 ui.checkbox(&mut self.show_log, "Console");
             });
+            if ui.button("⚙ Settings").clicked() {
+                self.cfg_edit = Some(self.cfg.clone());
+            }
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if let Some(f) = &self.file {
@@ -797,7 +813,11 @@ impl App {
                 lines.push(format!("⚠ {} open edges (not manifold)", i.open_edges));
             }
             if let Some(t) = self.last_time {
-                lines.push(format!("rendered in {:.2} s", t.as_secs_f32()));
+                lines.push(format!(
+                    "rendered in {:.2} s ({})",
+                    t.as_secs_f32(),
+                    self.engine
+                ));
             }
             painter.text(
                 rect.left_bottom() + Vec2::new(14.0, -12.0),
@@ -894,6 +914,75 @@ impl App {
     }
 }
 
+impl App {
+    fn settings_window(&mut self, ctx: &egui::Context) {
+        let Some(mut edit) = self.cfg_edit.take() else {
+            return;
+        };
+        let mut open = true;
+        let mut action = None;
+        egui::Window::new("OpenSCAD")
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(false)
+            .default_width(460.0)
+            .show(ctx, |ui| {
+                egui::Grid::new("cfg").num_columns(2).spacing([10.0, 8.0]).show(ui, |ui| {
+                    ui.label("Binary");
+                    ui.horizontal(|ui| {
+                        ui.add(egui::TextEdit::singleline(&mut edit.binary).hint_text("openscad").desired_width(300.0));
+                        if ui.button("Browse").clicked() {
+                            if let Some(p) = rfd::FileDialog::new().pick_file() {
+                                edit.binary = p.display().to_string();
+                            }
+                        }
+                    });
+                    ui.end_row();
+                    ui.label("Extra arguments");
+                    ui.add(egui::TextEdit::singleline(&mut edit.args).hint_text("e.g. --enable=lazy-union").desired_width(300.0));
+                    ui.end_row();
+                    ui.label("");
+                    ui.checkbox(&mut edit.manifold, "Use the Manifold backend when available");
+                    ui.end_row();
+                    let probe = openscad::probe(&edit.binary());
+                    ui.label("Found");
+                    ui.label(RichText::new(&probe.version).monospace());
+                    ui.end_row();
+                    ui.label("Manifold");
+                    if probe.manifold {
+                        ui.label(RichText::new("supported").color(ACCENT));
+                    } else {
+                        ui.label(RichText::new("not supported. Use an OpenSCAD development build (2024 or later).").weak());
+                    }
+                    ui.end_row();
+                });
+                if std::env::var_os("OPENSCAD").is_some() || std::env::var_os("OPENSCAD_ARGS").is_some() {
+                    ui.label(RichText::new("$OPENSCAD / $OPENSCAD_ARGS are set and override these values.").small().weak());
+                }
+                ui.separator();
+                ui.horizontal(|ui| {
+                    if ui.button("Save and render").clicked() {
+                        action = Some(true);
+                    }
+                    if ui.button("Cancel").clicked() {
+                        action = Some(false);
+                    }
+                });
+            });
+        match (open, action) {
+            (_, Some(true)) => {
+                if let Err(e) = edit.save() {
+                    self.toast = Some((format!("Cannot save settings: {e}"), Instant::now()));
+                }
+                self.cfg = edit;
+                self.start_render();
+            }
+            (false, _) | (_, Some(false)) => {}
+            _ => self.cfg_edit = Some(edit),
+        }
+    }
+}
+
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.poll(ctx);
@@ -908,6 +997,7 @@ impl eframe::App for App {
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
 
         egui::TopBottomPanel::top("top").show(ctx, |ui| self.top_bar(ui));
+        self.settings_window(ctx);
         if self.show_log {
             egui::TopBottomPanel::bottom("log")
                 .resizable(true)

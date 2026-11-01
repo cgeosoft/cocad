@@ -2,10 +2,11 @@
 
 use crate::mesh::{Mesh, read_stl};
 use anyhow::{Result, bail};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 pub struct RenderOutput {
@@ -14,9 +15,132 @@ pub struct RenderOutput {
     pub elapsed: Duration,
 }
 
-/// The OpenSCAD binary: `$OPENSCAD`, else `openscad` on the PATH.
-pub fn binary() -> String {
-    std::env::var("OPENSCAD").unwrap_or_else(|_| "openscad".into())
+/// How to run OpenSCAD. Saved in `$XDG_CONFIG_HOME/scad-viewer/config`.
+/// `$OPENSCAD` and `$OPENSCAD_ARGS` override the saved values.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Config {
+    /// Binary path or name. Empty means `openscad` on the PATH.
+    pub binary: String,
+    /// Extra arguments, split at whitespace.
+    pub args: String,
+    /// Add `--backend=manifold` when the binary supports it.
+    pub manifold: bool,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Config {
+            binary: String::new(),
+            args: String::new(),
+            manifold: true,
+        }
+    }
+}
+
+fn config_path() -> Option<PathBuf> {
+    let base = std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))?;
+    Some(base.join("scad-viewer").join("config"))
+}
+
+impl Config {
+    pub fn load() -> Config {
+        let mut c = Config::default();
+        if let Some(text) = config_path().and_then(|p| std::fs::read_to_string(p).ok()) {
+            for line in text.lines() {
+                if let Some((k, v)) = line.split_once('=') {
+                    let v = v.trim().to_string();
+                    match k.trim() {
+                        "openscad" => c.binary = v,
+                        "openscad_args" => c.args = v,
+                        "manifold" => c.manifold = v != "false",
+                        _ => {}
+                    }
+                }
+            }
+        }
+        c
+    }
+
+    pub fn save(&self) -> Result<()> {
+        let path = config_path().ok_or_else(|| anyhow::anyhow!("no config folder"))?;
+        std::fs::create_dir_all(path.parent().unwrap())?;
+        std::fs::write(
+            &path,
+            format!(
+                "openscad = {}\nopenscad_args = {}\nmanifold = {}\n",
+                self.binary, self.args, self.manifold
+            ),
+        )?;
+        Ok(())
+    }
+
+    /// The binary to run, after the `$OPENSCAD` override.
+    pub fn binary(&self) -> String {
+        match std::env::var("OPENSCAD") {
+            Ok(b) if !b.is_empty() => b,
+            _ if !self.binary.trim().is_empty() => self.binary.trim().to_string(),
+            _ => "openscad".into(),
+        }
+    }
+
+    /// All extra arguments, with `--backend=manifold` added when it applies.
+    pub fn args(&self) -> Vec<String> {
+        let extra = std::env::var("OPENSCAD_ARGS").unwrap_or_else(|_| self.args.clone());
+        let mut args: Vec<String> = extra.split_whitespace().map(String::from).collect();
+        if self.manifold
+            && !args.iter().any(|a| a.starts_with("--backend"))
+            && probe(&self.binary()).manifold
+        {
+            args.push("--backend=manifold".into());
+        }
+        args
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct Probe {
+    pub version: String,
+    pub manifold: bool,
+}
+
+/// Version and features of an OpenSCAD binary. Cached per binary.
+pub fn probe(binary: &str) -> Probe {
+    static CACHE: Mutex<Option<HashMap<String, Probe>>> = Mutex::new(None);
+    let mut cache = CACHE.lock().unwrap();
+    let map = cache.get_or_insert_with(HashMap::new);
+    if let Some(p) = map.get(binary) {
+        return p.clone();
+    }
+    let run = |arg: &str| {
+        Command::new(binary)
+            .arg(arg)
+            .stdin(Stdio::null())
+            .output()
+            .map(|o| {
+                String::from_utf8_lossy(&o.stdout).into_owned()
+                    + &String::from_utf8_lossy(&o.stderr)
+            })
+            .unwrap_or_default()
+    };
+    let version = run("--version")
+        .lines()
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let help = run("--help");
+    let p = Probe {
+        version: if version.is_empty() {
+            "not found".into()
+        } else {
+            version
+        },
+        manifold: help.contains("--backend") && help.to_lowercase().contains("manifold"),
+    };
+    map.insert(binary.to_string(), p.clone());
+    p
 }
 
 fn temp_stl() -> PathBuf {
@@ -30,15 +154,25 @@ fn temp_stl() -> PathBuf {
 
 /// Renders `file` with `-D` overrides. Returns early with an error when
 /// `cancel` becomes true; the OpenSCAD process is killed then.
-pub fn render(file: &Path, defines: &[String], cancel: &Arc<AtomicBool>) -> Result<RenderOutput> {
+pub fn render(
+    cfg: &Config,
+    file: &Path,
+    defines: &[String],
+    cancel: &Arc<AtomicBool>,
+) -> Result<RenderOutput> {
     let start = Instant::now();
     let out = temp_stl();
     let log_path = out.with_extension("log");
     let log_file = std::fs::File::create(&log_path)?;
 
     let file = file.canonicalize()?;
-    let mut cmd = Command::new(binary());
-    cmd.arg("-o").arg(&out).arg("--export-format").arg("binstl");
+    let binary = cfg.binary();
+    let mut cmd = Command::new(&binary);
+    cmd.args(cfg.args())
+        .arg("-o")
+        .arg(&out)
+        .arg("--export-format")
+        .arg("binstl");
     for d in defines {
         cmd.arg("-D").arg(d);
     }
@@ -53,8 +187,7 @@ pub fn render(file: &Path, defines: &[String], cancel: &Arc<AtomicBool>) -> Resu
 
     let mut child = cmd.spawn().map_err(|e| {
         anyhow::anyhow!(
-            "cannot start '{}': {e}. Install OpenSCAD or set $OPENSCAD.",
-            binary()
+            "cannot start '{binary}': {e}. Install OpenSCAD or set the binary in Settings."
         )
     })?;
 
