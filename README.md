@@ -8,7 +8,7 @@ status: in-progress
 tags: [openscad, 3d-printing, viewer, slicer, rust, egui]
 started: 2026-11-01
 dates_from: "first commit date"
-version: "0.1"
+version: "0.1.1"
 ---
 
 # SCAD Viewer
@@ -75,7 +75,7 @@ scripts/build.sh --debug    # debug build
 
 ```bash
 scripts/package-deb.sh
-sudo apt install ./dist/scad-viewer_0.1.0_amd64.deb
+sudo apt install ./dist/scad-viewer_0.1.1_amd64.deb
 ```
 
 ## Usage
