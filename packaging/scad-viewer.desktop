@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=SCAD Viewer
+GenericName=OpenSCAD Viewer
+Comment=View OpenSCAD models, edit parameters, export and preview slices
+Exec=scad-viewer %f
+Icon=scad-viewer
+Terminal=false
+Categories=Graphics;3DGraphics;Engineering;
+MimeType=application/x-openscad;
+StartupWMClass=scad-viewer
