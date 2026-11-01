@@ -3,6 +3,7 @@ mod export;
 mod mesh;
 mod openscad;
 mod params;
+mod pathtrace;
 mod presets;
 mod render;
 mod slicer;
@@ -23,6 +24,9 @@ Usage:
                                                Render and write OUT (.stl, .3mf or .step)
   scad-viewer slice FILE.scad [-P SET] [-D name=value]... [--layer-height MM] [--infill PCT] [--walls N]
                                                Slice and print estimates
+  scad-viewer photo FILE.scad -o OUT.png [-P SET] [-D name=value]... [--size WxH] [--samples N]
+                    [--color RRGGBB] [--finish matte|satin|gloss] [--studio dark|light] [--layer-lines]
+                                               Photo render (path traced) from the iso view
 
 Parameter sets:
   -P SET      Apply a saved parameter set before the -D values
@@ -50,6 +54,7 @@ fn main() -> Result<()> {
         Some("params") => cmd_params(&args[1..]),
         Some("export") => cmd_export(&args[1..]),
         Some("slice") => cmd_slice(&args[1..]),
+        Some("photo") => cmd_photo(&args[1..]),
         Some("--slice") => gui(args.get(1).map(PathBuf::from), true),
         Some(a) if a.starts_with('-') => bail!("unknown option {a}\n\n{USAGE}"),
         file => gui(file.map(PathBuf::from), false),
@@ -77,8 +82,31 @@ fn gui(file: Option<PathBuf>, slice: bool) -> Result<()> {
     .map_err(|e| anyhow::anyhow!("{e}"))
 }
 
+struct PhotoArgs {
+    size: (usize, usize),
+    samples: u32,
+    color: u32,
+    finish: String,
+    studio: String,
+    layer_lines: bool,
+}
+
+impl Default for PhotoArgs {
+    fn default() -> Self {
+        PhotoArgs {
+            size: (1600, 1200),
+            samples: 128,
+            color: 0xff9300,
+            finish: "satin".into(),
+            studio: "dark".into(),
+            layer_lines: false,
+        }
+    }
+}
+
 /// Parsed command line for the batch commands.
 struct Batch {
+    photo: PhotoArgs,
     file: PathBuf,
     out: Option<PathBuf>,
     params: Vec<params::Param>,
@@ -92,6 +120,7 @@ fn parse_batch(args: &[String]) -> Result<Batch> {
     let mut set = None;
     let mut set_file = None;
     let mut settings = slicer::Settings::default();
+    let mut photo = PhotoArgs::default();
     let mut it = args.iter();
     while let Some(a) = it.next() {
         let mut val = |name: &str| {
@@ -111,6 +140,16 @@ fn parse_batch(args: &[String]) -> Result<Batch> {
             "--walls" => settings.walls = val(a)?.parse()?,
             "--solid-layers" => settings.solid_layers = val(a)?.parse()?,
             "--speed" => settings.speed = val(a)?.parse()?,
+            "--size" => {
+                let v = val(a)?;
+                let (w, h) = v.split_once('x').context("--size needs WxH")?;
+                photo.size = (w.parse()?, h.parse()?);
+            }
+            "--samples" => photo.samples = val(a)?.parse()?,
+            "--color" => photo.color = u32::from_str_radix(val(a)?.trim_start_matches('#'), 16)?,
+            "--finish" => photo.finish = val(a)?,
+            "--studio" => photo.studio = val(a)?,
+            "--layer-lines" => photo.layer_lines = true,
             s if s.starts_with('-') => bail!("unknown option {s}"),
             s => file = Some(PathBuf::from(s)),
         }
@@ -129,6 +168,7 @@ fn parse_batch(args: &[String]) -> Result<Batch> {
         params::apply_define(&mut params, d)?;
     }
     Ok(Batch {
+        photo,
         file,
         out,
         params,
@@ -227,5 +267,45 @@ fn cmd_slice(args: &[String]) -> Result<()> {
     println!("filament    {:.2} m, {:.1} g", st.filament_m, st.grams);
     println!("print time  {:.0} min (rough)", st.seconds / 60.0);
     println!("sliced in   {} ms", t.elapsed().as_millis());
+    Ok(())
+}
+
+fn cmd_photo(args: &[String]) -> Result<()> {
+    let b = parse_batch(args)?;
+    let out = b.out.clone().context("missing -o OUT.png")?;
+    let mesh = std::sync::Arc::new(render(&b)?);
+    let p = &b.photo;
+    let look = pathtrace::Look {
+        color: pathtrace::srgb(p.color),
+        roughness: pathtrace::finish_roughness(&p.finish),
+        layer_lines: if p.layer_lines {
+            b.settings.layer_height
+        } else {
+            0.0
+        },
+        studio: if p.studio == "light" {
+            pathtrace::Studio::Light
+        } else {
+            pathtrace::Studio::Dark
+        },
+        exposure: 1.0,
+    };
+    let cam = pathtrace::iso_camera(&mesh, p.size.0 as f32 / p.size.1 as f32);
+    let t = std::time::Instant::now();
+    let job = pathtrace::Job::start(mesh, cam, look, p.size.0, p.size.1, p.samples);
+    loop {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        let f = job.frame.lock().unwrap();
+        if f.samples >= p.samples {
+            pathtrace::save_png(&out, &f)?;
+            break;
+        }
+    }
+    eprintln!(
+        "{} samples in {:.1} s, wrote {}",
+        p.samples,
+        t.elapsed().as_secs_f32(),
+        out.display()
+    );
     Ok(())
 }

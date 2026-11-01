@@ -8,6 +8,7 @@ anyhow = "1"
 bytemuck = { version = "1.25.2", features = ["derive"] }
 eframe = { version = "0.31", default-features = false, features = ["glow", "default_fonts", "x11", "wayland", "persistence"] }
 glam = "0.29"
+png = "0.17"
 rfd = { version = "0.15", default-features = false, features = ["gtk3"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 zip = { version = "2", default-features = false, features = ["deflate"] }
