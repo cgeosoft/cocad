@@ -14,9 +14,28 @@ showcase: true
 
 # SCAD Viewer
 
+[![Build](https://github.com/cgeosoft/scad-viewer/actions/workflows/build.yml/badge.svg)](https://github.com/cgeosoft/scad-viewer/actions/workflows/build.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-orange.svg)](LICENSE)
+
 SCAD Viewer opens an OpenSCAD `.scad` file and shows the model in 3D. It reads the Customizer parameters of the file and shows them as sliders, lists, check boxes and text fields. When you change a value, the model renders again. You can export the model as STL, 3MF or STEP. A simple slicer shows the layers, walls and infill, with a rough print time and filament use.
 
 OpenSCAD does the geometry. SCAD Viewer runs the `openscad` CLI in the background and reads the result.
+
+It runs on Linux, Windows and macOS.
+
+## Install
+
+1. Install OpenSCAD. A development snapshot is much faster than the 2021 release: <https://openscad.org/downloads.html#snapshots>.
+2. Download SCAD Viewer for your system from the [releases page](https://github.com/cgeosoft/scad-viewer/releases):
+
+| System | File | How to install |
+|---|---|---|
+| Debian, Ubuntu | `scad-viewer_<version>_amd64.deb` | `sudo apt install ./scad-viewer_<version>_amd64.deb` |
+| Other Linux | `scad-viewer-<version>-linux-x86_64.tar.gz` | Unpack and run `scad-viewer`. Needs GTK 3 and OpenGL. |
+| Windows | `scad-viewer-<version>-windows-x86_64.zip` | Unpack and run `scad-viewer.exe`. |
+| macOS (Apple Silicon and Intel) | `scad-viewer-<version>-macos-universal.zip` | Unpack and move **SCAD Viewer** to Applications. The app is not signed: the first time, right-click it and choose **Open**. |
+
+SCAD Viewer finds OpenSCAD on the `PATH` and in the usual install folders (`C:\Program Files\OpenSCAD*`, `/Applications/OpenSCAD*.app`, Homebrew). If it does not, set the binary in **Settings**.
 
 ## Features
 
@@ -35,7 +54,7 @@ OpenSCAD does the geometry. SCAD Viewer runs the `openscad` CLI in the backgroun
 - Status bar: render state and time, OpenSCAD version and backend, model size, triangles and volume, open edges, slice layer and estimate, photo progress, parameter set, and the Console button.
 - The header stays dark in both themes.
 - Dark and soft light themes. Choose System, Dark or Light in **Settings**. System follows the desktop.
-- The window position and size, and the panel widths, are kept between runs (`~/.local/share/scad-viewer/app.ron`).
+- The window position and size, and the panel widths, are kept between runs.
 
 The slicer is for preview only. Skin goes on each area that has no material in one of the top/bottom layers above or below it. It has no travel moves, supports or bridges, and it does not write G-code.
 
@@ -67,20 +86,40 @@ The slicer is for preview only. Skin goes on each area that has no material in o
 
 ## Build
 
-Requirements: Rust (stable), OpenSCAD, and the GTK3 and OpenGL development files.
+Requirements: Rust (stable, 1.85 or later) and OpenSCAD.
+
+- Debian and Ubuntu also need the GTK 3 and OpenGL development files:
 
 ```bash
-sudo apt install openscad libgtk-3-dev libxkbcommon-dev libgl-dev
+sudo apt install libgtk-3-dev libxkbcommon-dev libgl-dev
 ```
 
-Build and test:
+- Windows needs the Visual Studio C++ build tools. macOS needs the Xcode command line tools.
+
+Build and run:
+
+```bash
+cargo run --release -- examples/demo-box.scad
+```
+
+On Linux, the scripts build and test in one step:
 
 ```bash
 scripts/build.sh            # release build, runs the tests first
 scripts/build.sh --debug    # debug build
 ```
 
-## Debian package
+## Packages
+
+GitHub Actions (`.github/workflows/build.yml`) builds and tests on every push:
+
+- Linux: clippy, unit tests, all test models, a `.deb` and a `.tar.gz`.
+- Windows: unit tests and a `.zip` (`scripts/package-windows.ps1`).
+- macOS: unit tests and a universal `.app` in a `.zip` (`scripts/package-macos.sh`).
+
+A tag `v*` (for example `v0.2.0`) makes a GitHub release with all files attached.
+
+### Debian package
 
 `scripts/package-deb.sh` builds the release binary and writes `dist/scad-viewer_<version>_<arch>.deb`. The package installs the binary, a desktop entry, an icon, the `.scad` MIME type and the example.
 
@@ -136,12 +175,12 @@ The `photo` CLI command renders the iso view to a PNG without the window.
 
 ## OpenSCAD engine
 
-OpenSCAD 2021.01 (the Debian package) uses the CGAL backend. CGAL is slow on large models: `clip-on-case.scad` takes 13 s. OpenSCAD development builds have the Manifold backend, which is much faster.
+OpenSCAD 2021.01 (the Debian package) uses the CGAL backend. CGAL is slow on large models: a model that takes 13 s with CGAL can take 0.3 s with Manifold. OpenSCAD development builds have the Manifold backend.
 
-- With no binary set, SCAD Viewer uses `openscad-nightly` when it is on the PATH, else `openscad`.
+- With no binary set, SCAD Viewer looks for `openscad-nightly`, then `openscad`, on the PATH and in the usual install folders.
 - Open **Settings** to set the OpenSCAD binary (for example a development AppImage) and extra arguments.
 - When the binary supports Manifold, SCAD Viewer adds `--backend=manifold`. Turn this off in Settings, or set your own `--backend` argument.
-- The settings are saved in `~/.config/scad-viewer/config`. The CLI commands use them too.
+- The settings are saved in `config` in the settings folder: `~/.config/scad-viewer` (Linux), `%APPDATA%\\scad-viewer` (Windows) or `~/Library/Application Support/scad-viewer` (macOS). The CLI commands use them too.
 - `$OPENSCAD` and `$OPENSCAD_ARGS` override the saved values.
 - The 3D view shows the backend after the render time.
 
@@ -150,7 +189,7 @@ OpenSCAD 2021.01 (the Debian package) uses the CGAL backend. CGAL is slow on lar
 The **Parameter set** card at the top of the panel holds named sets of values.
 
 - The first line shows the sets file. **Open file** loads sets from any `.json` file. **New file** picks a place and name for a new sets file. It is written on the first save.
-- The app remembers the sets file for each model in `~/.config/scad-viewer/sets-files`. Without one, it uses `<model>.json` next to `<model>.scad`.
+- The app remembers the sets file for each model in `sets-files` in the settings folder. Without one, it uses `<model>.json` next to `<model>.scad`.
 - Select a set to load it. **Model defaults** sets all values back to the `.scad` defaults.
 - **Save** writes the values to the selected set. With no set selected, it asks for a name.
 - **Save as** saves the values as a new set. **Delete** removes the selected set (click two times).
@@ -198,3 +237,7 @@ Models with `// expect: error` on the first line must fail.
 - `cargo test`: parser, mesh, STL round trip, STEP faces, 3MF zip, parameter sets, slicer skin.
 - `scripts/test-models.sh`: all models in `examples/` through render, export and slice.
 - The STEP export of `examples/demo-box.scad` loads in OpenCASCADE as one valid solid. Its volume is the same as the STL volume.
+
+## License
+
+MIT. See [LICENSE](LICENSE).

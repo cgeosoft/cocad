@@ -6,17 +6,21 @@ SCAD Viewer (cgeosoft). A Rust desktop app that shows OpenSCAD models, edits Cus
 
 ## Layout
 
-- `README.md` - write-up with front matter (see the NoteBook skill `project-repo`, `frontmatter.md`).
+- `README.md` - write-up with front matter (project index metadata).
 - `src/` - the app. See the layout table in `README.md`.
 - `examples/` - test models. `scripts/test-models.sh` runs them all. `// expect: error` marks models that must fail.
-- `scripts/build.sh` - tests and release build. `scripts/package-deb.sh` - `.deb` in `dist/`.
+- `scripts/build.sh` - tests and release build. `scripts/package-deb.sh`, `package-windows.ps1`, `package-macos.sh` - packages in `dist/`.
+- `.github/workflows/build.yml` - CI for Linux, Windows and macOS; releases on `v*` tags.
 - `packaging/` - desktop entry, icon and MIME type for the `.deb`.
 
 ## Working
 
 - Run `cargo test` after changes. Use `target/debug/scad-viewer export|slice|params` to test without the GUI.
-- The GUI runs on Christos's live display (`:0`). Do not send mouse or key input to it. For screenshots, start it with `--slice` when needed and use `import -window <id>`.
-- Debian (trixie, amd64) is the first target. Keep `Depends` in `scripts/package-deb.sh` in sync with new runtime libraries.
+- The GUI may run on the user's live desktop. Do not send mouse or key input to it. For screenshots, start it with `--slice` or `--photo` when needed and capture the window.
+- Targets: Linux (Debian first), Windows and macOS. GitHub Actions builds all three. Check other platforms locally with `cargo check --target x86_64-pc-windows-msvc` and `--target aarch64-apple-darwin`.
+- Keep `Depends` in `scripts/package-deb.sh` in sync with new runtime libraries.
+- CI runs `cargo clippy --all-targets -- -D warnings`. Keep it clean.
+- The repo is public on GitHub (MIT). Do not commit secrets, personal paths or host names.
 - `dist/` and `target/` are not in git.
 
 ## Conventions
@@ -24,7 +28,7 @@ SCAD Viewer (cgeosoft). A Rust desktop app that shows OpenSCAD models, edits Cus
 - Git LFS stores images, video, STL and 3MF files (`.gitattributes`).
 - Never take dates from file modification times. Record the source in `dates_from`.
 - Warn before deleting files or pushing.
-- Remote `origin` is `cg@cronus:/mnt/repos/scad-viewer.git`. Branch `main`. Push only when Christos asks.
+- Remote `origin` is the private main repo; `github` is the public mirror. Branch `main`. Push only when the owner asks.
 
 ## Writing style
 

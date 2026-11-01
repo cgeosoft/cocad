@@ -49,7 +49,7 @@ Depends: libc6, libgcc-s1, libgl1, libx11-6, libxkbcommon0, libxcursor1, libxran
 Recommends: libwayland-client0, libxkbcommon-x11-0
 Section: graphics
 Priority: optional
-Homepage: https://cgeosoft.com
+Homepage: https://github.com/cgeosoft/scad-viewer
 Description: OpenSCAD model viewer with Customizer parameters
  Opens .scad files, shows the Customizer parameters as sliders and
  lists, and renders the model with OpenSCAD. Exports STL, 3MF and STEP.
