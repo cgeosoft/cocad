@@ -558,9 +558,6 @@ impl App {
                 ui::toggle(ui, &mut self.auto_render)
                     .on_hover_text("Render when a parameter changes");
                 ui.add_space(8.0);
-                if ui.add(ui::ghost("Console", self.show_log)).clicked() {
-                    self.show_log = !self.show_log;
-                }
                 if ui
                     .add(ui::ghost("Settings", self.cfg_edit.is_some()))
                     .clicked()
@@ -913,6 +910,132 @@ impl App {
         if let Some(m) = msg {
             self.toast = Some((m, Instant::now()));
         }
+    }
+
+    /// Thin bar at the bottom: render state, engine, model, mode details.
+    fn status_bar(&mut self, ui: &mut egui::Ui) {
+        let small = |t: String| RichText::new(t).size(12.5);
+        let dim = |t: String| RichText::new(t).size(12.5).color(ui::c().dim);
+        let sep = |ui: &mut egui::Ui| {
+            let (r, _) = ui.allocate_exact_size(Vec2::new(1.0, 14.0), egui::Sense::hover());
+            ui.painter().rect_filled(r, 0.0, ui::c().line);
+        };
+        ui.horizontal_centered(|ui| {
+            ui.spacing_mut().item_spacing.x = 12.0;
+            ui.spacing_mut().button_padding = Vec2::new(8.0, 2.0);
+
+            // Render state.
+            if let Some(job) = &self.job {
+                ui.add(egui::Spinner::new().size(12.0).color(ui::ACCENT));
+                ui.label(
+                    small(format!(
+                        "Rendering {:.1} s",
+                        job.started.elapsed().as_secs_f32()
+                    ))
+                    .color(ui::ACCENT),
+                );
+            } else if let Some(e) = &self.error {
+                let r = ui.add(
+                    egui::Label::new(small(format!("Error: {e}")).color(ui::c().danger))
+                        .sense(egui::Sense::click()),
+                );
+                if r.on_hover_text("Show the OpenSCAD output").clicked() {
+                    self.show_log = true;
+                }
+            } else if self.dirty_since.is_some() && !self.auto_render {
+                ui.label(small("Parameters changed. Press F5.".into()).color(ui::ACCENT));
+            } else if self.file.is_some() {
+                let (r, _) = ui.allocate_exact_size(Vec2::splat(8.0), egui::Sense::hover());
+                ui.painter()
+                    .circle_filled(r.center(), 4.0, Color32::from_rgb(0x3f, 0xb9, 0x50));
+                let t = self
+                    .last_time
+                    .map(|t| format!("Ready  ·  {:.2} s", t.as_secs_f32()))
+                    .unwrap_or("Ready".into());
+                ui.label(small(t));
+            } else {
+                ui.label(dim("No file".into()));
+            }
+
+            // Engine.
+            sep(ui);
+            let probe = openscad::probe(&self.cfg.binary());
+            let version = probe
+                .version
+                .trim_start_matches("OpenSCAD version ")
+                .to_string();
+            let backend = if self.engine.is_empty() {
+                String::new()
+            } else {
+                format!("  ·  {}", self.engine)
+            };
+            ui.label(dim(format!("OpenSCAD {version}{backend}")))
+                .on_hover_text(self.cfg.binary());
+
+            // Model.
+            if let Some(i) = &self.info {
+                sep(ui);
+                let s = i.bounds.size();
+                let tris = self.mesh.as_ref().map(|m| m.triangles.len()).unwrap_or(0);
+                ui.label(small(format!("{:.1} × {:.1} × {:.1} mm", s.x, s.y, s.z)));
+                ui.label(dim(format!(
+                    "{tris} triangles  ·  {:.2} cm³",
+                    i.volume / 1000.0
+                )));
+                if i.open_edges > 0 {
+                    ui.label(small(format!("{} open edges", i.open_edges)).color(ui::ACCENT))
+                        .on_hover_text(
+                            "The mesh is not closed. Slicing and STEP export may be wrong.",
+                        );
+                }
+            }
+
+            // Mode details.
+            match self.mode {
+                Mode::Slice => {
+                    if let Some(sl) = &self.sliced {
+                        sep(ui);
+                        ui.label(small(format!(
+                            "Layer {} / {}",
+                            self.layer + 1,
+                            sl.layers.len()
+                        )));
+                        ui.label(dim(format!(
+                            "{}  ·  {:.1} g",
+                            fmt_duration(sl.stats.seconds),
+                            sl.stats.grams
+                        )));
+                    }
+                }
+                Mode::Photo => {
+                    sep(ui);
+                    ui.label(small(format!(
+                        "Photo {} / {}",
+                        self.photo_samples(),
+                        self.photo.samples
+                    )));
+                    ui.label(dim(format!("{} × {}", self.photo.width, self.photo.height)));
+                }
+                Mode::Model => {}
+            }
+
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.label(dim(format!("v{}", env!("CARGO_PKG_VERSION"))));
+                if ui
+                    .add(ui::ghost("Console", self.show_log))
+                    .on_hover_text("OpenSCAD output")
+                    .clicked()
+                {
+                    self.show_log = !self.show_log;
+                }
+                if let Some(n) = &self.active_set {
+                    ui.label(dim(format!(
+                        "Set: {n}{}",
+                        if self.set_edited { " (edited)" } else { "" }
+                    )));
+                }
+            });
+        });
     }
 
     fn photo_look(&self) -> pathtrace::Look {
@@ -1521,91 +1644,25 @@ impl App {
             );
         }
 
-        // Status, top left.
         let painter = ui.painter_at(rect);
         let font = egui::FontId::proportional(13.5);
-        let mut y = rect.top() + m;
-        if let Some(job) = &self.job {
-            let t = job.started.elapsed().as_secs_f32();
-            let r = ui::pill(
-                &painter,
-                egui::pos2(rect.left() + m, y),
-                egui::Align2::LEFT_TOP,
-                &format!("      Rendering with OpenSCAD   {t:.1} s"),
-                font.clone(),
-                ui::c().text,
-                ui::glass(),
-            );
-            let c = egui::pos2(r.left() + 20.0, r.center().y);
-            let a = ui.input(|i| i.time) as f32 * 6.0;
-            let pts: Vec<egui::Pos2> = (0..=16)
-                .map(|k| {
-                    let ang = a + k as f32 / 16.0 * 4.2;
-                    c + Vec2::angled(ang) * 6.0
-                })
-                .collect();
-            painter.add(egui::Shape::line(
-                pts,
-                egui::Stroke::new(2.0_f32, ui::ACCENT),
-            ));
-            y = r.bottom() + 8.0;
-        } else if self.dirty_since.is_some() && !self.auto_render {
-            let r = ui::pill(
-                &painter,
-                egui::pos2(rect.left() + m, y),
-                egui::Align2::LEFT_TOP,
-                "Parameters changed. Press F5 to render.",
-                font.clone(),
-                ui::ACCENT,
-                ui::glass(),
-            );
-            y = r.bottom() + 8.0;
-        }
-        if let Some(e) = &self.error {
-            ui::pill(
-                &painter,
-                egui::pos2(rect.left() + m, y),
-                egui::Align2::LEFT_TOP,
-                e,
-                font.clone(),
-                Color32::WHITE,
-                Color32::from_rgba_unmultiplied(0x9b, 0x2c, 0x2c, 230),
-            );
-        }
 
-        // Model info, bottom left.
-        if let Some(i) = &self.info {
-            let s = i.bounds.size();
-            let tris = self.mesh.as_ref().map(|m| m.triangles.len()).unwrap_or(0);
-            let mut lines = vec![
-                format!("{:.1} × {:.1} × {:.1} mm", s.x, s.y, s.z),
-                format!("{tris} triangles   ·   {:.2} cm³", i.volume / 1000.0),
-            ];
-            if let Some(t) = self.last_time {
-                lines.push(format!(
-                    "Rendered in {:.2} s with {}",
-                    t.as_secs_f32(),
-                    self.engine
-                ));
-            }
-            let r = ui::pill(
-                &painter,
-                rect.left_bottom() + Vec2::new(m, -m),
-                egui::Align2::LEFT_BOTTOM,
-                &lines.join("\n"),
-                font.clone(),
-                ui::c().dim,
-                ui::glass(),
-            );
-            if i.open_edges > 0 {
+        // Empty view: say why.
+        if self.mesh.is_none() && self.job.is_none() {
+            let msg = match (&self.file, &self.error) {
+                (None, _) => Some("Open a .scad file, or drop one here.".to_string()),
+                (Some(_), Some(e)) => Some(format!("Nothing to show.  {e}")),
+                _ => None,
+            };
+            if let Some(msg) = msg {
                 ui::pill(
                     &painter,
-                    egui::pos2(r.left(), r.top() - 8.0),
-                    egui::Align2::LEFT_BOTTOM,
-                    &format!("{} open edges. The mesh is not closed.", i.open_edges),
-                    font.clone(),
-                    Color32::BLACK,
-                    ui::ACCENT,
+                    rect.center(),
+                    egui::Align2::CENTER_CENTER,
+                    &msg,
+                    egui::FontId::proportional(15.0),
+                    ui::c().text,
+                    ui::glass(),
                 );
             }
         }
@@ -1813,12 +1870,21 @@ impl eframe::App for App {
             .exact_height(60.0)
             .frame(
                 egui::Frame::NONE
-                    .fill(ui::c().bg)
+                    .fill(ui::dark().bg)
                     .inner_margin(egui::Margin::symmetric(18, 0))
+                    .stroke(egui::Stroke::new(1.0_f32, ui::dark().line)),
+            )
+            .show(ctx, |ui| ui::dark_scope(ui, |ui| self.top_bar(ui)));
+        self.settings_window(ctx);
+        egui::TopBottomPanel::bottom("status")
+            .exact_height(28.0)
+            .frame(
+                egui::Frame::NONE
+                    .fill(ui::c().bg)
+                    .inner_margin(egui::Margin::symmetric(14, 0))
                     .stroke(line),
             )
-            .show(ctx, |ui| self.top_bar(ui));
-        self.settings_window(ctx);
+            .show(ctx, |ui| self.status_bar(ui));
         if self.show_log {
             egui::TopBottomPanel::bottom("log")
                 .resizable(true)

@@ -69,9 +69,31 @@ pub fn is_dark() -> bool {
     IS_DARK.load(Ordering::Relaxed)
 }
 
-/// The palette of the current theme.
+thread_local! {
+    static FORCE_DARK: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// The palette of the current theme (dark inside `dark_scope`).
 pub fn c() -> &'static Palette {
-    if is_dark() { &DARK } else { &LIGHT }
+    if is_dark() || FORCE_DARK.with(|f| f.get()) {
+        &DARK
+    } else {
+        &LIGHT
+    }
+}
+
+/// Draws `add` with the dark theme, whatever the app theme is. For the header.
+pub fn dark_scope<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    ui.style_mut().visuals = visuals(true);
+    FORCE_DARK.with(|f| f.set(true));
+    let r = add(ui);
+    FORCE_DARK.with(|f| f.set(false));
+    r
+}
+
+/// Dark-theme colors, for parts that stay dark in both themes.
+pub fn dark() -> &'static Palette {
+    &DARK
 }
 
 /// System UI fonts to try, in order. The egui fonts stay as fallback for symbols.
@@ -101,7 +123,18 @@ pub fn fonts(ctx: &egui::Context) {
 /// Applies the dark or light theme.
 pub fn apply(ctx: &egui::Context, dark: bool) {
     IS_DARK.store(dark, Ordering::Relaxed);
-    let p = c();
+    ctx.set_theme(if dark {
+        egui::ThemePreference::Dark
+    } else {
+        egui::ThemePreference::Light
+    });
+    ctx.set_visuals(visuals(dark));
+    style(ctx);
+}
+
+/// Widget colors for one theme.
+pub fn visuals(dark: bool) -> egui::Visuals {
+    let p = if dark { &DARK } else { &LIGHT };
     let r = |n: u8| CornerRadius::same(n);
     let mut v = if dark {
         egui::Visuals::dark()
@@ -171,13 +204,10 @@ pub fn apply(ctx: &egui::Context, dark: bool) {
         },
     );
     w.active.bg_stroke = Stroke::new(1.0_f32, ACCENT);
-    ctx.set_theme(if dark {
-        egui::ThemePreference::Dark
-    } else {
-        egui::ThemePreference::Light
-    });
-    ctx.set_visuals(v);
+    v
+}
 
+fn style(ctx: &egui::Context) {
     ctx.style_mut(|s| {
         use FontFamily::{Monospace, Proportional};
         s.text_styles = [

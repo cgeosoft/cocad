@@ -8,7 +8,7 @@ status: in-progress
 tags: [openscad, 3d-printing, viewer, slicer, rust, egui]
 started: 2026-11-01
 dates_from: "first commit date"
-version: "0.1.9"
+version: "0.1.10"
 showcase: true
 ---
 
@@ -32,6 +32,8 @@ OpenSCAD does the geometry. SCAD Viewer runs the `openscad` CLI in the backgroun
 - Photo render: a path tracer renders the current view as a photo. Plastic material in 8 colors or any color, matte, satin or gloss finish, printed layer lines, dark or light studio. Save as PNG.
 - Mesh check: size, volume, triangle count, open edges. Back faces show in purple.
 - CLI for batch export and slicing.
+- Status bar: render state and time, OpenSCAD version and backend, model size, triangles and volume, open edges, slice layer and estimate, photo progress, parameter set, and the Console button.
+- The header stays dark in both themes.
 - Dark and soft light themes. Choose System, Dark or Light in **Settings**. System follows the desktop.
 - The window position and size, and the panel widths, are kept between runs (`~/.local/share/scad-viewer/app.ron`).
 
@@ -84,7 +86,7 @@ scripts/build.sh --debug    # debug build
 
 ```bash
 scripts/package-deb.sh
-sudo apt install ./dist/scad-viewer_0.1.9_amd64.deb
+sudo apt install ./dist/scad-viewer_0.1.10_amd64.deb
 ```
 
 ## Usage
