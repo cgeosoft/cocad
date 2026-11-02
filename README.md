@@ -1,20 +1,3 @@
----
-title: SCAD Viewer
-subtitle: Desktop viewer for OpenSCAD models with Customizer parameters, export and a slice preview.
-slug: scad-viewer
-brand: cgeosoft
-category: software
-status: done
-tags: [openscad, 3d-printing, viewer, slicer, rust, egui]
-started: 2026-11-01
-finished: 2026-11-01
-dates_from: "started: first commit date; finished: Christos marked it complete on 2026-11-01"
-version: "0.1.10"
-site: /b/scad-viewer/
-preview: preview.jpg
-showcase: true
----
-
 # SCAD Viewer
 
 [![Build](https://github.com/cgeosoft/scad-viewer/actions/workflows/build.yml/badge.svg)](https://github.com/cgeosoft/scad-viewer/actions/workflows/build.yml)

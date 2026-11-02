@@ -6,7 +6,7 @@ SCAD Viewer (cgeosoft). A Rust desktop app that shows OpenSCAD models, edits Cus
 
 ## Layout
 
-- `README.md` - write-up with front matter (project index metadata).
+- `README.md` - write-up.
 - `src/` - the app. See the layout table in `README.md`.
 - `examples/` - test models. `scripts/test-models.sh` runs them all. `// expect: error` marks models that must fail.
 - `scripts/build.sh` - tests and release build. `scripts/package-deb.sh`, `package-windows.ps1`, `package-macos.sh` - packages in `dist/`.
@@ -24,6 +24,8 @@ SCAD Viewer (cgeosoft). A Rust desktop app that shows OpenSCAD models, edits Cus
 - `dist/` and `target/` are not in git.
 
 ## Conventions
+
+- The project metadata is in the `scad-viewer` entry of `/mnt/files/Projects/cgeofab/src/_data/library.yml`, not in the README.
 
 - Git LFS stores images, video, STL and 3MF files (`.gitattributes`). Exception: `images/` (README images) is plain git, so GitHub shows it. Keep these files small.
 - Never take dates from file modification times. Record the source in `dates_from`.
