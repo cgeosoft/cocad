@@ -1,8 +1,8 @@
 /**
- * Consent modal and PostHog analytics.
+ * Consent box and PostHog analytics.
  * PostHog loads only after the visitor accepts. Before that, the page makes
  * no request to it. deploy.sh writes the project key. With no key, this file
- * does nothing and the modal does not show.
+ * does nothing and the box does not show.
  */
 (function () {
   "use strict";
@@ -14,7 +14,7 @@
   const enabled = /^phc_/.test(KEY);
 
   let choice = null;
-  let dialog = null;
+  let box = null;
   let loading = null;
 
   function read() {
@@ -84,34 +84,36 @@
     document.querySelectorAll("[data-consent-status]").forEach((n) => { n.textContent = text; });
   }
 
-  function buildDialog() {
-    dialog = document.createElement("dialog");
-    dialog.className = "consent";
-    dialog.setAttribute("aria-labelledby", "consent-title");
-    dialog.innerHTML =
-      '<p class="label"><span class="dot"></span>Cookies and analytics</p>' +
-      '<h2 id="consent-title">Allow analytics?</h2>' +
-      "<p>With your OK, PostHog counts page views, download clicks and demo use, so I can see what to improve. " +
-      "It keeps a random ID in your browser storage. It sets no cookies and records no sessions. The site works the same if you decline.</p>" +
-      '<p class="consent-state mono" data-consent-status></p>' +
+  function buildBox() {
+    box = document.createElement("div");
+    box.className = "consent";
+    box.setAttribute("role", "dialog");
+    box.setAttribute("aria-labelledby", "consent-title");
+    box.innerHTML =
+      '<div class="consent-title" id="consent-title">Analytics?</div>' +
+      "<p>With your OK, PostHog counts page views, download clicks and demo use. " +
+      "It keeps a random ID in your browser storage. It sets no cookies and records no sessions. " +
+      '<a href="/privacy/">Privacy policy</a>.</p>' +
+      '<p class="consent-state mono" data-consent-status hidden></p>' +
       '<div class="consent-actions">' +
       '<button type="button" class="btn" data-choice="declined">Decline</button>' +
-      '<button type="button" class="btn" data-choice="accepted">Accept</button>' +
-      "</div>" +
-      '<a class="consent-link" href="/privacy/">Privacy policy</a>';
-    dialog.addEventListener("click", (e) => {
+      '<button type="button" class="btn btn-primary" data-choice="accepted">Accept</button>' +
+      "</div>";
+    box.addEventListener("click", (e) => {
       const button = e.target.closest("[data-choice]");
       if (!button) return;
       apply(button.dataset.choice);
-      dialog.close();
+      box.classList.remove("visible");
     });
-    document.body.append(dialog);
+    document.body.append(box);
   }
 
   function open() {
-    if (!dialog) buildDialog();
+    if (!box) buildBox();
     syncStatus();
-    if (!dialog.open) dialog.showModal();
+    // The state line is for a visitor who opens the box again from the footer.
+    box.querySelector("[data-consent-status]").hidden = !choice;
+    requestAnimationFrame(() => box.classList.add("visible"));
   }
 
   function track(name, props) {
@@ -130,6 +132,6 @@
   choice = read();
   syncStatus();
   if (choice === "accepted") load().catch(() => {});
-  // The modal does not cover the policy that it links to.
+  // The box does not cover the policy that it links to.
   else if (!choice && !document.body.hasAttribute("data-no-consent-prompt")) setTimeout(open, 1200);
 })();

@@ -11,7 +11,7 @@ The look follows the Portfolio website (`portfolio/extras/website`). The colors 
 | `public/index.html` | The page |
 | `public/style.css` | All styles |
 | `public/boot.js` | Sets `.js` before first paint, for the reveal effect |
-| `public/analytics.js` | Consent modal and PostHog. The key comes from `deploy.sh` |
+| `public/analytics.js` | Consent box and PostHog. The key comes from `deploy.sh` |
 | `public/script.js` | OS detection, download links, scroll reveal, screenshot tabs, lightbox |
 | `public/viewer.js` | WebGL2 viewer: solid, wire and slice modes |
 | `public/demo.js` | Hero loop and the agent demo |
@@ -52,7 +52,7 @@ The chat text is scripted. The tool names and the numbers are real. The page dra
 - `analytics.js` loads PostHog from the EU cloud only after the visitor accepts. Before that, the page makes no request to PostHog.
 - PostHog runs with `localStorage` persistence, so the site sets no cookies. Autocapture, session recording, surveys and feature flags are off.
 - The events are `$pageview`, `download_clicked` (os, type) and `demo_prompt` (model). Each event has `site: cocad`.
-- The choice lasts 12 months. The footer `cookies` button opens the modal again.
+- The choice lasts 12 months. The footer `cookies` button opens the box again.
 - When you add a service, event or storage key, update `public/privacy/index.html`.
 
 Put the key in `extras/website/.env` (git-ignored):
@@ -74,7 +74,7 @@ This command also applies `_headers`.
 
 1. Run `wrangler login`, or set `CLOUDFLARE_API_TOKEN`.
 2. Make the project one time: `wrangler pages project create cocad --production-branch main`.
-3. Deploy: `bun run deploy`, from `extras/website`. This runs `deploy.sh`, which writes the PostHog key into a staged copy. Without a key, analytics stay off and the modal does not show.
+3. Deploy: `bun run deploy`, from `extras/website`. This runs `deploy.sh`, which writes the PostHog key into a staged copy. Without a key, analytics stay off and the box does not show.
 4. In the Cloudflare dashboard, open **Workers & Pages > cocad > Custom domains** and add `cocad.cgeosoft.com`.
 
 Use `deploy.sh`, not a git build. A git build has no PostHog key.
