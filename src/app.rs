@@ -9,7 +9,7 @@ use crate::presets;
 use crate::recent;
 use crate::render::{self, Renderer, View};
 use crate::slicer::{self, Kind, Settings, Sliced};
-use crate::ui::{self, ACCENT};
+use crate::ui;
 use eframe::egui::{self, Color32, RichText, Vec2};
 use glam::{Mat4, Vec3};
 use std::path::PathBuf;
@@ -314,13 +314,7 @@ impl App {
             server: None,
             pending: Vec::new(),
         };
-        if app.cfg.mcp {
-            let ctx = cc.egui_ctx.clone();
-            match crate::mcp::serve(move || ctx.request_repaint()) {
-                Ok(s) => app.server = Some(s),
-                Err(e) => eprintln!("mcp: {e}"),
-            }
-        }
+        app.sync_server(&cc.egui_ctx);
         if let Some(f) = file {
             app.open(f);
         }
@@ -1185,8 +1179,7 @@ impl App {
                 ui.label(small("Parameters changed. Press F5.".into()).color(ui::ACCENT));
             } else if self.file.is_some() {
                 let (r, _) = ui.allocate_exact_size(Vec2::splat(8.0), egui::Sense::hover());
-                ui.painter()
-                    .circle_filled(r.center(), 4.0, Color32::from_rgb(0x3f, 0xb9, 0x50));
+                ui.painter().circle_filled(r.center(), 4.0, ui::GOOD);
                 let t = self
                     .last_time
                     .map(|t| format!("Ready  ·  {:.2} s", t.as_secs_f32()))
@@ -2038,82 +2031,179 @@ impl App {
         let Some(mut edit) = self.cfg_edit.take() else {
             return;
         };
-        let mut open = true;
-        let mut action = None;
-        egui::Window::new("Settings")
-            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-            .open(&mut open)
-            .collapsible(false)
-            .resizable(false)
-            .default_width(460.0)
+        let mut close = ctx.input(|i| i.key_pressed(egui::Key::Escape));
+        let mut save = false;
+        let dirty = edit != self.cfg;
+        let running = self.server.is_some();
+        let frame = egui::Frame::NONE
+            .fill(ui::c().panel)
+            .corner_radius(14)
+            .inner_margin(egui::Margin::same(18))
+            .stroke(egui::Stroke::new(1.0_f32, ui::c().line));
+        let max_height = (ctx.screen_rect().height() - 170.0).max(160.0);
+        egui::Modal::new(egui::Id::new("settings"))
+            .frame(frame)
             .show(ctx, |ui| {
-                ui::section(ui, "Appearance");
-                let mut theme: &str = match edit.theme.as_str() {
-                    "dark" => "dark",
-                    "light" => "light",
-                    _ => "system",
-                };
-                ui::segmented(ui, &mut theme, &[("system", "System"), ("dark", "Dark"), ("light", "Light")]);
-                edit.theme = theme.to_string();
-                ui.add_space(8.0);
-                ui::section(ui, "OpenSCAD");
-                egui::Grid::new("cfg").num_columns(2).spacing([10.0, 8.0]).show(ui, |ui| {
-                    ui.label("Binary");
-                    ui.horizontal(|ui| {
-                        ui.add(egui::TextEdit::singleline(&mut edit.binary).hint_text("auto: openscad-nightly, else openscad").desired_width(300.0));
-                        if ui.button("Browse").clicked()
-                            && let Some(p) = rfd::FileDialog::new().pick_file() {
-                                edit.binary = p.display().to_string();
-                            }
-                    });
-                    ui.end_row();
-                    ui.label("Extra arguments");
-                    ui.add(egui::TextEdit::singleline(&mut edit.args).hint_text("e.g. --enable=lazy-union").desired_width(300.0));
-                    ui.end_row();
-                    ui.label("");
-                    ui.checkbox(&mut edit.manifold, "Use the Manifold backend when available");
-                    ui.end_row();
-                    ui.label("");
-                    ui.checkbox(&mut edit.mcp, "Allow MCP clients on this computer to control the window")
-                        .on_hover_text("Claude Desktop and other clients connect through `scad-viewer mcp`. Applies at the next start.");
-                    ui.end_row();
-                    let probe = openscad::probe(&edit.binary());
-                    ui.label("Found");
-                    ui.label(RichText::new(&probe.version).monospace());
-                    ui.end_row();
-                    ui.label("Manifold");
-                    if probe.manifold {
-                        ui.label(RichText::new("supported").color(ACCENT));
-                    } else {
-                        ui.label(RichText::new("not supported. Use an OpenSCAD development build (2024 or later).").weak());
-                    }
-                    ui.end_row();
-                });
-                if std::env::var_os("OPENSCAD").is_some() || std::env::var_os("OPENSCAD_ARGS").is_some() {
-                    ui.label(RichText::new("$OPENSCAD / $OPENSCAD_ARGS are set and override these values.").small().weak());
-                }
-                ui.separator();
+                ui.set_width(460.0);
                 ui.horizontal(|ui| {
-                    if ui.button("Save and render").clicked() {
-                        action = Some(true);
-                    }
-                    if ui.button("Cancel").clicked() {
-                        action = Some(false);
-                    }
+                    ui.heading("Settings");
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        close |= ui.add(egui::Button::new(RichText::new("×").size(20.0).color(ui::c().dim)).frame(false)).on_hover_text("Close (Esc)").clicked();
+                    });
+                });
+                ui.add_space(10.0);
+                egui::ScrollArea::vertical()
+                    .max_height(max_height)
+                    .auto_shrink([false, true])
+                    .show(ui, |ui| {
+                        ui.spacing_mut().item_spacing.y = 10.0;
+                        ui::card(ui, |ui| {
+                            let row = Vec2::new(ui.available_width(), 36.0);
+                            let rtl = egui::Layout::right_to_left(egui::Align::Center);
+                            ui.allocate_ui_with_layout(row, rtl, |ui| {
+                                let mut theme: &str = match edit.theme.as_str() {
+                                    "dark" => "dark",
+                                    "light" => "light",
+                                    _ => "system",
+                                };
+                                // Right to left: the last item comes first on screen.
+                                let options =
+                                    [("light", "Light"), ("dark", "Dark"), ("system", "System")];
+                                ui::segmented(ui, &mut theme, &options);
+                                edit.theme = theme.to_string();
+                                let ltr = egui::Layout::left_to_right(egui::Align::Center);
+                                ui.with_layout(ltr, |ui| ui.label("Theme"));
+                            });
+                        });
+                        ui::card(ui, |ui| openscad_settings(ui, &mut edit));
+                        ui::card(ui, |ui| {
+                            ui::section(ui, "MCP server");
+                            ui.add_space(4.0);
+                            toggle_row(
+                                ui,
+                                "Allow MCP clients",
+                                "Clients on this computer, such as Claude Desktop, can control this window.",
+                                &mut edit.mcp,
+                            );
+                            let (ok, text) = match (edit.mcp, running) {
+                                (true, true) => (true, "Running"),
+                                (false, false) => (false, "Off"),
+                                (true, false) => (false, "Starts when you save"),
+                                (false, true) => (true, "Stops when you save"),
+                            };
+                            status_line(ui, if ok { ui::GOOD } else { ui::c().dim }, text);
+                        });
+                    });
+                ui.add_space(12.0);
+                let row = Vec2::new(ui.available_width(), 34.0);
+                let rtl = egui::Layout::right_to_left(egui::Align::Center);
+                ui.allocate_ui_with_layout(row, rtl, |ui| {
+                    ui.spacing_mut().button_padding = Vec2::new(16.0, 7.0);
+                    save = ui
+                        .add_enabled(dirty, ui::primary("Save"))
+                        .on_disabled_hover_text("No changes")
+                        .clicked();
+                    close |= ui.add(ui::ghost("Cancel", false)).clicked();
                 });
             });
-        match (open, action) {
-            (_, Some(true)) => {
-                if let Err(e) = edit.save() {
-                    self.toast = Some((format!("Cannot save settings: {e}"), Instant::now()));
-                }
-                self.cfg = edit;
+        if save {
+            if let Err(e) = edit.save() {
+                self.toast = Some((format!("Cannot save settings: {e}"), Instant::now()));
+            }
+            let rerender = (&edit.binary, &edit.args, edit.manifold)
+                != (&self.cfg.binary, &self.cfg.args, self.cfg.manifold);
+            self.cfg = edit;
+            self.sync_server(ctx);
+            if rerender {
                 self.start_render();
             }
-            (false, _) | (_, Some(false)) => {}
-            _ => self.cfg_edit = Some(edit),
+        } else if !close {
+            self.cfg_edit = Some(edit);
         }
     }
+}
+
+/// The OpenSCAD card of the Settings window.
+fn openscad_settings(ui: &mut egui::Ui, edit: &mut openscad::Config) {
+    ui::section(ui, "OpenSCAD");
+    ui.add_space(4.0);
+    ui.label(ui::dim("Binary"));
+    let row = Vec2::new(ui.available_width(), 30.0);
+    let rtl = egui::Layout::right_to_left(egui::Align::Center);
+    let binary = ui
+        .allocate_ui_with_layout(row, rtl, |ui| {
+            if ui.add(ui::ghost("Browse", false)).clicked()
+                && let Some(p) = rfd::FileDialog::new().pick_file()
+            {
+                edit.binary = p.display().to_string();
+            }
+            ui.add(
+                egui::TextEdit::singleline(&mut edit.binary)
+                    .hint_text(ui::dim("Automatic"))
+                    .desired_width(f32::INFINITY)
+                    .margin(Vec2::new(10.0, 6.0)),
+            )
+        })
+        .inner;
+    ui.label(ui::dim("Extra arguments"));
+    ui.add(
+        egui::TextEdit::singleline(&mut edit.args)
+            .hint_text(ui::dim("For example --enable=lazy-union"))
+            .desired_width(f32::INFINITY)
+            .margin(Vec2::new(10.0, 6.0)),
+    );
+    // A half typed name must not run as a program.
+    let probe = (!binary.has_focus()).then(|| openscad::probe(&edit.binary()));
+    let manifold = probe.as_ref().is_none_or(|p| p.manifold);
+    let note = if manifold {
+        "Much faster renders with development builds."
+    } else {
+        "Needs an OpenSCAD development build, 2024 or later."
+    };
+    ui.add_space(4.0);
+    ui.add_enabled_ui(manifold, |ui| {
+        toggle_row(ui, "Manifold backend", note, &mut edit.manifold);
+    });
+    match &probe {
+        None => status_line(
+            ui,
+            ui::c().dim,
+            "Checks the binary when you leave the field",
+        ),
+        Some(p) if p.version == "not found" => {
+            status_line(ui, ui::c().danger, "OpenSCAD not found. Set the binary.");
+        }
+        Some(p) => status_line(ui, ui::GOOD, &p.version),
+    }
+    if std::env::var_os("OPENSCAD").is_some() || std::env::var_os("OPENSCAD_ARGS").is_some() {
+        ui.label(ui::dim(
+            "$OPENSCAD or $OPENSCAD_ARGS override these values.",
+        ));
+    }
+}
+
+/// Title and note on the left, switch on the right.
+fn toggle_row(ui: &mut egui::Ui, title: &str, note: &str, on: &mut bool) {
+    let row = Vec2::new(ui.available_width(), 38.0);
+    let rtl = egui::Layout::right_to_left(egui::Align::Center);
+    ui.allocate_ui_with_layout(row, rtl, |ui| {
+        ui::toggle(ui, on);
+        ui.add_space(12.0);
+        ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
+            ui.spacing_mut().item_spacing.y = 1.0;
+            ui.label(title);
+            ui.add(egui::Label::new(ui::dim(note).size(12.5)).wrap());
+        });
+    });
+}
+
+/// A colored dot and a short state text.
+fn status_line(ui: &mut egui::Ui, color: Color32, text: &str) {
+    ui.horizontal(|ui| {
+        let (r, _) = ui.allocate_exact_size(Vec2::new(8.0, 8.0), egui::Sense::hover());
+        ui.painter().circle_filled(r.center(), 4.0, color);
+        ui.label(ui::dim(text));
+    });
 }
 
 impl eframe::App for App {

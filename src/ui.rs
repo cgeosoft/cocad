@@ -8,6 +8,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 pub const ACCENT: Color32 = Color32::from_rgb(0xff, 0x93, 0x00);
+/// Status dots: all is well.
+pub const GOOD: Color32 = Color32::from_rgb(0x3f, 0xb9, 0x50);
 
 /// Colors of one theme.
 pub struct Palette {

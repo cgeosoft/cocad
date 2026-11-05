@@ -15,6 +15,8 @@ use serde_json::{Value as Json, json};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -45,11 +47,17 @@ pub struct Request {
 pub struct Server {
     pub requests: Receiver<Request>,
     endpoint: PathBuf,
+    port: u16,
+    stop: Arc<AtomicBool>,
 }
 
 impl Drop for Server {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.endpoint);
+        // The listener sleeps in accept: one connection wakes it to see the flag.
+        self.stop.store(true, Ordering::Relaxed);
+        let addr = SocketAddr::from(([127, 0, 0, 1], self.port));
+        let _ = TcpStream::connect_timeout(&addr, Duration::from_millis(200));
     }
 }
 
@@ -87,15 +95,26 @@ pub fn serve(wake: impl Fn() + Send + Clone + 'static) -> Result<Server> {
     )?;
 
     let (tx, requests) = channel();
+    let stop = Arc::new(AtomicBool::new(false));
+    let flag = stop.clone();
     std::thread::spawn(move || {
-        for stream in listener.incoming().flatten() {
+        for stream in listener.incoming() {
+            if flag.load(Ordering::Relaxed) {
+                break;
+            }
+            let Ok(stream) = stream else { continue };
             let (tx, token, wake) = (tx.clone(), token.clone(), wake.clone());
             std::thread::spawn(move || {
                 let _ = connection(stream, &tx, &token, wake);
             });
         }
     });
-    Ok(Server { requests, endpoint })
+    Ok(Server {
+        requests,
+        endpoint,
+        port,
+        stop,
+    })
 }
 
 fn connection(

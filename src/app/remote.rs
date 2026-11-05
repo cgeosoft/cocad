@@ -76,6 +76,23 @@ fn side(args: &Json, name: &str, default: u64, max: u64) -> Result<usize, String
 }
 
 impl App {
+    /// Starts or stops the listener to match the saved setting.
+    pub(super) fn sync_server(&mut self, ctx: &egui::Context) {
+        if !self.cfg.mcp {
+            self.server = None;
+            self.pending.clear();
+        } else if self.server.is_none() {
+            let ctx = ctx.clone();
+            match crate::mcp::serve(move || ctx.request_repaint()) {
+                Ok(s) => self.server = Some(s),
+                Err(e) => {
+                    self.toast = Some((format!("MCP server: {e}"), Instant::now()));
+                    eprintln!("mcp: {e}");
+                }
+            }
+        }
+    }
+
     /// Takes new tool calls and runs those that are ready.
     pub(super) fn run_commands(&mut self) {
         if let Some(server) = &self.server {

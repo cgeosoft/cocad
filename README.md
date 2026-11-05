@@ -115,7 +115,7 @@ Behavior:
 - The tools cannot delete a parameter set or a file.
 - A minimized window may not answer until you restore it.
 
-Security: each window listens on a free port of `127.0.0.1` and accepts only calls with a random token. The token is in `mcp/<pid>.json` in the settings folder, which only your user can read. Any program that runs as your user can read that file and control the window, and write files through the export tools. To turn the server off, clear **Allow MCP clients** in **File > Settings** and restart the app.
+Security: each window listens on a free port of `127.0.0.1` and accepts only calls with a random token. The token is in `mcp/<pid>.json` in the settings folder, which only your user can read. Any program that runs as your user can read that file and control the window, and write files through the export tools. The server is on by default. To turn it on or off, use **MCP server** in **File > Settings**. The change applies when you save. Other open windows change at their next start.
 
 ## Parameter sets
 
