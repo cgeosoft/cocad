@@ -43,6 +43,9 @@ The chat text is scripted. The tool names and the numbers are real. The page dra
 - Without WebGL2, images replace the live views.
 - With reduced motion, the hero does not loop and nothing fades in.
 - The wheel zooms the demo only after a click on the view, so the page scroll stays free.
+- The first prompt of the agent demo runs one time, when the demo reaches the middle of the viewport.
+- A click on a loop stage shows that stage of the current prompt at once and stops the run.
+- The lightbox opens when the image is ready.
 
 ## Analytics
 

@@ -164,10 +164,19 @@
   function lightbox() {
     const box = document.querySelector(".lightbox");
     const img = box.querySelector("img");
-    $$("[data-zoom]").forEach((b) => b.addEventListener("click", () => {
+    let last = 0;
+    $$("[data-zoom]").forEach((b) => b.addEventListener("click", async () => {
+      const id = ++last;
       img.src = b.dataset.zoom;
       img.alt = b.querySelector("img").alt;
-      box.showModal();
+      // Open only when the image is ready, so the box never shows an empty frame.
+      try {
+        await img.decode();
+      } catch (err) {
+        console.warn("Image did not load:", b.dataset.zoom, err);
+        return;
+      }
+      if (id === last && !box.open) box.showModal();
     }));
     box.addEventListener("click", () => box.close());
   }

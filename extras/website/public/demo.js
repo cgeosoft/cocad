@@ -107,12 +107,14 @@
     { model: "box", text: "Three compartments and square corners.", set: { compartments: 3, corners: "square" } },
   ];
 
-  const state = { slug: "vase", values: {}, viewer: null, run: 0 };
+  const state = { slug: "vase", values: {}, viewer: null, run: 0, turn: null, meshRun: 0 };
 
   function setStep(n) {
     document.querySelectorAll("[data-loop-stage]").forEach((s, i) => {
       s.classList.toggle("is-on", i === n);
       s.classList.toggle("is-done", i < n);
+      if (i === n) s.setAttribute("aria-current", "step");
+      else s.removeAttribute("aria-current");
     });
   }
 
@@ -148,8 +150,10 @@
   }
 
   async function applyMesh(reveal) {
+    const id = ++state.meshRun;
     const key = variantKey(state.slug, state.values[state.slug]);
     const mesh = await ScadView.loadMesh(meshUrl(state.slug, key));
+    if (id !== state.meshRun) return;
     state.viewer.setMesh(mesh, { reveal: reveal && !reduced });
     showStats();
     syncControls();
@@ -167,6 +171,7 @@
       b.setAttribute("aria-pressed", String(slug === state.slug));
       b.addEventListener("click", () => {
         state.run++;
+        state.turn = null;
         state.slug = slug;
         buildCustomizer();
         setMode("solid");
@@ -197,6 +202,7 @@
     $("label", top).htmlFor = id;
     const change = (value) => {
       state.run++;
+      state.turn = null;
       values[p.name] = value;
       setMode("solid");
       setStep(1);
@@ -271,11 +277,46 @@
     row.append(el("div", "tool-out mono", text));
   }
 
+  // The texts of one turn. The animated run and a stage click both use them.
+  const paramsArgs = (t) => JSON.stringify({ values: t.prompt.set });
+  const renderText = (d) => `rendered in ${d.seconds.toFixed(2)} s, ${fmt(d.triangles)} triangles`;
+  const sliceText = (d) => `${fmt(d.layers)} layers, ${d.filament_m} m, ${d.grams} g, ${d.print_time}`;
+
+  function agentLine(d) {
+    const edges = d.open_edges === 0 ? "No open edges." : `${d.open_edges} open edges.`;
+    return el("p", "msg-agent", `${edges} ${d.size.map((n) => n.toFixed(0)).join(" × ")} mm, ${d.print_time} at 0.2 mm. Ready to export or render a photo.`);
+  }
+
+  function newTurn(prompt, button) {
+    document.querySelectorAll("[data-prompt]").forEach((b) => b.setAttribute("aria-pressed", String(b === button)));
+    state.turn = { prompt, before: { slug: state.slug, values: { ...state.values[state.slug] } } };
+    return state.turn;
+  }
+
+  function openModel(t) {
+    state.slug = t.prompt.model;
+    state.values[state.slug] = { ...models[state.slug].defaults };
+    buildCustomizer();
+  }
+
+  function restoreBefore(t) {
+    state.slug = t.before.slug;
+    state.values[state.slug] = { ...t.before.values };
+    buildCustomizer();
+  }
+
+  async function sweepLayers() {
+    $("[data-layer]").value = 0;
+    setMode("slice");
+    state.viewer.setLayer(0);
+    await state.viewer.sweep(reduced ? 1 : 2200);
+  }
+
   async function runPrompt(prompt, button) {
     const id = ++state.run;
     const alive = () => id === state.run;
+    const t = newTurn(prompt, button);
     const log = $("[data-log]");
-    document.querySelectorAll("[data-prompt]").forEach((b) => b.setAttribute("aria-pressed", String(b === button)));
     log.textContent = "";
     selectTab("agent");
     setMode("solid");
@@ -289,41 +330,75 @@
       addLine(log, open);
       await sleep(350);
       if (!alive()) return;
-      state.slug = prompt.model;
-      state.values[prompt.model] = { ...models[prompt.model].defaults };
-      buildCustomizer();
+      openModel(t);
       finish(open, "opened");
     }
 
-    const params = toolRow("set_params", JSON.stringify({ values: prompt.set }));
+    const params = toolRow("set_params", paramsArgs(t));
     addLine(log, params);
     await sleep(350);
     if (!alive()) return;
     Object.assign(state.values[state.slug], prompt.set);
     setStep(1);
     await applyMesh(true);
+    if (!alive()) return;
     const d = current();
-    finish(params, `rendered in ${d.seconds.toFixed(2)} s, ${fmt(d.triangles)} triangles`);
+    finish(params, renderText(d));
     await sleep(900);
     if (!alive()) return;
 
     setStep(2);
     const slice = toolRow("slice", null);
     addLine(log, slice);
-    $("[data-layer]").value = 0;
-    setMode("slice");
-    state.viewer.setLayer(0);
-    await state.viewer.sweep(reduced ? 1 : 2200);
+    await sweepLayers();
     if (!alive()) return;
     $("[data-layer]").value = 1000;
     updateLayerLabel();
-    finish(slice, `${fmt(d.layers)} layers, ${d.filament_m} m, ${d.grams} g, ${d.print_time}`);
+    finish(slice, sliceText(d));
     await sleep(500);
     if (!alive()) return;
 
     setStep(3);
-    const edges = d.open_edges === 0 ? "No open edges." : `${d.open_edges} open edges.`;
-    addLine(log, el("p", "msg-agent", `${edges} ${d.size.map((n) => n.toFixed(0)).join(" × ")} mm, ${d.print_time} at 0.2 mm. Ready to export or render a photo.`));
+    setMode("solid");
+    addLine(log, agentLine(d));
+  }
+
+  // Shows one stage at once and stays there. It stops a turn that is running.
+  async function showStage(n) {
+    if (!state.turn && state.run === 0) newTurn(PROMPTS[0], $("[data-prompts]").firstChild);
+    const id = ++state.run;
+    const t = state.turn;
+    setStep(n);
+    if (t) {
+      restoreBefore(t);
+      const log = $("[data-log]");
+      log.textContent = "";
+      selectTab("agent");
+      addLine(log, el("p", "msg-user", t.prompt.text));
+      if (n > 0) {
+        if (t.prompt.model !== state.slug) {
+          openModel(t);
+          const open = toolRow("open_model", `{"path":"${models[t.prompt.model].file}"}`);
+          finish(open, "opened");
+          addLine(log, open);
+        }
+        Object.assign(state.values[state.slug], t.prompt.set);
+        const d = current();
+        const params = toolRow("set_params", paramsArgs(t));
+        finish(params, renderText(d));
+        addLine(log, params);
+        if (n > 1) {
+          const slice = toolRow("slice", null);
+          finish(slice, sliceText(d));
+          addLine(log, slice);
+        }
+        if (n > 2) addLine(log, agentLine(d));
+      }
+    }
+    setMode("solid");
+    await applyMesh(n === 1);
+    if (id !== state.run) return;
+    if (n === 2) await sweepLayers();
   }
 
   function selectTab(name) {
@@ -376,12 +451,15 @@
     viewer.center = viewer.centerGoal.slice();
     root.classList.add("is-ready");
 
-    // The first prompt runs one time, when the demo comes into view.
+    document.querySelectorAll("[data-loop-stage]").forEach((s, i) => s.addEventListener("click", () => showStage(i)));
+
+    // The first prompt runs one time, when the demo reaches the middle of the
+    // viewport. The band works for any section height, also on a phone.
     new IntersectionObserver(([e], obs) => {
       if (!e.isIntersecting) return;
       obs.disconnect();
       if (state.run === 0 && !reduced) runPrompt(PROMPTS[0], prompts.firstChild);
-    }, { threshold: 0.45 }).observe(root);
+    }, { rootMargin: "-35% 0px -35% 0px" }).observe($(".loop-grid", root));
   }
 
   async function start() {
