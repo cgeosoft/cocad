@@ -27,6 +27,8 @@ pub struct Config {
     pub manifold: bool,
     /// UI theme: "system", "dark" or "light".
     pub theme: String,
+    /// Let MCP clients on this computer control the window.
+    pub mcp: bool,
 }
 
 impl Default for Config {
@@ -36,6 +38,7 @@ impl Default for Config {
             args: String::new(),
             manifold: true,
             theme: "system".into(),
+            mcp: true,
         }
     }
 }
@@ -72,6 +75,7 @@ impl Config {
                         "openscad_args" => c.args = v,
                         "manifold" => c.manifold = v != "false",
                         "theme" => c.theme = v,
+                        "mcp" => c.mcp = v != "false",
                         _ => {}
                     }
                 }
@@ -86,8 +90,8 @@ impl Config {
         std::fs::write(
             &path,
             format!(
-                "openscad = {}\nopenscad_args = {}\nmanifold = {}\ntheme = {}\n",
-                self.binary, self.args, self.manifold, self.theme
+                "openscad = {}\nopenscad_args = {}\nmanifold = {}\ntheme = {}\nmcp = {}\n",
+                self.binary, self.args, self.manifold, self.theme, self.mcp
             ),
         )?;
         Ok(())

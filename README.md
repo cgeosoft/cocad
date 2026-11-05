@@ -19,6 +19,7 @@ OpenSCAD does the geometry. SCAD Viewer runs the `openscad` CLI in the backgroun
 - **Photo render.** A path tracer makes a studio photo of the current view, in a plastic color and finish you choose.
 - **Mesh check.** Size, volume, triangles and open edges. Back faces show in purple.
 - **CLI.** Batch export, slice and photo without the window.
+- **MCP server.** Claude Desktop and other MCP clients can read the model, change parameters, render and export in the open window.
 - Linux, Windows and macOS. Dark and light themes.
 
 ## Install
@@ -66,6 +67,55 @@ You can also open a file with Ctrl+O or drop it on the window. **File** lists th
 The menu bar holds all commands: **File**, **Model**, **View** and **Help**. The right sidebar has the **Model**, **Slice** and **Photo** tabs. The **Model** tab has Auto render, Render, the export buttons and the mesh data.
 
 The status bar at the bottom shows the render state and time, the OpenSCAD version and backend, the model size, triangles and volume, open edges, the slice or photo state, and the **Console** button with the OpenSCAD output.
+
+## MCP server
+
+SCAD Viewer has an MCP server, so that an AI client can work with the open window. The client can read the model and its parameters, change values, see the result as an image, and run app commands.
+
+Add the server to the client. For Claude Desktop, edit `claude_desktop_config.json` and restart Claude Desktop:
+
+```json
+{
+  "mcpServers": {
+    "scad-viewer": {
+      "command": "scad-viewer",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+Use the full path of the binary when it is not on the `PATH` of the client. On Windows, this is `scad-viewer.exe` in the folder where you unpacked the zip, with double backslashes in the JSON. On macOS, it is `SCAD Viewer.app/Contents/MacOS/scad-viewer` in Applications.
+
+The client starts `scad-viewer mcp`. This process has no window. It sends each tool call to the open window, and you see the changes there. `open_model` starts the app when it is not running.
+
+| Tool | Action |
+|---|---|
+| `get_state` | Loaded file, render status, last error, mesh data, changed parameters, parameter sets, end of the OpenSCAD log |
+| `get_params` | All Customizer parameters with type, value, default, limits and options |
+| `get_source` | Source of the `.scad` file |
+| `view_model` | Render an image and return it to the client |
+| `open_model` | Open a `.scad` file |
+| `set_params`, `reset_params` | Change parameters or reset them, then render |
+| `render` | Run OpenSCAD again |
+| `load_parameter_set`, `save_parameter_set` | Load or save a parameter set |
+| `export_model` | Write STL, 3MF or STEP |
+| `save_photo` | Write a path traced PNG |
+| `slice` | Slice and return layers, filament, weight and a rough print time |
+| `set_view` | Change the tab, camera direction, wireframe, grid and slice layer |
+| `list_windows`, `select_window` | Choose a window when more than one is open |
+
+Behavior:
+
+- `set_params` uses the limits of the Customizer panel. One bad value rejects the whole call.
+- Calls wait for the render, for at most 45 seconds. Then they return the state with status `rendering`, or an error.
+- `export_model` and `save_photo` do not replace a file without `overwrite`. They and `view_model` fail when the last render failed, so that they do not use an old mesh.
+- `view_model` and `save_photo` put the whole model in the frame. They use the camera direction of the window, or the given `view`.
+- `save_photo` stops after 40 seconds and saves the samples it has.
+- The tools cannot delete a parameter set or a file.
+- A minimized window may not answer until you restore it.
+
+Security: each window listens on a free port of `127.0.0.1` and accepts only calls with a random token. The token is in `mcp/<pid>.json` in the settings folder, which only your user can read. Any program that runs as your user can read that file and control the window, and write files through the export tools. To turn the server off, clear **Allow MCP clients** in **File > Settings** and restart the app.
 
 ## Parameter sets
 
@@ -136,7 +186,7 @@ OpenSCAD 2021.01 (the Debian package) uses the CGAL backend. CGAL is slow on lar
 
 The settings are saved in the settings folder. The CLI commands use them too.
 
-The settings folder also holds `recent`, the list of recent models.
+The settings folder also holds `recent`, the list of recent models, and `mcp/`, the addresses of the open windows.
 
 | System | Settings folder |
 |---|---|
@@ -206,6 +256,8 @@ A tag `v*` (for example `v0.2.0`) also makes a GitHub release with all files att
 |---|---|
 | `src/main.rs` | CLI and window start |
 | `src/app.rs` | egui application: panels, camera, jobs |
+| `src/app/remote.rs` | MCP tools inside the window |
+| `src/mcp.rs` | MCP server, tool list, window listener |
 | `src/render.rs` | OpenGL shaders and buffers |
 | `src/ui.rs` | Dark and light palettes and widgets |
 | `src/params.rs` | Customizer parameter parser |

@@ -18,6 +18,8 @@ use std::sync::mpsc::{Receiver, channel};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
+mod remote;
+
 const DEBOUNCE: Duration = Duration::from_millis(350);
 
 #[derive(PartialEq, Clone, Copy)]
@@ -222,6 +224,9 @@ pub struct App {
     menu_bar_rect: egui::Rect,
     recent: Vec<PathBuf>,
     show_about: bool,
+    /// Listener for MCP tool calls, when the option is on.
+    server: Option<crate::mcp::Server>,
+    pending: Vec<remote::Pending>,
 }
 
 impl App {
@@ -306,7 +311,16 @@ impl App {
             menu_bar_rect: egui::Rect::NOTHING,
             recent: recent::load(),
             show_about: false,
+            server: None,
+            pending: Vec::new(),
         };
+        if app.cfg.mcp {
+            let ctx = cc.egui_ctx.clone();
+            match crate::mcp::serve(move || ctx.request_repaint()) {
+                Ok(s) => app.server = Some(s),
+                Err(e) => eprintln!("mcp: {e}"),
+            }
+        }
         if let Some(f) = file {
             app.open(f);
         }
@@ -487,7 +501,12 @@ impl App {
         {
             self.start_slice();
         }
-        if self.job.is_some() || self.slice_job.is_some() || self.export_rx.is_some() {
+        self.run_commands();
+        if self.job.is_some()
+            || self.slice_job.is_some()
+            || self.export_rx.is_some()
+            || !self.pending.is_empty()
+        {
             ctx.request_repaint_after(Duration::from_millis(50));
         } else {
             ctx.request_repaint_after(Duration::from_millis(500));
@@ -2053,6 +2072,10 @@ impl App {
                     ui.end_row();
                     ui.label("");
                     ui.checkbox(&mut edit.manifold, "Use the Manifold backend when available");
+                    ui.end_row();
+                    ui.label("");
+                    ui.checkbox(&mut edit.mcp, "Allow MCP clients on this computer to control the window")
+                        .on_hover_text("Claude Desktop and other clients connect through `scad-viewer mcp`. Applies at the next start.");
                     ui.end_row();
                     let probe = openscad::probe(&edit.binary());
                     ui.label("Found");

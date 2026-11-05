@@ -43,6 +43,11 @@ pub fn finish_roughness(name: &str) -> f32 {
 
 /// The viewer's iso view, fitted to the mesh.
 pub fn iso_camera(mesh: &Mesh, aspect: f32) -> Camera {
+    fit_camera(mesh, -0.9, 0.55, aspect)
+}
+
+/// A view from this direction with the whole mesh in frame.
+pub fn fit_camera(mesh: &Mesh, yaw: f32, pitch: f32, aspect: f32) -> Camera {
     let b = mesh.bounds().expect("empty mesh");
     let fov = 0.6f32;
     let r = (b.size().length() * 0.5).max(1.0);
@@ -53,7 +58,6 @@ pub fn iso_camera(mesh: &Mesh, aspect: f32) -> Camera {
         (fov * 0.5).tan()
     };
     let dist = r / half.atan().sin() * 1.05;
-    let (yaw, pitch) = (-0.9f32, 0.55f32);
     let dir = Vec3::new(
         pitch.cos() * yaw.cos(),
         pitch.cos() * yaw.sin(),
@@ -161,8 +165,26 @@ pub fn srgb(hex: u32) -> Vec3 {
 
 /// Writes RGBA as PNG.
 pub fn save_png(path: &std::path::Path, f: &Frame) -> anyhow::Result<()> {
-    let file = std::io::BufWriter::new(std::fs::File::create(path)?);
-    let mut enc = png::Encoder::new(file, f.width as u32, f.height as u32);
+    write_png(std::io::BufWriter::new(std::fs::File::create(path)?), f)
+}
+
+/// RGB PNG file data, packed small for tool results.
+pub fn png_bytes(f: &Frame) -> anyhow::Result<Vec<u8>> {
+    let rgb: Vec<u8> = (f.rgba.iter().enumerate())
+        .filter(|(i, _)| i % 4 != 3)
+        .map(|(_, b)| *b)
+        .collect();
+    let mut out = Vec::new();
+    let mut enc = png::Encoder::new(&mut out, f.width as u32, f.height as u32);
+    enc.set_color(png::ColorType::Rgb);
+    enc.set_depth(png::BitDepth::Eight);
+    enc.set_compression(png::Compression::Best);
+    enc.write_header()?.write_image_data(&rgb)?;
+    Ok(out)
+}
+
+fn write_png(out: impl std::io::Write, f: &Frame) -> anyhow::Result<()> {
+    let mut enc = png::Encoder::new(out, f.width as u32, f.height as u32);
     enc.set_color(png::ColorType::Rgba);
     enc.set_depth(png::BitDepth::Eight);
     enc.write_header()?.write_image_data(&f.rgba)?;

@@ -4,6 +4,7 @@
 
 mod app;
 mod export;
+mod mcp;
 mod mesh;
 mod openscad;
 mod params;
@@ -24,6 +25,8 @@ const USAGE: &str =
 
 Usage:
   scad-viewer [--slice|--photo] [FILE.scad]    Open the viewer (start in slice or photo view)
+  scad-viewer mcp                              Serve MCP on stdin and stdout, for Claude Desktop and
+                                               other MCP clients. Controls the open window.
   scad-viewer params FILE.scad                 List the Customizer parameters
   scad-viewer export FILE.scad -o OUT [-P SET] [-D name=value]...
                                                Render and write OUT (.stl, .3mf or .step)
@@ -63,6 +66,7 @@ fn main() -> Result<()> {
             println!("scad-viewer {}", env!("CARGO_PKG_VERSION"));
             Ok(())
         }
+        Some("mcp") => mcp::run(),
         Some("params") => cmd_params(&args[1..]),
         Some("export") => cmd_export(&args[1..]),
         Some("slice") => cmd_slice(&args[1..]),

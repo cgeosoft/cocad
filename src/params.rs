@@ -18,6 +18,8 @@
 //! Parsing stops at the first top-level `module` or `function`.
 //! Assignments with expressions (e.g. `h = w * 2;`) are not parameters.
 
+use serde_json::{Value as Json, json};
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value {
     Num(f64),
@@ -444,9 +446,129 @@ pub fn set_from_text(p: &mut Param, text: &str) -> bool {
     }
 }
 
+/// The value as JSON, for MCP tools.
+pub fn to_json(v: &Value) -> Json {
+    match v {
+        Value::Num(n) => json!(clean(*n)),
+        Value::Bool(b) => json!(b),
+        Value::Str(s) => json!(s),
+        Value::Vec(v) => json!(v.iter().map(|n| clean(*n)).collect::<Vec<_>>()),
+    }
+}
+
+/// A full description of the parameter, for MCP tools.
+pub fn describe(p: &Param) -> Json {
+    let kind = match p.default {
+        Value::Num(_) => "number",
+        Value::Bool(_) => "boolean",
+        Value::Str(_) => "string",
+        Value::Vec(_) => "vector",
+    };
+    let mut out = json!({
+        "name": p.name,
+        "group": p.group,
+        "description": p.description,
+        "type": kind,
+        "value": to_json(&p.value),
+        "default": to_json(&p.default),
+        "changed": p.changed(),
+    });
+    match &p.widget {
+        Widget::Plain => {}
+        Widget::Slider { min, max, .. } => {
+            out["min"] = json!(min);
+            out["max"] = json!(max);
+            out["step"] = json!(p.step());
+        }
+        Widget::Dropdown(options) => {
+            let list: Vec<Json> = options
+                .iter()
+                .map(|(v, label)| json!({ "value": to_json(v), "label": label }))
+                .collect();
+            out["options"] = json!(list);
+        }
+        Widget::TextMax(n) => out["max_length"] = json!(n),
+    }
+    out
+}
+
+/// Checks a JSON value against the type and the limits of the parameter.
+/// The Customizer panel applies the same limits.
+pub fn from_json(p: &Param, v: &Json) -> Result<Value, String> {
+    let value = match &p.default {
+        Value::Num(_) => Value::Num(v.as_f64().ok_or("must be a number")?),
+        Value::Bool(_) => Value::Bool(v.as_bool().ok_or("must be true or false")?),
+        Value::Str(_) => Value::Str(v.as_str().ok_or("must be a string")?.to_string()),
+        Value::Vec(d) => {
+            let a = v.as_array().ok_or("must be an array of numbers")?;
+            if a.len() != d.len() {
+                return Err(format!("must have {} items, got {}", d.len(), a.len()));
+            }
+            let n: Option<Vec<f64>> = a.iter().map(Json::as_f64).collect();
+            Value::Vec(n.ok_or("must be an array of numbers")?)
+        }
+    };
+    match (&p.widget, &value) {
+        (Widget::Slider { min, max, .. }, Value::Num(_) | Value::Vec(_)) => {
+            let items = match &value {
+                Value::Num(n) => std::slice::from_ref(n),
+                Value::Vec(v) => v.as_slice(),
+                _ => &[],
+            };
+            if items.iter().any(|n| n < min || n > max) {
+                return Err(format!("must be {min} to {max}"));
+            }
+        }
+        (Widget::Dropdown(options), _) => {
+            if !options.iter().any(|(o, _)| same(o, &value)) {
+                let list: Vec<String> = options.iter().map(|(o, _)| o.to_scad()).collect();
+                return Err(format!("must be one of {}", list.join(", ")));
+            }
+        }
+        (Widget::TextMax(n), Value::Str(s)) if s.chars().count() > *n => {
+            return Err(format!("must have at most {n} characters"));
+        }
+        _ => {}
+    }
+    Ok(value)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn json_values_follow_the_widget_limits() {
+        let ps = parse(SRC);
+        let get = |n: &str| ps.iter().find(|p| p.name == n).unwrap();
+        assert_eq!(from_json(get("width"), &json!(50)), Ok(Value::Num(50.0)));
+        assert!(from_json(get("width"), &json!(101)).is_err());
+        assert!(from_json(get("width"), &json!("50")).is_err());
+        assert!(from_json(get("shape"), &json!("round")).is_ok());
+        assert!(from_json(get("shape"), &json!("oval")).is_err());
+        assert_eq!(
+            from_json(get("hollow"), &json!(false)),
+            Ok(Value::Bool(false))
+        );
+        assert!(from_json(get("hollow"), &json!(1)).is_err());
+        assert!(from_json(get("offset"), &json!([1, 2, 3])).is_ok());
+        assert!(from_json(get("offset"), &json!([1, 2])).is_err());
+        assert!(from_json(get("offset"), &json!([1, 2, 99])).is_err());
+        assert!(from_json(get("label"), &json!("123456789012")).is_ok());
+        assert!(from_json(get("label"), &json!("1234567890123")).is_err());
+    }
+
+    #[test]
+    fn describe_lists_limits_and_options() {
+        let ps = parse(SRC);
+        let get = |n: &str| describe(ps.iter().find(|p| p.name == n).unwrap());
+        let w = get("width");
+        assert_eq!(w["type"], "number");
+        assert_eq!(w["min"], 10.0);
+        assert_eq!(w["max"], 100.0);
+        assert_eq!(get("size")["options"][1]["label"], "Big");
+        assert_eq!(get("label")["max_length"], 12);
+    }
 
     const SRC: &str = r#"
 // Overall width
