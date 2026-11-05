@@ -10,7 +10,7 @@ SCAD Viewer (cgeosoft). A Rust desktop app that shows OpenSCAD models, edits Cus
 - `src/` - the app. See the layout table in `README.md`.
 - `examples/` - test models. `scripts/test-models.sh` runs them all. `// expect: error` marks models that must fail.
 - `scripts/build.sh` - tests and release build. `scripts/package-deb.sh`, `package-windows.ps1`, `package-macos.sh` - packages in `dist/`.
-- `.github/workflows/build.yml` - CI for Linux, Windows and macOS; releases on `v*` tags.
+- `.github/workflows/build.yml` - builds Linux, Windows and macOS on `v*` tags and makes the release. A push to `main` starts no build.
 - `packaging/` - desktop entry, icon and MIME type for the `.deb`.
 
 ## Working
@@ -18,9 +18,9 @@ SCAD Viewer (cgeosoft). A Rust desktop app that shows OpenSCAD models, edits Cus
 - Run `cargo test` after changes. Use `target/debug/scad-viewer export|slice|params` to test without the GUI.
 - The GUI may run on the user's live desktop. Do not send mouse or key input to it. For screenshots, start it with `--slice` or `--photo` when needed and capture the window.
 - To test clicks, start a private display (`Xephyr :9 -screen 1600x1040 -ac`), run the app there with `DISPLAY=:9 LIBGL_ALWAYS_SOFTWARE=1`, and send input with `xdotool` on `:9` only. Use separate `XDG_DATA_HOME` and `XDG_CONFIG_HOME`, so the user's window state and recent list stay as they are.
-- Targets: Linux (Debian first), Windows and macOS. GitHub Actions builds all three. Check other platforms locally with `cargo check --target x86_64-pc-windows-msvc` and `--target aarch64-apple-darwin`.
+- Targets: Linux (Debian first), Windows and macOS. GitHub Actions builds all three on a version tag. Check other platforms locally with `cargo check --target x86_64-pc-windows-msvc` and `--target aarch64-apple-darwin`.
 - Keep `Depends` in `scripts/package-deb.sh` in sync with new runtime libraries.
-- CI runs `cargo clippy --all-targets -- -D warnings`. Keep it clean.
+- CI runs `cargo clippy --all-targets -- -D warnings` on release tags. Run it before you tag, and keep it clean.
 - The repo is public on GitHub (MIT). Do not commit secrets, personal paths or host names.
 - `dist/` and `target/` are not in git.
 

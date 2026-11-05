@@ -190,13 +190,13 @@ The `.deb` installs the binary, a desktop entry, an icon, the `.scad` MIME type 
 
 ### Continuous integration
 
-GitHub Actions (`.github/workflows/build.yml`) builds and tests on every push:
+GitHub Actions (`.github/workflows/build.yml`) builds and tests on a version tag, or when you start it by hand:
 
 - Linux: clippy, unit tests, all test models, a `.deb` and a `.tar.gz`.
 - Windows: unit tests and a `.zip` (`scripts/package-windows.ps1`).
 - macOS: unit tests and a universal `.app` in a `.zip` (`scripts/package-macos.sh`).
 
-A tag `v*` (for example `v0.2.0`) makes a GitHub release with all files attached.
+A tag `v*` (for example `v0.2.0`) also makes a GitHub release with all files attached. A push to `main` starts no build.
 
 ### Source layout
 
