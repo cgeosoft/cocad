@@ -1,6 +1,6 @@
 [package]
 name = "scad-viewer"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 description = "OpenSCAD model viewer with Customizer parameters, STL/3MF/STEP export, slice preview and photo renders"
 authors = ["Christos Georgiou <christos@cgeosoft.com>"]
