@@ -2077,7 +2077,14 @@ impl App {
                         });
                         ui::card(ui, |ui| openscad_settings(ui, &mut edit));
                         ui::card(ui, |ui| {
-                            ui::section(ui, "MCP server");
+                            let (ok, text) = match (edit.mcp, running) {
+                                (true, true) => (true, "Running"),
+                                (false, false) => (false, "Off"),
+                                (true, false) => (false, "Starts when you save"),
+                                (false, true) => (true, "Stops when you save"),
+                            };
+                            let color = if ok { ui::GOOD } else { ui::c().dim };
+                            card_header(ui, "MCP server", color, text);
                             ui.add_space(4.0);
                             toggle_row(
                                 ui,
@@ -2085,13 +2092,6 @@ impl App {
                                 "Clients on this computer, such as Claude Desktop, can control this window.",
                                 &mut edit.mcp,
                             );
-                            let (ok, text) = match (edit.mcp, running) {
-                                (true, true) => (true, "Running"),
-                                (false, false) => (false, "Off"),
-                                (true, false) => (false, "Starts when you save"),
-                                (false, true) => (true, "Stops when you save"),
-                            };
-                            status_line(ui, if ok { ui::GOOD } else { ui::c().dim }, text);
                         });
                     });
                 ui.add_space(12.0);
@@ -2125,26 +2125,44 @@ impl App {
 
 /// The OpenSCAD card of the Settings window.
 fn openscad_settings(ui: &mut egui::Ui, edit: &mut openscad::Config) {
-    ui::section(ui, "OpenSCAD");
+    // A half typed name must not run as a program.
+    let binary_id = egui::Id::new("settings-binary");
+    let typing = ui.memory(|m| m.has_focus(binary_id));
+    let probe = (!typing).then(|| openscad::probe(&edit.binary()));
+    match &probe {
+        None => card_header(
+            ui,
+            "OpenSCAD",
+            ui::c().dim,
+            "Checks when you leave the field",
+        ),
+        Some(p) if p.version == "not found" => {
+            card_header(ui, "OpenSCAD", ui::c().danger, "Not found. Set the binary.");
+        }
+        Some(p) => {
+            let version = p.version.trim_start_matches("OpenSCAD version ");
+            let short: String = version.chars().take(32).collect();
+            card_header(ui, "OpenSCAD", ui::GOOD, &short);
+        }
+    }
     ui.add_space(4.0);
     ui.label(ui::dim("Binary"));
     let row = Vec2::new(ui.available_width(), 30.0);
     let rtl = egui::Layout::right_to_left(egui::Align::Center);
-    let binary = ui
-        .allocate_ui_with_layout(row, rtl, |ui| {
-            if ui.add(ui::ghost("Browse", false)).clicked()
-                && let Some(p) = rfd::FileDialog::new().pick_file()
-            {
-                edit.binary = p.display().to_string();
-            }
-            ui.add(
-                egui::TextEdit::singleline(&mut edit.binary)
-                    .hint_text(ui::dim("Automatic"))
-                    .desired_width(f32::INFINITY)
-                    .margin(Vec2::new(10.0, 6.0)),
-            )
-        })
-        .inner;
+    ui.allocate_ui_with_layout(row, rtl, |ui| {
+        if ui.add(ui::ghost("Browse", false)).clicked()
+            && let Some(p) = rfd::FileDialog::new().pick_file()
+        {
+            edit.binary = p.display().to_string();
+        }
+        ui.add(
+            egui::TextEdit::singleline(&mut edit.binary)
+                .id(binary_id)
+                .hint_text(ui::dim("Automatic"))
+                .desired_width(f32::INFINITY)
+                .margin(Vec2::new(10.0, 6.0)),
+        );
+    });
     ui.label(ui::dim("Extra arguments"));
     ui.add(
         egui::TextEdit::singleline(&mut edit.args)
@@ -2152,8 +2170,6 @@ fn openscad_settings(ui: &mut egui::Ui, edit: &mut openscad::Config) {
             .desired_width(f32::INFINITY)
             .margin(Vec2::new(10.0, 6.0)),
     );
-    // A half typed name must not run as a program.
-    let probe = (!binary.has_focus()).then(|| openscad::probe(&edit.binary()));
     let manifold = probe.as_ref().is_none_or(|p| p.manifold);
     let note = if manifold {
         "Much faster renders with development builds."
@@ -2164,17 +2180,6 @@ fn openscad_settings(ui: &mut egui::Ui, edit: &mut openscad::Config) {
     ui.add_enabled_ui(manifold, |ui| {
         toggle_row(ui, "Manifold backend", note, &mut edit.manifold);
     });
-    match &probe {
-        None => status_line(
-            ui,
-            ui::c().dim,
-            "Checks the binary when you leave the field",
-        ),
-        Some(p) if p.version == "not found" => {
-            status_line(ui, ui::c().danger, "OpenSCAD not found. Set the binary.");
-        }
-        Some(p) => status_line(ui, ui::GOOD, &p.version),
-    }
     if std::env::var_os("OPENSCAD").is_some() || std::env::var_os("OPENSCAD_ARGS").is_some() {
         ui.label(ui::dim(
             "$OPENSCAD or $OPENSCAD_ARGS override these values.",
@@ -2197,12 +2202,16 @@ fn toggle_row(ui: &mut egui::Ui, title: &str, note: &str, on: &mut bool) {
     });
 }
 
-/// A colored dot and a short state text.
-fn status_line(ui: &mut egui::Ui, color: Color32, text: &str) {
-    ui.horizontal(|ui| {
+/// Section title on the left, a colored dot and a short state on the right.
+fn card_header(ui: &mut egui::Ui, title: &str, color: Color32, state: &str) {
+    let row = Vec2::new(ui.available_width(), 18.0);
+    let rtl = egui::Layout::right_to_left(egui::Align::Center);
+    ui.allocate_ui_with_layout(row, rtl, |ui| {
+        ui.label(ui::dim(state).size(12.5));
         let (r, _) = ui.allocate_exact_size(Vec2::new(8.0, 8.0), egui::Sense::hover());
         ui.painter().circle_filled(r.center(), 4.0, color);
-        ui.label(ui::dim(text));
+        let ltr = egui::Layout::left_to_right(egui::Align::Center);
+        ui.with_layout(ltr, |ui| ui::section(ui, title));
     });
 }
 
