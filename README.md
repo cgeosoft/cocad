@@ -61,6 +61,8 @@ You can also open a file with Ctrl+O or drop it on the window. **File** lists th
 | Ctrl+Q | Quit |
 | Alt+F, Alt+M, Alt+V, Alt+H | Open the File, Model, View or Help menu |
 
+![The File menu with the recent models](images/screen-menu.jpg)
+
 The menu bar holds all commands: **File**, **Model**, **View** and **Help**. The right sidebar has the **Model**, **Slice** and **Photo** tabs. The **Model** tab has Auto render, Render, the export buttons and the mesh data.
 
 The status bar at the bottom shows the render state and time, the OpenSCAD version and backend, the model size, triangles and volume, open edges, the slice or photo state, and the **Console** button with the OpenSCAD output.
