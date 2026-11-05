@@ -346,7 +346,10 @@
       b.type = "button";
       b.dataset.prompt = "";
       b.setAttribute("aria-pressed", "false");
-      b.addEventListener("click", () => runPrompt(p, b));
+      b.addEventListener("click", () => {
+        window.scadAnalytics.track("demo_prompt", { model: p.model });
+        runPrompt(p, b);
+      });
       prompts.append(b);
     });
 

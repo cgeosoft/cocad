@@ -100,6 +100,11 @@
     render();
   }));
 
+  $$("#primary-download-btn, [data-dl]").forEach((a) => a.addEventListener("click", () => {
+    const kind = a.dataset.dl || LABELS[activeOS].key;
+    window.scadAnalytics.track("download_clicked", { os: kind.split("-")[0], type: kind.split("-")[1] });
+  }));
+
   // Scroll reveal ----------------------------------------------------------
 
   function reveal() {

@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Privacy Policy - SCAD Viewer</title>
+  <meta name="description" content="What the SCAD Viewer website collects, how optional PostHog analytics work, and how to change your choice. The desktop app sends no data.">
+  <link rel="canonical" href="https://scadviewer.cgeosoft.com/privacy/">
+  <link rel="icon" type="image/svg+xml" href="/assets/app-icon.svg">
+  <meta name="theme-color" content="#0f1114">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Sansation:wght@700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body data-no-consent-prompt>
+  <header class="site-header">
+    <div class="container nav-container">
+      <a href="/" class="brand-link" aria-label="SCAD Viewer home">
+        <img src="/assets/app-icon.svg" alt="" class="brand-icon" width="28" height="28">
+        <span class="brand-name">SCAD Viewer</span>
+      </a>
+      <div class="nav-actions legal-nav"><a href="/" class="btn">Back to the site</a></div>
+    </div>
+  </header>
+
+  <main class="section container legal">
+    <p class="label"><span class="dot"></span>Privacy</p>
+    <h1 class="big-title">Privacy policy</h1>
+    <p class="legal-date mono">Last updated: November 5, 2026</p>
+
+    <section>
+      <h2>Summary</h2>
+      <ul>
+        <li>The desktop app sends no data. It has no telemetry and no account.</li>
+        <li>This website uses PostHog analytics only if you accept them.</li>
+        <li>The website sets no cookies.</li>
+        <li>The website has no forms and no accounts.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Who is responsible</h2>
+      <p>Christos Georgiou (cgeosoft) runs this website. Contact: <a href="mailto:christos@cgeosoft.com">christos@cgeosoft.com</a>.</p>
+    </section>
+
+    <section id="services">
+      <h2>What this website uses</h2>
+      <div class="card legal-table">
+        <table>
+          <thead><tr><th>Service</th><th>When</th><th>What it receives</th><th>Why</th></tr></thead>
+          <tbody>
+            <tr><td>Cloudflare Pages</td><td>Each visit</td><td>IP address, browser data, the pages you request</td><td>Hosting and security</td></tr>
+            <tr><td>Google Fonts</td><td>Each visit</td><td>IP address, browser data</td><td>Text fonts of the site</td></tr>
+            <tr><td>GitHub API</td><td>Each visit, at most one time in 10 minutes</td><td>IP address, browser data</td><td>Latest version and download links</td></tr>
+            <tr><td>PostHog (EU cloud)</td><td>Only after you accept</td><td>IP address, browser data, page views, download clicks, demo use, a random ID</td><td>To see which parts of the site people use</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>The legal basis for PostHog is your consent. The legal basis for the other services is the legitimate interest in running the site. These companies can process data outside the EU, under their own privacy policies.</p>
+    </section>
+
+    <section id="analytics">
+      <h2>Analytics</h2>
+      <p>The site loads PostHog only after you accept. If you decline, the page makes no request to PostHog.</p>
+      <p>After you accept, PostHog records these events: page view, download click (system and file type) and demo prompt. It does not record your clicks in general, your keystrokes or your session. No event holds your name or your email address.</p>
+      <p>PostHog keeps the events for the retention period of the project. To ask for their removal, write to the contact address.</p>
+    </section>
+
+    <section id="cookies">
+      <h2>Cookies and browser storage</h2>
+      <p>This website sets no cookies. It uses the local storage of your browser:</p>
+      <div class="card legal-table">
+        <table>
+          <thead><tr><th>Name</th><th>Purpose</th><th>Kept for</th></tr></thead>
+          <tbody>
+            <tr><td class="mono">scadviewer_consent_v1</td><td>Your analytics choice</td><td>12 months, then the site asks again</td></tr>
+            <tr><td class="mono">scadviewer_release_v1</td><td>Latest version data, so the site asks GitHub less often</td><td>Replaced after 10 minutes</td></tr>
+            <tr><td class="mono">ph_*, __ph_*</td><td>Random PostHog ID and its opt-in state. Only after you accept</td><td>Until you decline or clear the storage</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="choice">
+      <h2>Change your choice</h2>
+      <p>You can change your choice at any time. When you decline, the site stops the analytics and removes the PostHog ID from your browser. <span class="mono" data-consent-status></span></p>
+      <button type="button" class="btn btn-soft" data-cookie-settings hidden>Cookie settings</button>
+    </section>
+
+    <section id="app">
+      <h2>The desktop app</h2>
+      <p>SCAD Viewer makes no connection to a server of ours. It has no telemetry, no update check and no account. Your models stay on your computer.</p>
+      <p>The MCP server listens on 127.0.0.1 only. If you connect an AI client, that client sends what it reads to its own model provider. The policy of that provider applies.</p>
+    </section>
+
+    <section id="rights">
+      <h2>Your rights</h2>
+      <p>You can ask for access to your data, and for its correction or deletion. You can object to its use, and you can withdraw consent. To do this, write to the contact address. You can also complain to your data protection authority.</p>
+    </section>
+
+    <section>
+      <h2>Changes</h2>
+      <p>This page shows the date of the last change.</p>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container status-bar mono">
+      <p>&copy; 2026 <a href="https://cgeosoft.com">cgeosoft</a> &middot; MIT</p>
+      <nav aria-label="Footer">
+        <a href="/">home</a>
+        <a href="https://github.com/cgeosoft/scad-viewer" target="_blank" rel="noopener noreferrer">source</a>
+      </nav>
+    </div>
+  </footer>
+
+  <script src="/boot.js"></script>
+  <script src="/analytics.js" defer></script>
+</body>
+</html>

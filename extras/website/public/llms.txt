@@ -1,0 +1,22 @@
+# SCAD Viewer
+
+> SCAD Viewer is a free, MIT licensed desktop app for OpenSCAD models on Linux, Windows and macOS. An AI agent changes the model over MCP, the window renders it again, and the user checks a slice preview for errors before printing. It exports STL, 3MF and STEP, and it makes path traced photo renders.
+
+OpenSCAD does the geometry through its CLI, so the user must install OpenSCAD too. A development snapshot with the Manifold backend is much faster than the 2021 release. The slice view is for preview only: it has no travel moves, supports or bridges, and it writes no G-code. The app has no telemetry.
+
+## Docs
+
+- [Website](https://scadviewer.cgeosoft.com/): Overview, the agent loop, MCP setup and downloads
+- [README](https://raw.githubusercontent.com/cgeosoft/scad-viewer/main/README.md): Install, usage, MCP tools, parameter sets, CLI, Customizer syntax and build steps
+- [Releases](https://github.com/cgeosoft/scad-viewer/releases): Downloads and release notes
+
+## MCP
+
+- [MCP server](https://github.com/cgeosoft/scad-viewer#mcp-server): Client setup, the tool list, behavior and security
+
+The client runs `scad-viewer mcp` as a stdio server. Tools: `get_state`, `get_params`, `get_source`, `view_model`, `open_model`, `set_params`, `reset_params`, `render`, `slice`, `export_model`, `save_photo`, `set_view`, `load_parameter_set`, `save_parameter_set`, `list_windows`, `select_window`.
+
+## Optional
+
+- [Source code](https://github.com/cgeosoft/scad-viewer): Rust, egui and an own OpenGL renderer
+- [Privacy policy](https://scadviewer.cgeosoft.com/privacy/): Website analytics and storage

@@ -11,6 +11,7 @@
   <meta name="theme-color" content="#0f1114">
   <meta property="og:title" content="SCAD Viewer - Ask for the change. Check the slice. Print.">
   <meta property="og:description" content="An AI agent changes the OpenSCAD model over MCP. You see the render and the slice in seconds. Free, MIT, for Linux, Windows and macOS.">
+  <link rel="alternate" type="text/plain" href="/llms.txt" title="llms.txt">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://scadviewer.cgeosoft.com/">
   <meta property="og:image" content="https://scadviewer.cgeosoft.com/assets/og.png">
@@ -363,7 +364,7 @@
         </details>
         <details>
           <summary>Does my model leave my computer?</summary>
-          <p>SCAD Viewer has no account and no server. The MCP server listens on 127.0.0.1 only. Your AI client sends what it reads to its own model provider, so pick the client with that in mind.</p>
+          <p>SCAD Viewer has no account, no server and no telemetry. The MCP server listens on 127.0.0.1 only. Your AI client sends what it reads to its own model provider, so pick the client with that in mind. See the <a href="/privacy/">privacy policy</a>.</p>
         </details>
         <details>
           <summary>Do I need an agent?</summary>
@@ -384,12 +385,15 @@
         <a href="https://github.com/cgeosoft/scad-viewer" target="_blank" rel="noopener noreferrer">source</a>
         <a href="https://github.com/cgeosoft/scad-viewer/issues" target="_blank" rel="noopener noreferrer">issues</a>
         <a href="https://github.com/cgeosoft/scad-viewer/releases" target="_blank" rel="noopener noreferrer">releases</a>
+        <a href="/privacy/">privacy</a>
+        <button type="button" class="link-btn" data-cookie-settings hidden>cookies</button>
       </nav>
     </div>
   </footer>
 
   <dialog class="lightbox" aria-label="Enlarged image"><img src="data:," alt=""></dialog>
 
+  <script src="analytics.js" defer></script>
   <script src="script.js" defer></script>
   <script src="viewer.js" defer></script>
   <script src="demo.js" defer></script>

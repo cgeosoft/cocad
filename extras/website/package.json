@@ -5,6 +5,6 @@
   "description": "Website of SCAD Viewer, static files for Cloudflare Pages",
   "scripts": {
     "dev": "bunx serve public",
-    "deploy": "wrangler pages deploy public --project-name scad-viewer --branch main"
+    "deploy": "./deploy.sh"
   }
 }
