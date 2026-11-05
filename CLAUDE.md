@@ -31,6 +31,7 @@ SCAD Viewer (cgeosoft). A Rust desktop app that shows OpenSCAD models, edits Cus
 - Git LFS stores images, video, STL and 3MF files (`.gitattributes`). Exception: `images/` (README images) is plain git, so GitHub shows it. Keep these files small.
 - Never take dates from file modification times. Record the source in `dates_from`.
 - Warn before deleting files or pushing.
+- Releases bump the minor version by default (0.2.0, 0.3.0). Bump the patch only when the owner says so.
 - Remote `origin` is the private main repo; `github` is the public mirror. Branch `main`. Push only when the owner asks.
 
 ## Writing style
