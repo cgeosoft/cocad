@@ -9,7 +9,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 cargo build --quiet
-bin=$PWD/target/debug/scad-viewer
+bin=$PWD/target/debug/cocad
 out=$PWD/images/tour
 disp=:9
 width=1120
@@ -18,14 +18,14 @@ height=700
 work=$(mktemp -d)
 models=$work/models
 export XDG_CONFIG_HOME=$work/config XDG_DATA_HOME=$work/data
-mkdir -p "$models" "$XDG_CONFIG_HOME/scad-viewer" "$out"
+mkdir -p "$models" "$XDG_CONFIG_HOME/cocad" "$out"
 cp examples/*.scad "$models/"
 # The tour must not cover the app in its own screenshots.
-touch "$XDG_CONFIG_HOME/scad-viewer/tour_seen"
-echo 'theme = dark' > "$XDG_CONFIG_HOME/scad-viewer/config"
+touch "$XDG_CONFIG_HOME/cocad/tour_seen"
+echo 'theme = dark' > "$XDG_CONFIG_HOME/cocad/config"
 for m in vase gear knob honeycomb-tray; do
     echo "$models/$m.scad"
-done > "$XDG_CONFIG_HOME/scad-viewer/recent"
+done > "$XDG_CONFIG_HOME/cocad/recent"
 
 xephyr=
 app=
@@ -45,7 +45,7 @@ start() {
     "$bin" "$@" &
     app=$!
     sleep 2
-    xdotool search --name 'SCAD Viewer' windowmove 0 0 windowsize "$width" "$height" windowfocus
+    xdotool search --name 'CoCAD' windowmove 0 0 windowsize "$width" "$height" windowfocus
     sleep 1
 }
 

@@ -70,7 +70,7 @@ pub fn write(path: &Path, mesh: &Mesh, meta: &Meta) -> Result<()> {
 pub fn stl_bytes(mesh: &Mesh) -> Vec<u8> {
     let mut out = Vec::with_capacity(84 + mesh.triangles.len() * 50);
     let mut header = [0u8; 80];
-    let tag = b"scad-viewer binary STL";
+    let tag = b"cocad binary STL";
     header[..tag.len()].copy_from_slice(tag);
     out.extend_from_slice(&header);
     out.extend_from_slice(&(mesh.triangles.len() as u32).to_le_bytes());
@@ -104,7 +104,7 @@ pub fn threemf_bytes(mesh: &Mesh, meta: &Meta) -> Result<Vec<u8>> {
         " <metadata name=\"Title\">{}</metadata>",
         xml_escape(&meta.title)
     );
-    model.push_str(" <metadata name=\"Application\">scad-viewer</metadata>\n");
+    model.push_str(" <metadata name=\"Application\">cocad</metadata>\n");
     if !meta.params.is_empty() {
         let desc: Vec<String> = meta
             .params
@@ -330,7 +330,7 @@ pub fn step_string(mesh: &Mesh, meta: &Meta) -> String {
     let _ = write!(
         s,
         "ISO-10303-21;\nHEADER;\nFILE_DESCRIPTION(('{name}'),'2;1');\n\
-FILE_NAME('{name}.step','',(''),(''),'scad-viewer','scad-viewer','');\n\
+FILE_NAME('{name}.step','',(''),(''),'cocad','cocad','');\n\
 FILE_SCHEMA(('AUTOMOTIVE_DESIGN {{ 1 0 10303 214 1 1 1 1 }}'));\nENDSEC;\nDATA;\n\
 #1=APPLICATION_CONTEXT('core data for automotive mechanical design processes');\n\
 #2=APPLICATION_PROTOCOL_DEFINITION('international standard','automotive_design',2000,#1);\n\

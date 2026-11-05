@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds SCAD Viewer.
+# Builds CoCAD.
 #
 # Usage: scripts/build.sh [--debug] [--no-test]
 #   --debug    debug build (default: release)
@@ -27,5 +27,5 @@ else
     cargo build --locked
 fi
 
-bin="target/$profile/scad-viewer"
+bin="target/$profile/cocad"
 echo "Built $bin ($(du -h "$bin" | cut -f1))"

@@ -1,11 +1,11 @@
 [package]
-name = "scad-viewer"
+name = "cocad"
 version = "0.2.1"
 edition = "2024"
 description = "OpenSCAD model viewer with Customizer parameters, STL/3MF/STEP export, slice preview and photo renders"
 authors = ["Christos Georgiou <christos@cgeosoft.com>"]
 license = "MIT"
-repository = "https://github.com/cgeosoft/scad-viewer"
+repository = "https://github.com/cgeosoft/cocad"
 readme = "README.md"
 keywords = ["openscad", "3d-printing", "cad", "viewer", "slicer"]
 categories = ["graphics", "visualization"]

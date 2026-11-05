@@ -1,6 +1,6 @@
 //! MCP server, so that Claude Desktop and other MCP clients can drive the app.
 //!
-//! The client starts `scad-viewer mcp` and speaks JSON-RPC on stdin and stdout.
+//! The client starts `cocad mcp` and speaks JSON-RPC on stdin and stdout.
 //! That process holds no model. It passes each tool call to a running window.
 //!
 //! Each window listens on a free loopback TCP port and writes the port and a
@@ -26,7 +26,7 @@ const MAX_LINE: u64 = 1 << 20;
 /// on waits sooner, see `remote::WAIT`.
 const CALL_TIMEOUT: Duration = Duration::from_secs(70);
 
-const INSTRUCTIONS: &str = "SCAD Viewer shows one OpenSCAD model in a desktop window. \
+const INSTRUCTIONS: &str = "CoCAD shows one OpenSCAD model in a desktop window. \
 Start with get_state, then get_params to see the Customizer parameters and their limits. \
 Use get_source to read the model code. Use view_model to see the model as an image. \
 set_params changes values in the window and waits for the render. \
@@ -165,9 +165,9 @@ struct Instance {
 
 impl Instance {
     fn call(&self, tool: &str, args: &Json) -> Result<Json, String> {
-        let closed = |e: std::io::Error| format!("SCAD Viewer connection failed: {e}");
+        let closed = |e: std::io::Error| format!("CoCAD connection failed: {e}");
         let stream = TcpStream::connect_timeout(&self.addr, Duration::from_secs(2))
-            .map_err(|e| format!("SCAD Viewer window is gone: {e}"))?;
+            .map_err(|e| format!("CoCAD window is gone: {e}"))?;
         stream
             .set_read_timeout(Some(CALL_TIMEOUT))
             .map_err(closed)?;
@@ -226,7 +226,7 @@ fn launch() -> Result<Instance, String> {
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .spawn()
-        .map_err(|e| format!("Cannot start SCAD Viewer: {e}"))?;
+        .map_err(|e| format!("Cannot start CoCAD: {e}"))?;
     let until = Instant::now() + Duration::from_secs(15);
     while Instant::now() < until {
         std::thread::sleep(Duration::from_millis(200));
@@ -234,7 +234,7 @@ fn launch() -> Result<Instance, String> {
             return Ok(i);
         }
     }
-    Err("SCAD Viewer started, but its window does not answer. \
+    Err("CoCAD started, but its window does not answer. \
          Check that the MCP option is on in File > Settings."
         .into())
 }
@@ -298,7 +298,7 @@ fn tools() -> Json {
     json!([
         tool(
             "list_windows",
-            "List the open SCAD Viewer windows and their models. Use this when more than one window is open.",
+            "List the open CoCAD windows and their models. Use this when more than one window is open.",
             true,
             false,
             no_args()
@@ -344,7 +344,7 @@ fn tools() -> Json {
         ),
         tool(
             "open_model",
-            "Open a .scad file in the window. Starts SCAD Viewer when it is not running. Edited values of the previous model are lost.",
+            "Open a .scad file in the window. Starts CoCAD when it is not running. Edited values of the previous model are lost.",
             false,
             false,
             json!({
@@ -505,7 +505,7 @@ impl Bridge {
     fn window(&self) -> Result<Instance, String> {
         let mut all = instances();
         if all.is_empty() {
-            return Err("SCAD Viewer is not running, or its MCP option is off. \
+            return Err("CoCAD is not running, or its MCP option is off. \
                  Call open_model with a path to start it."
                 .into());
         }
@@ -578,7 +578,7 @@ impl Bridge {
                 json!({
                     "protocolVersion": version,
                     "capabilities": { "tools": {} },
-                    "serverInfo": { "name": "scad-viewer", "version": env!("CARGO_PKG_VERSION") },
+                    "serverInfo": { "name": "cocad", "version": env!("CARGO_PKG_VERSION") },
                     "instructions": INSTRUCTIONS,
                 })
             }
@@ -608,7 +608,7 @@ impl Bridge {
     }
 }
 
-/// `scad-viewer mcp`: serves MCP on stdin and stdout until the client closes them.
+/// `cocad mcp`: serves MCP on stdin and stdout until the client closes them.
 pub fn run() -> Result<()> {
     let mut bridge = Bridge::default();
     let stdin = std::io::stdin();

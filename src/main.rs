@@ -21,18 +21,18 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 const USAGE: &str =
-    "SCAD Viewer: view OpenSCAD models, edit Customizer parameters, export and preview slices.
+    "CoCAD: view OpenSCAD models, edit Customizer parameters, export and preview slices.
 
 Usage:
-  scad-viewer [--slice|--photo] [FILE.scad]    Open the viewer (start in slice or photo view)
-  scad-viewer mcp                              Serve MCP on stdin and stdout, for Claude Desktop and
+  cocad [--slice|--photo] [FILE.scad]    Open the viewer (start in slice or photo view)
+  cocad mcp                              Serve MCP on stdin and stdout, for Claude Desktop and
                                                other MCP clients. Controls the open window.
-  scad-viewer params FILE.scad                 List the Customizer parameters
-  scad-viewer export FILE.scad -o OUT [-P SET] [-D name=value]...
+  cocad params FILE.scad                 List the Customizer parameters
+  cocad export FILE.scad -o OUT [-P SET] [-D name=value]...
                                                Render and write OUT (.stl, .3mf or .step)
-  scad-viewer slice FILE.scad [-P SET] [-D name=value]... [--layer-height MM] [--infill PCT] [--walls N]
+  cocad slice FILE.scad [-P SET] [-D name=value]... [--layer-height MM] [--infill PCT] [--walls N]
                                                Slice and print estimates
-  scad-viewer photo FILE.scad -o OUT.png [-P SET] [-D name=value]... [--size WxH] [--samples N]
+  cocad photo FILE.scad -o OUT.png [-P SET] [-D name=value]... [--size WxH] [--samples N]
                     [--color RRGGBB] [--finish matte|satin|gloss] [--studio dark|light] [--layer-lines]
                                                Photo render (path traced) from the iso view
 
@@ -44,7 +44,7 @@ Environment:
   OPENSCAD       OpenSCAD binary (overrides the saved setting; default: openscad)
   OPENSCAD_ARGS  Extra OpenSCAD arguments (overrides the saved setting)
 
-Settings are saved in $XDG_CONFIG_HOME/scad-viewer/config (Settings window in the app).
+Settings are saved in $XDG_CONFIG_HOME/cocad/config (Settings window in the app).
 --backend=manifold is added when the OpenSCAD binary supports it.
 ";
 
@@ -63,7 +63,7 @@ fn main() -> Result<()> {
             Ok(())
         }
         Some("-V" | "--version") => {
-            println!("scad-viewer {}", env!("CARGO_PKG_VERSION"));
+            println!("cocad {}", env!("CARGO_PKG_VERSION"));
             Ok(())
         }
         Some("mcp") => mcp::run(),
@@ -83,16 +83,16 @@ fn gui(file: Option<PathBuf>, mode: &str) -> Result<()> {
         viewport: eframe::egui::ViewportBuilder::default()
             .with_inner_size([1400.0, 900.0])
             .with_min_inner_size([800.0, 500.0])
-            .with_app_id("scad-viewer")
-            .with_title("SCAD Viewer"),
-        // Window position and size, panel widths: ~/.local/share/scad-viewer.
+            .with_app_id("cocad")
+            .with_title("CoCAD"),
+        // Window position and size, panel widths: ~/.local/share/cocad.
         persist_window: true,
         depth_buffer: 24,
         multisampling: 4,
         ..Default::default()
     };
     eframe::run_native(
-        "SCAD Viewer",
+        "CoCAD",
         options,
         Box::new(move |cc| Ok(Box::new(app::App::new(cc, file, &mode)))),
     )

@@ -1,14 +1,14 @@
-# SCAD Viewer
+# CoCAD
 
-[![Build](https://github.com/cgeosoft/scad-viewer/actions/workflows/build.yml/badge.svg)](https://github.com/cgeosoft/scad-viewer/actions/workflows/build.yml)
+[![Build](https://github.com/cgeosoft/cocad/actions/workflows/build.yml/badge.svg)](https://github.com/cgeosoft/cocad/actions/workflows/build.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-orange.svg)](LICENSE)
 ![Platforms](https://img.shields.io/badge/platform-Linux%20%7C%20Windows%20%7C%20macOS-555.svg)
 
 A fast desktop viewer for OpenSCAD models. Open a `.scad` file, change its Customizer parameters with sliders, and see the model update. Export STL, 3MF or STEP, check the print layers, and render a photo of the part.
 
-![SCAD Viewer: slice preview of the honeycomb tray example](images/screen-slice.jpg)
+![CoCAD: slice preview of the honeycomb tray example](images/screen-slice.jpg)
 
-OpenSCAD does the geometry. SCAD Viewer runs the `openscad` CLI in the background, reads the mesh and does the rest. With an OpenSCAD development build (Manifold backend), most models render in less than a second.
+OpenSCAD does the geometry. CoCAD runs the `openscad` CLI in the background, reads the mesh and does the rest. With an OpenSCAD development build (Manifold backend), most models render in less than a second.
 
 ## Highlights
 
@@ -25,23 +25,23 @@ OpenSCAD does the geometry. SCAD Viewer runs the `openscad` CLI in the backgroun
 ## Install
 
 1. Install OpenSCAD. A development snapshot is much faster than the 2021 release: <https://openscad.org/downloads.html#snapshots>.
-2. Download SCAD Viewer for your system from the [releases page](https://github.com/cgeosoft/scad-viewer/releases):
+2. Download CoCAD for your system from the [releases page](https://github.com/cgeosoft/cocad/releases):
 
 | System | File | How to install |
 |---|---|---|
-| Debian, Ubuntu | `scad-viewer_<version>_amd64.deb` | `sudo apt install ./scad-viewer_<version>_amd64.deb` |
-| Other Linux | `scad-viewer-<version>-linux-x86_64.tar.gz` | Unpack and run `scad-viewer`. Needs GTK 3 and OpenGL. |
-| Windows | `scad-viewer-<version>-windows-x86_64.zip` | Unpack and run `scad-viewer.exe`. |
-| macOS (Apple Silicon and Intel) | `scad-viewer-<version>-macos-universal.zip` | Unpack and move **SCAD Viewer** to Applications. The app is not signed: the first time, right-click it and choose **Open**. |
+| Debian, Ubuntu | `cocad_<version>_amd64.deb` | `sudo apt install ./cocad_<version>_amd64.deb` |
+| Other Linux | `cocad-<version>-linux-x86_64.tar.gz` | Unpack and run `cocad`. Needs GTK 3 and OpenGL. |
+| Windows | `cocad-<version>-windows-x86_64.zip` | Unpack and run `cocad.exe`. |
+| macOS (Apple Silicon and Intel) | `cocad-<version>-macos-universal.zip` | Unpack and move **CoCAD** to Applications. The app is not signed: the first time, right-click it and choose **Open**. |
 
-SCAD Viewer finds OpenSCAD on the `PATH` and in the usual install folders (`C:\Program Files\OpenSCAD*`, `/Applications/OpenSCAD*.app`, Homebrew). If it does not, set the binary in **File > Settings**.
+CoCAD finds OpenSCAD on the `PATH` and in the usual install folders (`C:\Program Files\OpenSCAD*`, `/Applications/OpenSCAD*.app`, Homebrew). If it does not, set the binary in **File > Settings**.
 
 ## Usage
 
 ```bash
-scad-viewer model.scad            # open in the model view
-scad-viewer --slice model.scad    # open in the slice view
-scad-viewer --photo model.scad    # open in the photo view
+cocad model.scad            # open in the model view
+cocad --slice model.scad    # open in the slice view
+cocad --photo model.scad    # open in the photo view
 ```
 
 You can also open a file with Ctrl+O or drop it on the window. **File** lists the last 10 models. The window shows the same list when no model is open. When the `.scad` file changes on disk, the model reloads and your edited values stay.
@@ -72,24 +72,24 @@ The status bar at the bottom shows the render state and time, the OpenSCAD versi
 
 ## MCP server
 
-SCAD Viewer has an MCP server, so that an AI client can work with the open window. The client can read the model and its parameters, change values, see the result as an image, and run app commands.
+CoCAD has an MCP server, so that an AI client can work with the open window. The client can read the model and its parameters, change values, see the result as an image, and run app commands.
 
 Add the server to the client. For Claude Desktop, edit `claude_desktop_config.json` and restart Claude Desktop:
 
 ```json
 {
   "mcpServers": {
-    "scad-viewer": {
-      "command": "scad-viewer",
+    "cocad": {
+      "command": "cocad",
       "args": ["mcp"]
     }
   }
 }
 ```
 
-Use the full path of the binary when it is not on the `PATH` of the client. On Windows, this is `scad-viewer.exe` in the folder where you unpacked the zip, with double backslashes in the JSON. On macOS, it is `SCAD Viewer.app/Contents/MacOS/scad-viewer` in Applications.
+Use the full path of the binary when it is not on the `PATH` of the client. On Windows, this is `cocad.exe` in the folder where you unpacked the zip, with double backslashes in the JSON. On macOS, it is `CoCAD.app/Contents/MacOS/cocad` in Applications.
 
-The client starts `scad-viewer mcp`. This process has no window. It sends each tool call to the open window, and you see the changes there. `open_model` starts the app when it is not running.
+The client starts `cocad mcp`. This process has no window. It sends each tool call to the open window, and you see the changes there. `open_model` starts the app when it is not running.
 
 | Tool | Action |
 |---|---|
@@ -166,11 +166,11 @@ The **Photo** view path-traces the current camera view on all CPU cores. The ima
 ## Command line
 
 ```bash
-scad-viewer params model.scad
-scad-viewer export model.scad -o model.3mf -D width=80 -D 'shape="square"'
-scad-viewer export model.scad -o big.stl -P big          # saved set 'big' from model.json
-scad-viewer slice model.scad --layer-height 0.2 --infill 20 --walls 3
-scad-viewer photo model.scad -o model.png --size 1600x1200 --samples 256 --color eb6f40 --finish satin --layer-lines
+cocad params model.scad
+cocad export model.scad -o model.3mf -D width=80 -D 'shape="square"'
+cocad export model.scad -o big.stl -P big          # saved set 'big' from model.json
+cocad slice model.scad --layer-height 0.2 --infill 20 --walls 3
+cocad photo model.scad -o model.png --size 1600x1200 --samples 256 --color eb6f40 --finish satin --layer-lines
 ```
 
 - `-P name` loads a saved set. `-p file.json` picks the sets file. Without `-p`, the CLI uses the file the app remembers, else `<model>.json`.
@@ -181,9 +181,9 @@ scad-viewer photo model.scad -o model.png --size 1600x1200 --samples 256 --color
 
 OpenSCAD 2021.01 (the Debian package) uses the CGAL backend. CGAL is slow on large models: a model that takes 13 s with CGAL can take 0.3 s with Manifold. OpenSCAD development builds have the Manifold backend.
 
-- With no binary set, SCAD Viewer looks for `openscad-nightly`, then `openscad`, on the PATH and in the usual install folders.
+- With no binary set, CoCAD looks for `openscad-nightly`, then `openscad`, on the PATH and in the usual install folders.
 - Open **File > Settings** to set the OpenSCAD binary (for example a development AppImage), extra arguments and the theme.
-- When the binary supports Manifold, SCAD Viewer adds `--backend=manifold`. Turn this off in Settings, or set your own `--backend` argument.
+- When the binary supports Manifold, CoCAD adds `--backend=manifold`. Turn this off in Settings, or set your own `--backend` argument.
 - `$OPENSCAD` and `$OPENSCAD_ARGS` override the saved values.
 
 The settings are saved in the settings folder. The CLI commands use them too.
@@ -192,13 +192,13 @@ The settings folder also holds `recent`, the list of recent models, `mcp/`, the 
 
 | System | Settings folder |
 |---|---|
-| Linux | `~/.config/scad-viewer` |
-| Windows | `%APPDATA%\scad-viewer` |
-| macOS | `~/Library/Application Support/scad-viewer` |
+| Linux | `~/.config/cocad` |
+| Windows | `%APPDATA%\cocad` |
+| macOS | `~/Library/Application Support/cocad` |
 
 ## Customizer syntax
 
-SCAD Viewer reads the same comments as the OpenSCAD Customizer. Parsing stops at the first top-level `module` or `function`.
+CoCAD reads the same comments as the OpenSCAD Customizer. Parsing stops at the first top-level `module` or `function`.
 
 ```openscad
 /* [Size] */
@@ -237,7 +237,7 @@ On Linux, the scripts build and test in one step:
 ```bash
 scripts/build.sh            # release build, runs the tests first
 scripts/build.sh --debug    # debug build
-scripts/package-deb.sh      # writes dist/scad-viewer_<version>_<arch>.deb
+scripts/package-deb.sh      # writes dist/cocad_<version>_<arch>.deb
 ```
 
 The `.deb` installs the binary, a desktop entry, an icon, the `.scad` MIME type and the examples.

@@ -18,7 +18,7 @@ done
 [ ${#models[@]} -eq 0 ] && models=(examples/*.scad)
 
 if [ "$profile" = release ]; then cargo build --release --quiet; else cargo build --quiet; fi || exit 1
-bin=target/$profile/scad-viewer
+bin=target/$profile/cocad
 out=$(mktemp -d)
 trap 'rm -rf "$out"' EXIT
 

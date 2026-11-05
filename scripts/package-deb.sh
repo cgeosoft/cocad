@@ -4,7 +4,7 @@
 # Usage: scripts/package-deb.sh [--no-build]
 #   --no-build  package the existing target/release binary
 #
-# Install with: sudo apt install ./dist/scad-viewer_<version>_<arch>.deb
+# Install with: sudo apt install ./dist/cocad_<version>_<arch>.deb
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -19,7 +19,7 @@ done
 
 [ "$build" = 1 ] && scripts/build.sh
 
-name=scad-viewer
+name=cocad
 version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
 arch=$(dpkg --print-architecture)
 bin=target/release/$name
@@ -49,7 +49,7 @@ Depends: libc6, libgcc-s1, libgl1, libx11-6, libxkbcommon0, libxcursor1, libxran
 Recommends: libwayland-client0, libxkbcommon-x11-0
 Section: graphics
 Priority: optional
-Homepage: https://github.com/cgeosoft/scad-viewer
+Homepage: https://github.com/cgeosoft/cocad
 Description: OpenSCAD model viewer with Customizer parameters
  Opens .scad files, shows the Customizer parameters as sliders and
  lists, and renders the model with OpenSCAD. Exports STL, 3MF and STEP.

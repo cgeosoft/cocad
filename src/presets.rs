@@ -154,7 +154,7 @@ mod tests {
 
     #[test]
     fn save_apply_delete() {
-        let dir = std::env::temp_dir().join(format!("scad-viewer-presets-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("cocad-presets-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("m.json");
         let src = "w = 10; // [1:100]\nshape = \"round\"; // [round, square]\nlabel = \"5\";\non = true;\nv = [1, 2];\n";

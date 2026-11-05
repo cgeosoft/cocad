@@ -1,4 +1,4 @@
-// Demo model for SCAD Viewer. It uses every Customizer widget type.
+// Demo model for CoCAD. It uses every Customizer widget type.
 
 /* [Size] */
 // Outer width of the box

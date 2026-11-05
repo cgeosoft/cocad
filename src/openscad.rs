@@ -15,7 +15,7 @@ pub struct RenderOutput {
     pub elapsed: Duration,
 }
 
-/// How to run OpenSCAD. Saved in `$XDG_CONFIG_HOME/scad-viewer/config`.
+/// How to run OpenSCAD. Saved in `$XDG_CONFIG_HOME/cocad/config`.
 /// `$OPENSCAD` and `$OPENSCAD_ARGS` override the saved values.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Config {
@@ -43,9 +43,9 @@ impl Default for Config {
     }
 }
 
-/// Per-user settings folder: `%APPDATA%\scad-viewer` on Windows,
-/// `~/Library/Application Support/scad-viewer` on macOS, else
-/// `$XDG_CONFIG_HOME/scad-viewer` or `~/.config/scad-viewer`.
+/// Per-user settings folder: `%APPDATA%\cocad` on Windows,
+/// `~/Library/Application Support/cocad` on macOS, else
+/// `$XDG_CONFIG_HOME/cocad` or `~/.config/cocad`.
 pub fn config_dir() -> Option<PathBuf> {
     let base = if cfg!(windows) {
         PathBuf::from(std::env::var_os("APPDATA")?)
@@ -56,7 +56,7 @@ pub fn config_dir() -> Option<PathBuf> {
             .map(PathBuf::from)
             .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))?
     };
-    Some(base.join("scad-viewer"))
+    Some(base.join("cocad"))
 }
 
 fn config_path() -> Option<PathBuf> {
@@ -237,7 +237,7 @@ pub fn probe(binary: &str) -> Probe {
 fn temp_stl() -> PathBuf {
     static N: AtomicU64 = AtomicU64::new(0);
     std::env::temp_dir().join(format!(
-        "scad-viewer-{}-{}.stl",
+        "cocad-{}-{}.stl",
         std::process::id(),
         N.fetch_add(1, Ordering::Relaxed)
     ))

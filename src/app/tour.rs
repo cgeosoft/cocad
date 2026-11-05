@@ -31,7 +31,7 @@ const CONNECT: usize = 7;
 
 const STEPS: [Step; 9] = [
     Step {
-        title: "Welcome to SCAD Viewer",
+        title: "Welcome to CoCAD",
         intro: "View and change OpenSCAD models. OpenSCAD does the geometry in the background.",
         points: &[
             "Press Ctrl+O to open a .scad file, or drop it on the window.",
@@ -106,7 +106,7 @@ const STEPS: [Step; 9] = [
     },
     Step {
         title: "Connect an agent",
-        intro: "Add SCAD Viewer to your MCP client. The tool calls go to the open window.",
+        intro: "Add CoCAD to your MCP client. The tool calls go to the open window.",
         points: &[],
         image: shot!("8-connect"),
     },
@@ -117,7 +117,7 @@ const STEPS: [Step; 9] = [
             "File > Settings sets the theme and the OpenSCAD binary.",
             "An OpenSCAD development build with Manifold is much faster.",
             "Help > About and shortcuts lists all keys.",
-            "The CLI exports, slices and makes photos without the window. Run scad-viewer --help.",
+            "The CLI exports, slices and makes photos without the window. Run cocad --help.",
             "Help > Welcome tour shows this tour again.",
         ],
         image: shot!("9-menu"),
@@ -176,18 +176,18 @@ fn claim(marker: &Path) -> bool {
 }
 
 fn binary_path(exe: Option<PathBuf>) -> String {
-    exe.map_or("scad-viewer".into(), |p| p.display().to_string())
+    exe.map_or("cocad".into(), |p| p.display().to_string())
 }
 
 fn client_config(binary: &str) -> String {
     let config = json!({
-        "mcpServers": { "scad-viewer": { "command": binary, "args": ["mcp"] } }
+        "mcpServers": { "cocad": { "command": binary, "args": ["mcp"] } }
     });
     serde_json::to_string_pretty(&config).unwrap_or_default()
 }
 
 fn claude_code_command(binary: &str) -> String {
-    format!("claude mcp add scad-viewer -- \"{binary}\" mcp")
+    format!("claude mcp add cocad -- \"{binary}\" mcp")
 }
 
 fn decode(jpeg: &[u8]) -> Result<([usize; 2], Vec<u8>), String> {
@@ -421,18 +421,18 @@ mod tests {
 
     #[test]
     fn client_config_escapes_the_path() {
-        let text = client_config("C:\\Apps\\scad-viewer.exe");
+        let text = client_config("C:\\Apps\\cocad.exe");
         let v: serde_json::Value = serde_json::from_str(&text).unwrap();
-        let server = &v["mcpServers"]["scad-viewer"];
-        assert_eq!(server["command"], "C:\\Apps\\scad-viewer.exe");
+        let server = &v["mcpServers"]["cocad"];
+        assert_eq!(server["command"], "C:\\Apps\\cocad.exe");
         assert_eq!(server["args"][0], "mcp");
     }
 
     #[test]
     fn claude_code_command_quotes_the_path() {
         assert_eq!(
-            claude_code_command("/Apps/SCAD Viewer.app/scad-viewer"),
-            "claude mcp add scad-viewer -- \"/Apps/SCAD Viewer.app/scad-viewer\" mcp"
+            claude_code_command("/Apps/CoCAD.app/cocad"),
+            "claude mcp add cocad -- \"/Apps/CoCAD.app/cocad\" mcp"
         );
     }
 }

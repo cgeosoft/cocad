@@ -1,11 +1,11 @@
 [Desktop Entry]
 Type=Application
-Name=SCAD Viewer
-GenericName=OpenSCAD Viewer
+Name=CoCAD
+GenericName=Parametric CAD
 Comment=View OpenSCAD models, edit parameters, export and preview slices
-Exec=scad-viewer %f
-Icon=scad-viewer
+Exec=cocad %f
+Icon=cocad
 Terminal=false
 Categories=Graphics;3DGraphics;Engineering;
 MimeType=application/x-openscad;
-StartupWMClass=scad-viewer
+StartupWMClass=cocad

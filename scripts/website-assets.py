@@ -20,7 +20,7 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-BIN = ROOT / "target/release/scad-viewer"
+BIN = ROOT / "target/release/cocad"
 OUT = ROOT / "extras/website/public/assets"
 
 # Only these values are in the web demo. The first file of a model is its default.

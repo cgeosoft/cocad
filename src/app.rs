@@ -53,7 +53,7 @@ const VIEWS: [(&str, f32, f32); 4] = [
     ("Right", 0.0, 0.0),
 ];
 
-const REPO: &str = "https://github.com/cgeosoft/scad-viewer";
+const REPO: &str = "https://github.com/cgeosoft/cocad";
 
 const SHORTCUTS: [(&str, &str); 12] = [
     ("Ctrl+O", "Open a file"),
@@ -731,7 +731,7 @@ impl App {
 
     fn about_window(&mut self, ctx: &egui::Context) {
         let mut open = self.show_about;
-        egui::Window::new("About SCAD Viewer")
+        egui::Window::new("About CoCAD")
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .open(&mut open)
             .collapsible(false)
@@ -2246,10 +2246,10 @@ impl eframe::App for App {
         self.shortcuts(ctx);
         let title = match &self.file {
             Some(f) => format!(
-                "SCAD Viewer · {}",
+                "CoCAD · {}",
                 f.file_name().unwrap_or_default().to_string_lossy()
             ),
-            None => "SCAD Viewer".into(),
+            None => "CoCAD".into(),
         };
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
 

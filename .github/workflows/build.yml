@@ -32,9 +32,9 @@ jobs:
         run: |
           scripts/package-deb.sh --no-build
           version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
-          mkdir -p dist/tar/scad-viewer-$version-linux-x86_64
-          cp target/release/scad-viewer README.md LICENSE dist/tar/scad-viewer-$version-linux-x86_64/
-          tar -C dist/tar -czf dist/scad-viewer-$version-linux-x86_64.tar.gz scad-viewer-$version-linux-x86_64
+          mkdir -p dist/tar/cocad-$version-linux-x86_64
+          cp target/release/cocad README.md LICENSE dist/tar/cocad-$version-linux-x86_64/
+          tar -C dist/tar -czf dist/cocad-$version-linux-x86_64.tar.gz cocad-$version-linux-x86_64
       - uses: actions/upload-artifact@v4
         with:
           name: linux
