@@ -1,6 +1,6 @@
-# SCAD Viewer website
+# CoCAD website
 
-Static site for <https://scadviewer.cgeosoft.com>. It uses plain HTML, CSS and JavaScript, with no build step and no library. It sets no cookies. PostHog analytics run only after consent.
+Static site for <https://cocad.cgeosoft.com>. It uses plain HTML, CSS and JavaScript, with no build step and no library. It sets no cookies. PostHog analytics run only after consent.
 
 The look follows the Portfolio website (`portfolio/extras/website`). The colors follow `src/ui.rs`.
 
@@ -47,7 +47,7 @@ The chat text is scripted. The tool names and the numbers are real. The page dra
 
 - `analytics.js` loads PostHog from the EU cloud only after the visitor accepts. Before that, the page makes no request to PostHog.
 - PostHog runs with `localStorage` persistence, so the site sets no cookies. Autocapture, session recording, surveys and feature flags are off.
-- The events are `$pageview`, `download_clicked` (os, type) and `demo_prompt` (model). Each event has `site: scad-viewer`.
+- The events are `$pageview`, `download_clicked` (os, type) and `demo_prompt` (model). Each event has `site: cocad`.
 - The choice lasts 12 months. The footer `cookies` button opens the modal again.
 - When you add a service, event or storage key, update `public/privacy/index.html`.
 
@@ -69,9 +69,9 @@ This command also applies `_headers`.
 ## Deploy
 
 1. Run `wrangler login`, or set `CLOUDFLARE_API_TOKEN`.
-2. Make the project one time: `wrangler pages project create scad-viewer --production-branch main`.
+2. Make the project one time: `wrangler pages project create cocad --production-branch main`.
 3. Deploy: `bun run deploy`, from `extras/website`. This runs `deploy.sh`, which writes the PostHog key into a staged copy. Without a key, analytics stay off and the modal does not show.
-4. In the Cloudflare dashboard, open **Workers & Pages > scad-viewer > Custom domains** and add `scadviewer.cgeosoft.com`.
+4. In the Cloudflare dashboard, open **Workers & Pages > cocad > Custom domains** and add `cocad.cgeosoft.com`.
 
 Use `deploy.sh`, not a git build. A git build has no PostHog key.
 

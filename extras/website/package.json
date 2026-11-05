@@ -1,8 +1,8 @@
 {
-  "name": "scad-viewer-website",
+  "name": "cocad-website",
   "version": "0.1.0",
   "private": true,
-  "description": "Website of SCAD Viewer, static files for Cloudflare Pages",
+  "description": "Website of CoCAD, static files for Cloudflare Pages",
   "scripts": {
     "dev": "bunx serve public",
     "deploy": "./deploy.sh"

@@ -5,9 +5,9 @@
 (function () {
   "use strict";
 
-  const REPO = "cgeosoft/scad-viewer";
+  const REPO = "cgeosoft/cocad";
   const RELEASES = `https://github.com/${REPO}/releases/latest`;
-  const CACHE_KEY = "scadviewer_release_v1";
+  const CACHE_KEY = "cocad_release_v1";
   const CACHE_MS = 10 * 60 * 1000;
   const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const $$ = (sel) => Array.from(document.querySelectorAll(sel));

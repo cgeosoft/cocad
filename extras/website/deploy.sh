@@ -32,4 +32,4 @@ if [ -n "$key" ]; then
 fi
 [ "${1:-}" = "--stage" ] && exit 0
 
-wrangler pages deploy "$stage" --project-name "${CLOUDFLARE_PAGES_PROJECT:-scad-viewer}" --branch main
+wrangler pages deploy "$stage" --project-name "${CLOUDFLARE_PAGES_PROJECT:-cocad}" --branch main

@@ -9,7 +9,7 @@
 
   const KEY = "YOUR_POSTHOG_PROJECT_API_KEY";
   const SCRIPT = "https://eu-assets.i.posthog.com/static/array.js";
-  const CONSENT_KEY = "scadviewer_consent_v1";
+  const CONSENT_KEY = "cocad_consent_v1";
   const CONSENT_MS = 365 * 24 * 60 * 60 * 1000;
   const enabled = /^phc_/.test(KEY);
 
@@ -58,7 +58,7 @@
           disable_external_dependency_loading: true,
           respect_dnt: true,
         });
-        window.posthog.register({ site: "scad-viewer" });
+        window.posthog.register({ site: "cocad" });
         resolve();
       };
       script.onerror = reject;
