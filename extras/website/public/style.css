@@ -1,6 +1,10 @@
 /* CoCAD website. The layout follows the Portfolio website (cgeosoft).
  * The tokens follow src/ui.rs, so the site looks like the app. */
 
+@font-face { font-family: "Plus Jakarta Sans"; font-style: normal; font-weight: 400 800; font-display: swap; src: url("assets/fonts/plus-jakarta-sans-latin.woff2") format("woff2"); }
+@font-face { font-family: "Sansation"; font-style: normal; font-weight: 700; font-display: swap; src: url("assets/fonts/sansation-700-latin.woff2") format("woff2"); }
+@font-face { font-family: "JetBrains Mono"; font-style: normal; font-weight: 400 600; font-display: swap; src: url("assets/fonts/jetbrains-mono-latin.woff2") format("woff2"); }
+
 :root {
   --canvas: #0f1114;
   --widget: #15171b;

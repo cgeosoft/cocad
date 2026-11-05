@@ -1,6 +1,6 @@
 # CoCAD website
 
-Static site for <https://cocad.cgeosoft.com>. It uses plain HTML, CSS and JavaScript, with no build step and no library. It sets no cookies. PostHog analytics run only after consent.
+Static site for <https://cocad.cgeosoft.com>. It uses plain HTML, CSS and JavaScript, with no build step and no library. It sets no cookies, and it loads fonts from its own domain. PostHog analytics run only after consent.
 
 The look follows the Portfolio website (`portfolio/extras/website`). The colors follow `src/ui.rs`.
 
@@ -19,6 +19,7 @@ The look follows the Portfolio website (`portfolio/extras/website`). The colors 
 | `public/assets/img/` | Generated. WebP copies of `images/` |
 | `public/privacy/index.html` | Privacy policy |
 | `public/llms.txt`, `robots.txt`, `sitemap.xml` | Files for crawlers and LLMs |
+| `public/assets/fonts/` | Self-hosted fonts (Latin subset) with their OFL licenses |
 | `public/_headers` | Security and cache headers |
 | `wrangler.toml` | Cloudflare Pages project |
 
