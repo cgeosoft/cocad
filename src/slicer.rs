@@ -3,7 +3,7 @@
 //! no supports, no bridges, simple top/bottom detection.
 
 use crate::mesh::Mesh;
-use glam::{Vec2, Vec3};
+use glam::Vec2;
 use std::collections::HashMap;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -197,26 +197,26 @@ fn cut(mesh: &Mesh, tris: &[u32], z: f32) -> Vec<Vec<Vec2>> {
     let mut pts: HashMap<Edge, Vec2> = HashMap::with_capacity(tris.len());
     for &ti in tris {
         let t = mesh.triangles[ti as usize];
-        let mut hits: [Edge; 2] = [(0, 0); 2];
-        let mut k = 0;
+        // The winding gives the direction, so a sliver with no usable normal
+        // cannot flip a segment: material stays on the left of the loop.
+        let (mut from, mut to) = (None, None);
         for e in 0..3 {
             let (a, b) = (t[e], t[(e + 1) % 3]);
-            if above(a) != above(b) && k < 2 {
-                hits[k] = (a.min(b), a.max(b));
-                k += 1;
+            if above(a) != above(b) {
+                let edge = Some((a.min(b), a.max(b)));
+                if above(a) {
+                    from = edge;
+                } else {
+                    to = edge;
+                }
             }
         }
-        if k != 2 {
+        let (Some(from), Some(to)) = (from, to) else {
+            continue;
+        };
+        if from == to {
             continue;
         }
-        let (p0, p1) = (point(hits[0]), point(hits[1]));
-        let n: Vec3 = mesh.normal(ti as usize);
-        let tangent = Vec2::new(-n.y, n.x); // up x normal
-        let (from, to) = if (p1 - p0).dot(tangent) >= 0.0 {
-            (hits[0], hits[1])
-        } else {
-            (hits[1], hits[0])
-        };
         segs.insert(from, to);
         pts.insert(from, point(from));
         pts.insert(to, point(to));
@@ -400,9 +400,10 @@ impl Shape {
         })
     }
 
-    /// Inside intervals on the line at `y` (even-odd rule), sorted.
+    /// Inside intervals on the line at `y`, sorted. It counts windings, so a
+    /// hole offset that crosses an outer offset in a thin wall adds no material.
     fn scan(&self, y: f32) -> Vec<(f32, f32)> {
-        let mut xs = Vec::new();
+        let mut xs: Vec<(f32, i32)> = Vec::new();
         for (lp, lo, hi) in &self.loops {
             if y < *lo || y > *hi {
                 continue;
@@ -411,17 +412,25 @@ impl Shape {
             for i in 0..n {
                 let (a, b) = (lp[i], lp[(i + 1) % n]);
                 if (a.y <= y) != (b.y <= y) {
-                    xs.push(a.x + (y - a.y) / (b.y - a.y) * (b.x - a.x));
+                    let x = a.x + (y - a.y) / (b.y - a.y) * (b.x - a.x);
+                    // Material is on the left, so a downward edge enters it.
+                    xs.push((x, if a.y > y { 1 } else { -1 }));
                 }
             }
         }
-        xs.sort_by(f32::total_cmp);
-        xs.as_chunks::<2>()
-            .0
-            .iter()
-            .map(|p| (p[0], p[1]))
-            .filter(|(a, b)| b > a)
-            .collect()
+        xs.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let mut out = Vec::new();
+        let (mut winding, mut start) = (0, 0.0);
+        for (x, step) in xs {
+            let before = winding;
+            winding += step;
+            if before <= 0 && winding > 0 {
+                start = x;
+            } else if before > 0 && winding <= 0 && x > start {
+                out.push((start, x));
+            }
+        }
+        out
     }
 }
 
@@ -527,6 +536,7 @@ fn infill(geo: &[LayerGeo], li: usize, s: &Settings) -> Vec<Path> {
 mod tests {
     use super::*;
     use crate::mesh::cube;
+    use glam::Vec3;
 
     #[test]
     fn slices_a_cube() {
@@ -585,6 +595,55 @@ mod tests {
         let b = [(5.0, 25.0)];
         assert_eq!(intersect(&a, &b), [(5.0, 10.0), (20.0, 25.0)]);
         assert_eq!(subtract(&a, &b), [(0.0, 5.0), (25.0, 30.0)]);
+    }
+
+    /// A prism side holds a zero-area sliver: it has no normal, and the
+    /// outline must still close.
+    #[test]
+    fn sliver_keeps_the_loop_closed() {
+        let p = |x, y, z| Vec3::new(x, y, z);
+        let mesh = Mesh {
+            vertices: vec![
+                p(0., 0., 0.),
+                p(10., 0., 0.),
+                p(0., 10., 0.),
+                p(0., 0., 2.),
+                p(10., 0., 2.),
+                p(0., 10., 2.),
+                p(0., 0., 1.), // 6: on the edge 0-3
+            ],
+            triangles: vec![
+                [0, 2, 1],
+                [3, 4, 5],
+                [0, 1, 4],
+                [0, 4, 6],
+                [6, 4, 3],
+                [0, 6, 3], // The sliver, in the order that a normal test gets wrong.
+                [1, 2, 5],
+                [1, 5, 4],
+                [2, 0, 3],
+                [2, 3, 5],
+            ],
+        };
+        for rot in 0..3 {
+            let mut m = mesh.clone();
+            m.triangles[5].rotate_left(rot);
+            let tris: Vec<u32> = (0..m.triangles.len() as u32).collect();
+            let loops = cut(&m, &tris, 1.5);
+            assert_eq!(loops.len(), 1);
+            assert!((area(&loops[0]) - 50.0).abs() < 0.01);
+        }
+    }
+
+    /// In a thin wall the offsets of the outside and the hole cross over.
+    /// The band between them is not material.
+    #[test]
+    fn crossed_offsets_add_no_material() {
+        let outer = square(0.9, 0.9, 19.1, 19.1);
+        let mut hole = square(0.3, 0.3, 19.7, 19.7);
+        hole.reverse();
+        let shape = Shape::new(&[outer, hole], Vec2::X);
+        assert!(shape.scan(10.0).is_empty());
     }
 
     /// A 20 mm block with a 10 mm deep pocket: the pocket floor must get top skin.
