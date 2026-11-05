@@ -7,3 +7,5 @@
 # README images: plain git, so GitHub shows them without LFS
 images/** -filter -diff -merge -text
 /preview.jpg -filter -diff -merge -text
+# Website images: plain git, so that Cloudflare Pages can build from the repo
+extras/website/public/**/*.png -filter -diff -merge -text

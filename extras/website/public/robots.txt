@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://scadviewer.cgeosoft.com/sitemap.xml

@@ -13,6 +13,7 @@ SCAD Viewer (cgeosoft). A Rust desktop app that shows OpenSCAD models, edits Cus
 - `.github/workflows/build.yml` - builds Linux, Windows and macOS on `v*` tags and makes the release. A push to `main` starts no build.
 - `scripts/tour-shots.sh` - makes the welcome tour screenshots in `images/tour/`. The binary embeds them, so build again after a new run.
 - `packaging/` - desktop entry, icon and MIME type for the `.deb`.
+- `extras/website/` - website at scadviewer.cgeosoft.com (Cloudflare Pages, static, see its `README.md`). `scripts/website-assets.py` makes its meshes and images.
 
 ## Working
 

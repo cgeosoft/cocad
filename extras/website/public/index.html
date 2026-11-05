@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SCAD Viewer - From prompt to print-ready model</title>
+  <meta name="description" content="A free desktop app for OpenSCAD. An AI agent changes the model over MCP, you check the slice in seconds, then render or export. The fast way to make models for 3D printing.">
+  <link rel="canonical" href="https://scadviewer.cgeosoft.com/">
+  <link rel="icon" type="image/svg+xml" href="assets/app-icon.svg">
+  <link rel="apple-touch-icon" href="assets/icon-512.png">
+  <meta name="theme-color" content="#0f1114">
+  <meta property="og:title" content="SCAD Viewer - Ask for the change. Check the slice. Print.">
+  <meta property="og:description" content="An AI agent changes the OpenSCAD model over MCP. You see the render and the slice in seconds. Free, MIT, for Linux, Windows and macOS.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://scadviewer.cgeosoft.com/">
+  <meta property="og:image" content="https://scadviewer.cgeosoft.com/assets/og.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Sansation:wght@700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <script src="boot.js"></script>
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "SCAD Viewer",
+    "applicationCategory": "DesignApplication",
+    "operatingSystem": "Linux, Windows, macOS",
+    "url": "https://scadviewer.cgeosoft.com/",
+    "license": "https://opensource.org/licenses/MIT",
+    "offers": { "@type": "Offer", "price": "0", "priceCurrency": "EUR" }
+  }
+  </script>
+</head>
+<body>
+  <header class="site-header">
+    <div class="container nav-container">
+      <a href="/" class="brand-link" aria-label="SCAD Viewer home">
+        <img src="assets/app-icon.svg" alt="" class="brand-icon" width="28" height="28">
+        <span class="brand-name">SCAD Viewer</span>
+      </a>
+      <nav class="main-nav" aria-label="Primary">
+        <a href="#loop">The loop</a>
+        <a href="#mcp">MCP</a>
+        <a href="#tour">Tour</a>
+        <a href="#features">Features</a>
+        <a href="#faq">FAQ</a>
+        <a href="https://github.com/cgeosoft/scad-viewer" target="_blank" rel="noopener noreferrer">GitHub</a>
+      </nav>
+      <div class="nav-actions">
+        <a href="#downloads" class="btn btn-primary">Download</a>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero" data-hero>
+      <canvas class="hero-canvas" role="img" aria-label="A twisted vase turns slowly. An agent changes its parameters, the model renders again, and its print layers build up from the bottom."></canvas>
+      <img class="hero-fallback" src="assets/img/render-vase.webp" alt="Path traced render of the twisted vase example." width="1000" height="750">
+      <div class="hero-scrim" aria-hidden="true"></div>
+      <div class="container hero-inner">
+        <div class="hero-copy">
+          <a class="hero-new" href="#mcp"><span class="pill pill-accent">MCP server</span>Your agent drives the window</a>
+          <h1 class="hero-headline">Ask for the change.<br><em>Check the slice.</em><br>Print.</h1>
+          <p class="hero-lede">SCAD Viewer is the fast way to make models for 3D printing. An AI agent changes the OpenSCAD model over MCP. You see the new render and its print layers in seconds, and you catch errors before the printer does.</p>
+          <div class="hero-cta">
+            <div class="hero-buttons">
+              <a href="#downloads" class="btn btn-big" id="primary-download-btn">
+                <span id="download-title">Download for Linux</span>
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M19 12l-7 7-7-7"/></svg>
+              </a>
+              <a href="#loop" class="btn btn-ghost">See the loop</a>
+            </div>
+            <p class="hero-alt">
+              <span id="download-meta" class="mono">.deb</span>
+              <span class="sep">|</span>
+              also for
+              <button type="button" class="os-switch" data-target-os="windows">Windows</button>
+              <button type="button" class="os-switch" data-target-os="macos">macOS</button>
+              <button type="button" class="os-switch" data-target-os="linux">Linux</button>
+            </p>
+          </div>
+        </div>
+      </div>
+      <div class="hero-trace" aria-hidden="true">
+        <ol class="hero-stages mono">
+          <li data-hero-stage>Agent</li>
+          <li data-hero-stage>Render</li>
+          <li data-hero-stage>Slice</li>
+        </ol>
+        <code class="hero-call" data-hero-call>set_params</code>
+        <span class="hero-result mono" data-hero-result></span>
+      </div>
+    </section>
+
+    <section class="section loop" id="loop" data-loop>
+      <div class="container loop-container">
+        <div class="loop-head reveal">
+          <p class="label"><span class="dot"></span>The loop</p>
+          <h2 class="big-title">One prompt.<br>Render, slice, <em>next prompt.</em></h2>
+          <p class="lede">Most of the time on a printable model goes to small changes and checks. SCAD Viewer keeps that loop short. Pick a prompt and watch one turn.</p>
+        </div>
+        <ol class="loop-stages mono reveal" aria-label="Stages of one turn">
+          <li class="stage" data-loop-stage><span class="stage-num">1</span><span class="stage-name">Ask</span><span class="stage-meta">The agent edits the model</span><i class="stage-fill"></i></li>
+          <li class="stage" data-loop-stage><span class="stage-num">2</span><span class="stage-name">Render</span><span class="stage-meta">OpenSCAD runs in the background</span><i class="stage-fill"></i></li>
+          <li class="stage" data-loop-stage><span class="stage-num">3</span><span class="stage-name">Slice</span><span class="stage-meta">Check the layers for errors</span><i class="stage-fill"></i></li>
+          <li class="stage" data-loop-stage><span class="stage-num">4</span><span class="stage-name">Finish</span><span class="stage-meta">Export or render a photo</span><i class="stage-fill"></i></li>
+        </ol>
+        <div class="loop-grid reveal">
+          <div class="card viewport">
+            <div class="view-bar">
+              <span class="mono view-file" data-stat="file">vase.scad</span>
+              <div class="view-group" role="group" aria-label="View mode">
+                <button type="button" class="view-btn" data-mode="solid" aria-pressed="true">Model</button>
+                <button type="button" class="view-btn" data-mode="wire" aria-pressed="false">Wire</button>
+                <button type="button" class="view-btn" data-mode="slice" aria-pressed="false">Slice</button>
+              </div>
+            </div>
+            <div class="view-stage">
+              <canvas role="img" aria-label="Live 3D view of the example model. Drag to orbit. Click, then use the wheel to zoom."></canvas>
+              <img class="view-fallback" src="assets/img/screen-slice.webp" alt="SCAD Viewer with the slice preview of the honeycomb tray example." loading="lazy">
+              <div class="view-presets" role="group" aria-label="Camera">
+                <button type="button" class="view-btn" data-view="iso">Iso</button>
+                <button type="button" class="view-btn" data-view="top">Top</button>
+                <button type="button" class="view-btn" data-view="front">Front</button>
+                <button type="button" class="view-btn" data-view="right">Right</button>
+              </div>
+              <div class="layer-bar" data-layer-bar hidden>
+                <label class="mono" for="layer" data-layer-label>Layer</label>
+                <input id="layer" type="range" min="0" max="1000" step="1" value="1000" data-layer>
+              </div>
+            </div>
+            <div class="view-status mono">
+              <span class="status-ready"><i class="dot-ok"></i><span data-stat="time">Ready</span></span>
+              <span data-stat="size"></span>
+              <span data-stat="tris"></span>
+              <span data-stat="volume"></span>
+              <span data-stat="edges"></span>
+            </div>
+          </div>
+          <aside class="card side">
+            <div class="side-tabs" role="tablist" aria-label="Control the model">
+              <button type="button" role="tab" class="side-tab" data-tab="agent" aria-selected="true">Agent</button>
+              <button type="button" role="tab" class="side-tab" data-tab="customizer" aria-selected="false">Customizer</button>
+            </div>
+            <div class="side-panel" data-tabpanel="agent">
+              <div class="prompts" data-prompts></div>
+              <div class="log" data-log aria-live="polite"></div>
+              <p class="param-note mono">Scripted chat. The tool names are real. The meshes and numbers come from the app CLI. The page draws layer outlines only. The app draws walls, infill and skin.</p>
+            </div>
+            <div class="side-panel" data-tabpanel="customizer" hidden>
+              <div data-customizer></div>
+            </div>
+          </aside>
+        </div>
+      </div>
+    </section>
+
+    <section class="section container" id="fast">
+      <div class="reveal">
+        <p class="label">Why it is fast</p>
+        <h2 class="big-title">The check comes<br>before the print.</h2>
+      </div>
+      <div class="rule-grid">
+        <article class="card rule reveal">
+          <p class="rule-tag mono">Render</p>
+          <p class="rule-value mono">0.24&ndash;0.41 s</p>
+          <h3>Each change, in view</h3>
+          <p>OpenSCAD runs with the Manifold backend. This is the range for the 72 meshes on this page.</p>
+        </article>
+        <article class="card rule reveal">
+          <p class="rule-tag mono">Slice</p>
+          <p class="rule-value mono">&lt; 50 ms</p>
+          <h3>Layers, not a slicer session</h3>
+          <p>See walls, infill and skin at real line width. You do not export or open a slicer for a first check.</p>
+        </article>
+        <article class="card rule reveal">
+          <p class="rule-tag mono">Agent</p>
+          <p class="rule-value mono">16 tools</p>
+          <h3>It sees what you see</h3>
+          <p>The agent reads the render state, the OpenSCAD log, open edges and slice data. Then it fixes what it finds.</p>
+        </article>
+        <article class="card rule reveal">
+          <p class="rule-tag mono">Finish</p>
+          <p class="rule-value mono">STL 3MF STEP</p>
+          <h3>Done means a file</h3>
+          <p>Export from the window or through the agent. Render a studio photo of the part if you want one.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="section mcp" id="mcp">
+      <div class="container">
+        <div class="reveal">
+          <p class="label"><span class="dot"></span>MCP server <span class="pill pill-accent" data-since="0.3.0">Next release</span></p>
+          <h2 class="big-title">Your agent works<br>in the open window.</h2>
+          <p class="lede">The client starts <code class="inline">scad-viewer mcp</code>. Each tool call goes to the open window, so you see every change as it happens.</p>
+        </div>
+        <div class="mcp-grid">
+          <div class="mcp-setup reveal">
+            <div class="card code-card">
+              <p class="code-title mono">claude_desktop_config.json</p>
+              <pre><code>{
+  "mcpServers": {
+    "scad-viewer": {
+      "command": "scad-viewer",
+      "args": ["mcp"]
+    }
+  }
+}</code></pre>
+            </div>
+            <div class="card code-card">
+              <p class="code-title mono">Claude Code</p>
+              <pre><code>claude mcp add scad-viewer -- scad-viewer mcp</code></pre>
+            </div>
+            <figure class="shot">
+              <button type="button" class="zoom" data-zoom="assets/img/screen-agent.webp" aria-label="Enlarge screenshot">
+                <img src="assets/img/screen-agent.webp" width="1120" height="700" alt="SCAD Viewer with the vase example. A message in the view says that MCP changed sides, twist and taper." loading="lazy" decoding="async">
+              </button>
+              <figcaption class="mono">The window names each change from the agent.</figcaption>
+            </figure>
+          </div>
+          <div class="card tools reveal">
+            <table>
+              <caption class="sr-only">MCP tools</caption>
+              <tbody>
+                <tr><th class="mono">get_state</th><td>File, render status, last error, mesh data, OpenSCAD log</td></tr>
+                <tr><th class="mono">get_params</th><td>All Customizer parameters with limits and options</td></tr>
+                <tr><th class="mono">get_source</th><td>Source of the <code class="inline">.scad</code> file</td></tr>
+                <tr><th class="mono">view_model</th><td>Render an image and return it to the client</td></tr>
+                <tr><th class="mono">open_model</th><td>Open a file. Starts the app when it is not running</td></tr>
+                <tr><th class="mono">set_params<br>reset_params</th><td>Change or reset parameters, then render</td></tr>
+                <tr><th class="mono">render</th><td>Run OpenSCAD again</td></tr>
+                <tr><th class="mono">slice</th><td>Layers, filament, weight and a rough print time</td></tr>
+                <tr><th class="mono">export_model</th><td>Write STL, 3MF or STEP</td></tr>
+                <tr><th class="mono">save_photo</th><td>Write a path traced PNG</td></tr>
+                <tr><th class="mono">set_view</th><td>Tab, camera, wireframe, grid and slice layer</td></tr>
+                <tr><th class="mono">load_parameter_set<br>save_parameter_set</th><td>Load or save a named set</td></tr>
+                <tr><th class="mono">list_windows<br>select_window</th><td>Choose a window when more than one is open</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <ul class="guard-list reveal">
+          <li><b>Limits apply.</b> One bad value rejects the whole call.</li>
+          <li><b>No stale output.</b> Export and photo fail when the last render failed.</li>
+          <li><b>No overwrite.</b> Files stay unless the call sets <code class="inline">overwrite</code>.</li>
+          <li><b>Local only.</b> Each window listens on 127.0.0.1 and needs a random token.</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="tour container" id="tour" data-tour>
+      <div class="tour-head reveal">
+        <div>
+          <p class="label">Tour</p>
+          <h2 class="big-title">The rest of the app.</h2>
+        </div>
+        <p>Real screenshots of the example models.</p>
+      </div>
+      <div class="tour-tabs reveal" role="tablist" aria-label="Screens">
+        <i class="tour-ink" aria-hidden="true"></i>
+        <button type="button" role="tab" class="tour-tab" data-shot="assets/img/screen-slice.webp" data-text="Slice preview. Walls, infill and skin as round strands, with a layer slider and a time, length and weight estimate.">Slice</button>
+        <button type="button" role="tab" class="tour-tab" data-shot="assets/img/screen-model.webp" data-text="Customizer panel. Sliders, dropdowns, switches, text and vectors, read from the comments in your .scad file.">Customizer</button>
+        <button type="button" role="tab" class="tour-tab" data-shot="assets/img/screen-photo.webp" data-text="Photo view. A path tracer renders the current camera in a plastic color and finish you choose, on all CPU cores.">Photo</button>
+        <button type="button" role="tab" class="tour-tab" data-shot="assets/img/screen-sets.webp" data-text="Parameter sets. Named sets in a .json file that OpenSCAD reads too.">Sets</button>
+        <button type="button" role="tab" class="tour-tab" data-shot="assets/img/screen-export.webp" data-text="Mesh check and export. Size, volume, triangles and open edges, then STL, 3MF or STEP.">Export</button>
+      </div>
+      <div class="tour-frame reveal">
+        <img data-tour-img src="assets/img/screen-slice.webp" width="1600" height="1040" alt="SCAD Viewer screenshot." loading="lazy" decoding="async">
+      </div>
+      <p class="tour-text mono" data-tour-text aria-live="polite">Slice preview. Walls, infill and skin as round strands, with a layer slider and a time, length and weight estimate.</p>
+    </section>
+
+    <section class="section container photo" id="photo">
+      <div class="reveal">
+        <p class="label">Photo render</p>
+        <h2 class="big-title">Happy with the slice?<br><em>See the part.</em></h2>
+        <p class="lede">The path tracer makes a studio photo of the current view. The agent can run it too, or you can use the CLI.</p>
+      </div>
+      <div class="gallery">
+        <button type="button" class="zoom reveal" data-zoom="assets/img/render-gear.webp" aria-label="Enlarge gear render"><img src="assets/img/render-gear.webp" width="1000" height="750" alt="Path traced render of the gear example." loading="lazy" decoding="async"></button>
+        <button type="button" class="zoom reveal" data-zoom="assets/img/render-honeycomb.webp" aria-label="Enlarge honeycomb tray render"><img src="assets/img/render-honeycomb.webp" width="1000" height="750" alt="Path traced render of the honeycomb tray example." loading="lazy" decoding="async"></button>
+        <button type="button" class="zoom reveal" data-zoom="assets/img/render-knob.webp" aria-label="Enlarge knob render"><img src="assets/img/render-knob.webp" width="1000" height="750" alt="Path traced render of the knob example in the light studio." loading="lazy" decoding="async"></button>
+        <button type="button" class="zoom reveal" data-zoom="assets/img/render-vase.webp" aria-label="Enlarge vase render"><img src="assets/img/render-vase.webp" width="1000" height="750" alt="Path traced render of the twisted vase example." loading="lazy" decoding="async"></button>
+      </div>
+      <div class="card code-card reveal">
+        <p class="code-title mono">Command line</p>
+        <pre><code>scad-viewer photo model.scad -o model.png --size 1600x1200 --samples 256 --color ff9300 --finish satin --layer-lines</code></pre>
+      </div>
+    </section>
+
+    <section class="section container" id="features">
+      <div class="reveal">
+        <p class="label">Features</p>
+        <h2 class="big-title">Also without an agent</h2>
+      </div>
+      <ol class="ledger-list">
+        <li class="card reveal"><h3>Customizer panel</h3><p>It reads the same comments as OpenSCAD. The model renders again when you change a value.</p></li>
+        <li class="card reveal"><h3>Live reload</h3><p>Keep your editor open. When the file changes on disk, the model reloads and your values stay.</p></li>
+        <li class="card reveal"><h3>Parameter sets</h3><p>Save named sets in the OpenSCAD <code class="inline">.json</code> format.</p></li>
+        <li class="card reveal"><h3>Slice preview</h3><p>Walls, infill and skin, with a time, length and weight estimate. It writes no G-code.</p></li>
+        <li class="card reveal"><h3>Mesh check</h3><p>Size, volume, triangles and open edges. Back faces show in purple.</p></li>
+        <li class="card reveal"><h3>Real STEP export</h3><p>AP214 with planar faces. A closed mesh becomes one solid that CAD tools can edit.</p></li>
+        <li class="card reveal"><h3>3MF with parameters</h3><p>The parameter values go in the metadata of the file.</p></li>
+        <li class="card reveal"><h3>Batch CLI</h3><p>Run <code class="inline">export</code>, <code class="inline">slice</code> and <code class="inline">photo</code> without the window.</p></li>
+        <li class="card reveal"><h3>Three systems</h3><p>Linux, Windows and macOS, with dark and light themes.</p></li>
+      </ol>
+    </section>
+
+    <section class="section container" id="downloads">
+      <div class="reveal">
+        <p class="label">Downloads</p>
+        <h2 class="big-title">Get it.</h2>
+        <p class="lede">Free, MIT licensed, built from the <a href="https://github.com/cgeosoft/scad-viewer" target="_blank" rel="noopener noreferrer">public source</a>. <span class="latest-version-text mono"></span></p>
+      </div>
+      <div class="card dl-rows reveal">
+        <div class="dl-row" id="card-linux">
+          <span class="dl-os">Linux</span><span class="dl-req">Debian, Ubuntu, x86-64</span>
+          <a href="#" class="btn btn-soft" data-dl="linux-installer">Package .deb</a>
+          <a href="#" class="dl-alt" data-dl="linux-portable">Archive .tar.gz</a>
+        </div>
+        <div class="dl-row" id="card-windows">
+          <span class="dl-os">Windows</span><span class="dl-req">x86-64</span>
+          <a href="#" class="btn btn-soft" data-dl="windows-installer">Archive .zip</a>
+          <span></span>
+        </div>
+        <div class="dl-row" id="card-macos">
+          <span class="dl-os">macOS</span><span class="dl-req">Apple Silicon and Intel, not signed</span>
+          <a href="#" class="btn btn-soft" data-dl="macos-installer">Universal .zip</a>
+          <span></span>
+        </div>
+      </div>
+      <div class="card gate reveal">
+        <p class="label"><span class="dot"></span>You also need OpenSCAD</p>
+        <p class="gate-text">Install a <a href="https://openscad.org/downloads.html#snapshots" target="_blank" rel="noopener noreferrer">development snapshot</a>. It has the Manifold backend. The 2021 release also works, but a model that takes 13 s with CGAL can take 0.3 s with Manifold.</p>
+      </div>
+      <p class="caption mono">Older versions and release notes are on <a href="https://github.com/cgeosoft/scad-viewer/releases" target="_blank" rel="noopener noreferrer">GitHub releases</a>.</p>
+    </section>
+
+    <section class="section container faq" id="faq">
+      <div class="reveal">
+        <p class="label">FAQ</p>
+        <h2 class="big-title">Asked first</h2>
+      </div>
+      <div class="card faq-list reveal">
+        <details open>
+          <summary>Which agents work with it?</summary>
+          <p>Claude Desktop, Claude Code and other MCP clients. The client talks to <code class="inline">scad-viewer mcp</code> and that process talks to the open window.</p>
+        </details>
+        <details>
+          <summary>Can the agent change the geometry, or only the parameters?</summary>
+          <p>Both. The agent reads the source with <code class="inline">get_source</code>. A client that can write files can edit the <code class="inline">.scad</code> file, and the window reloads it. <code class="inline">set_params</code> changes Customizer values with no file edit.</p>
+        </details>
+        <details>
+          <summary>Does it replace my slicer?</summary>
+          <p>No. The slice is for preview only. It has no travel moves, supports or bridges, and it does not write G-code. Export a 3MF or STL for your slicer.</p>
+        </details>
+        <details>
+          <summary>What errors does the check show?</summary>
+          <p>The mesh check shows open edges and back faces. The slice view shows each layer, so you can see gaps, thin walls and details that vanish. The OpenSCAD console shows script errors. The agent reads the same log and data.</p>
+        </details>
+        <details>
+          <summary>Does my model leave my computer?</summary>
+          <p>SCAD Viewer has no account and no server. The MCP server listens on 127.0.0.1 only. Your AI client sends what it reads to its own model provider, so pick the client with that in mind.</p>
+        </details>
+        <details>
+          <summary>Do I need an agent?</summary>
+          <p>No. Open a file, move the sliders and use your own editor. The app works the same way. To turn the MCP server off, use <b>File &gt; Settings</b>.</p>
+        </details>
+        <details>
+          <summary>What does it cost?</summary>
+          <p>Nothing. It is open source under the MIT License.</p>
+        </details>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container status-bar mono">
+      <p>scad-viewer <span class="footer-version"></span> &middot; &copy; <span id="current-year">2026</span> <a href="https://cgeosoft.com">cgeosoft</a> &middot; MIT</p>
+      <nav aria-label="Footer">
+        <a href="https://github.com/cgeosoft/scad-viewer" target="_blank" rel="noopener noreferrer">source</a>
+        <a href="https://github.com/cgeosoft/scad-viewer/issues" target="_blank" rel="noopener noreferrer">issues</a>
+        <a href="https://github.com/cgeosoft/scad-viewer/releases" target="_blank" rel="noopener noreferrer">releases</a>
+      </nav>
+    </div>
+  </footer>
+
+  <dialog class="lightbox" aria-label="Enlarged image"><img src="data:," alt=""></dialog>
+
+  <script src="script.js" defer></script>
+  <script src="viewer.js" defer></script>
+  <script src="demo.js" defer></script>
+</body>
+</html>
