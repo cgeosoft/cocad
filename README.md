@@ -66,6 +66,8 @@ You can also open a file with Ctrl+O or drop it on the window. **File** lists th
 
 The menu bar holds all commands: **File**, **Model**, **View** and **Help**. The right sidebar has the **Model**, **Slice** and **Photo** tabs. The **Model** tab has Auto render, Render, the export buttons and the mesh data.
 
+At the first start, a welcome tour shows the main features one step at a time, with the MCP setup. To see it again, use **Help > Welcome tour**. Keys: Left and Right change the step, Enter goes on, Esc closes.
+
 The status bar at the bottom shows the render state and time, the OpenSCAD version and backend, the model size, triangles and volume, open edges, the slice or photo state, and the **Console** button with the OpenSCAD output.
 
 ## MCP server
@@ -186,7 +188,7 @@ OpenSCAD 2021.01 (the Debian package) uses the CGAL backend. CGAL is slow on lar
 
 The settings are saved in the settings folder. The CLI commands use them too.
 
-The settings folder also holds `recent`, the list of recent models, and `mcp/`, the addresses of the open windows.
+The settings folder also holds `recent`, the list of recent models, `mcp/`, the addresses of the open windows, and `tour_seen`, the marker of the welcome tour. Delete `tour_seen` to show the tour at the next start.
 
 | System | Settings folder |
 |---|---|
@@ -257,6 +259,7 @@ A tag `v*` (for example `v0.2.0`) also makes a GitHub release with all files att
 | `src/main.rs` | CLI and window start |
 | `src/app.rs` | egui application: panels, camera, jobs |
 | `src/app/remote.rs` | MCP tools inside the window |
+| `src/app/tour.rs` | Welcome tour |
 | `src/mcp.rs` | MCP server, tool list, window listener |
 | `src/render.rs` | OpenGL shaders and buffers |
 | `src/ui.rs` | Dark and light palettes and widgets |

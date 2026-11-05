@@ -20,6 +20,8 @@ png = "0.17"
 rfd = { version = "0.15", default-features = false, features = ["gtk3"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 zip = { version = "2", default-features = false, features = ["deflate"] }
+zune-core = "0.5"
+zune-jpeg = "0.5"
 
 [profile.release]
 opt-level = 3

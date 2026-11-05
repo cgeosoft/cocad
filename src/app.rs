@@ -19,6 +19,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
 mod remote;
+mod tour;
 
 const DEBOUNCE: Duration = Duration::from_millis(350);
 
@@ -224,6 +225,8 @@ pub struct App {
     menu_bar_rect: egui::Rect,
     recent: Vec<PathBuf>,
     show_about: bool,
+    /// Welcome tour, while it is open.
+    tour: Option<tour::Tour>,
     /// Listener for MCP tool calls, when the option is on.
     server: Option<crate::mcp::Server>,
     pending: Vec<remote::Pending>,
@@ -311,6 +314,7 @@ impl App {
             menu_bar_rect: egui::Rect::NOTHING,
             recent: recent::load(),
             show_about: false,
+            tour: tour::first_start().then(tour::Tour::new),
             server: None,
             pending: Vec::new(),
         };
@@ -713,6 +717,9 @@ impl App {
     }
 
     fn help_menu(&mut self, ui: &mut egui::Ui) {
+        if ui::menu_item(ui, "Welcome tour", "", true, false).clicked() {
+            self.tour = Some(tour::Tour::new());
+        }
         if ui::menu_item(ui, "GitHub page", "", true, false).clicked() {
             ui.ctx().open_url(egui::OpenUrl::new_tab(REPO));
         }
@@ -1942,14 +1949,18 @@ impl App {
         if let Some(p) = ctx.input(|i| i.raw.dropped_files.iter().find_map(|f| f.path.clone())) {
             self.open(p);
         }
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::Q)) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        }
+        // The tour uses the arrow keys, and the app waits behind it.
+        if self.tour.is_some() {
+            return;
+        }
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::O)) {
             self.pick_file();
         }
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::Comma)) {
             self.cfg_edit = Some(self.cfg.clone());
-        }
-        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::Q)) {
-            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
         for (key, menu) in [
             (egui::Key::F, Menu::File),
@@ -2254,6 +2265,7 @@ impl eframe::App for App {
             .show(ctx, |ui| ui::dark_scope(ui, |ui| self.menu_bar(ui)));
         self.settings_window(ctx);
         self.about_window(ctx);
+        self.tour_window(ctx);
         egui::TopBottomPanel::bottom("status")
             .exact_height(28.0)
             .frame(
