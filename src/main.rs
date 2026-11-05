@@ -9,6 +9,7 @@ mod openscad;
 mod params;
 mod pathtrace;
 mod presets;
+mod recent;
 mod render;
 mod slicer;
 mod ui;

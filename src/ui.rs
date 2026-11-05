@@ -455,3 +455,171 @@ pub fn ghost(text: &str, active: bool) -> egui::Button<'static> {
         })
         .corner_radius(8)
 }
+
+fn one_line(ui: &egui::Ui, text: &str, font: FontId, max: f32) -> Arc<egui::Galley> {
+    let mut job =
+        egui::text::LayoutJob::simple_singleline(text.to_owned(), font, Color32::PLACEHOLDER);
+    job.wrap = egui::text::TextWrapping::truncate_at_width(max);
+    ui.fonts(|f| f.layout_job(job))
+}
+
+fn accent_tint() -> Color32 {
+    Color32::from_rgba_unmultiplied(0xff, 0x93, 0x00, 42)
+}
+
+/// Menu bar button. `open` marks the menu that is showing.
+pub fn menu_trigger(ui: &mut egui::Ui, text: &str, open: bool) -> egui::Response {
+    let galley = one_line(ui, text, FontId::monospace(12.5), f32::INFINITY);
+    let size = vec2(galley.size().x + 20.0, 24.0);
+    let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
+    let (fg, bg) = if open {
+        (Color32::from_rgb(0xff, 0xc4, 0x73), accent_tint())
+    } else if resp.hovered() {
+        (Color32::WHITE, c().input_hover)
+    } else {
+        (c().text, Color32::TRANSPARENT)
+    };
+    let p = ui.painter();
+    p.rect_filled(rect, 6.0, bg);
+    p.galley(rect.center() - galley.size() / 2.0, galley, fg);
+    resp
+}
+
+/// Dropdown surface of the menu bar.
+pub fn menu_frame<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    egui::Frame::NONE
+        .fill(c().panel)
+        .stroke(Stroke::new(1.0_f32, c().input_hover))
+        .corner_radius(10)
+        .inner_margin(Margin::same(6))
+        .shadow(ui.visuals().popup_shadow)
+        .show(ui, |ui| {
+            ui.spacing_mut().item_spacing.y = 0.0;
+            ui.set_width(320.0);
+            add(ui)
+        })
+        .inner
+}
+
+/// Menu row: check mark gutter, label, and dim text on the right.
+pub fn menu_item(
+    ui: &mut egui::Ui,
+    label: &str,
+    right: &str,
+    enabled: bool,
+    checked: bool,
+) -> egui::Response {
+    let sense = if enabled {
+        Sense::click()
+    } else {
+        Sense::hover()
+    };
+    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 29.0), sense);
+    let hot = enabled && resp.hovered();
+    if hot {
+        ui.painter().rect_filled(rect, 6.0, accent_tint());
+    }
+    let fg = if !enabled {
+        c().dim.gamma_multiply(0.7)
+    } else if hot {
+        Color32::WHITE
+    } else {
+        c().text
+    };
+    let inner = rect.width() - 36.0;
+    let side = one_line(ui, right, FontId::monospace(11.0), inner * 0.4);
+    let main = one_line(
+        ui,
+        label,
+        FontId::monospace(12.5),
+        inner - side.size().x - 12.0,
+    );
+    let y = rect.center().y;
+    let p = ui.painter();
+    if checked {
+        let at = egui::pos2(rect.left() + 12.0, y);
+        p.add(egui::Shape::line(
+            vec![
+                at + vec2(-4.0, 0.0),
+                at + vec2(-1.0, 3.5),
+                at + vec2(5.0, -4.0),
+            ],
+            Stroke::new(1.8_f32, ACCENT),
+        ));
+    }
+    p.galley(
+        egui::pos2(rect.left() + 26.0, y - main.size().y / 2.0),
+        main,
+        fg,
+    );
+    p.galley(
+        egui::pos2(rect.right() - 10.0 - side.size().x, y - side.size().y / 2.0),
+        side,
+        c().dim,
+    );
+    if enabled {
+        resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+    } else {
+        resp
+    }
+}
+
+/// Small title above a group of menu rows.
+pub fn menu_header(ui: &mut egui::Ui, text: &str) {
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 26.0), Sense::hover());
+    let p = ui.painter();
+    let g = p.layout_no_wrap(text.to_uppercase(), FontId::monospace(10.5), c().dim);
+    p.galley(
+        egui::pos2(rect.left() + 10.0, rect.bottom() - g.size().y - 4.0),
+        g,
+        c().dim,
+    );
+}
+
+pub fn menu_separator(ui: &mut egui::Ui) {
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 11.0), Sense::hover());
+    ui.painter().hline(
+        rect.x_range().shrink(4.0),
+        rect.center().y,
+        Stroke::new(1.0_f32, c().line),
+    );
+}
+
+/// Full-width tab selector; returns true when the value changed.
+pub fn tabs<T: PartialEq + Copy>(ui: &mut egui::Ui, value: &mut T, options: &[(T, &str)]) -> bool {
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 40.0), Sense::hover());
+    ui.painter().rect_filled(rect, 11.0, c().input);
+    let inner = rect.shrink(4.0);
+    let w = inner.width() / options.len() as f32;
+    let mut changed = false;
+    for (i, (v, label)) in options.iter().enumerate() {
+        let cell =
+            Rect::from_min_size(inner.min + vec2(w * i as f32, 0.0), vec2(w, inner.height()));
+        let resp = ui.interact(cell, ui.id().with(("tab", i)), Sense::click());
+        let sel = *value == *v;
+        if resp.clicked() && !sel {
+            *value = *v;
+            changed = true;
+        }
+        let fg = if sel {
+            Color32::BLACK
+        } else if resp.hovered() {
+            c().text
+        } else {
+            c().dim
+        };
+        let p = ui.painter();
+        if sel {
+            p.rect_filled(cell, 8.0, ACCENT);
+        }
+        p.text(
+            cell.center(),
+            Align2::CENTER_CENTER,
+            label,
+            FontId::proportional(14.5),
+            fg,
+        );
+        resp.on_hover_cursor(egui::CursorIcon::PointingHand);
+    }
+    changed
+}

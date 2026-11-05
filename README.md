@@ -33,7 +33,7 @@ OpenSCAD does the geometry. SCAD Viewer runs the `openscad` CLI in the backgroun
 | Windows | `scad-viewer-<version>-windows-x86_64.zip` | Unpack and run `scad-viewer.exe`. |
 | macOS (Apple Silicon and Intel) | `scad-viewer-<version>-macos-universal.zip` | Unpack and move **SCAD Viewer** to Applications. The app is not signed: the first time, right-click it and choose **Open**. |
 
-SCAD Viewer finds OpenSCAD on the `PATH` and in the usual install folders (`C:\Program Files\OpenSCAD*`, `/Applications/OpenSCAD*.app`, Homebrew). If it does not, set the binary in **Settings**.
+SCAD Viewer finds OpenSCAD on the `PATH` and in the usual install folders (`C:\Program Files\OpenSCAD*`, `/Applications/OpenSCAD*.app`, Homebrew). If it does not, set the binary in **File > Settings**.
 
 ## Usage
 
@@ -43,7 +43,7 @@ scad-viewer --slice model.scad    # open in the slice view
 scad-viewer --photo model.scad    # open in the photo view
 ```
 
-You can also open a file with Ctrl+O or drop it on the window. When the `.scad` file changes on disk, the model reloads and your edited values stay.
+You can also open a file with Ctrl+O or drop it on the window. **File** lists the last 10 models. The window shows the same list when no model is open. When the `.scad` file changes on disk, the model reloads and your edited values stay.
 
 | Input | Action |
 |---|---|
@@ -57,6 +57,11 @@ You can also open a file with Ctrl+O or drop it on the window. When the `.scad` 
 | `P` | Photo view |
 | Up / Down, PgUp / PgDn | Change the slice layer |
 | Ctrl+O | Open a file |
+| Ctrl+, | Settings |
+| Ctrl+Q | Quit |
+| Alt+F, Alt+M, Alt+V, Alt+H | Open the File, Model, View or Help menu |
+
+The menu bar holds all commands: **File**, **Model**, **View** and **Help**. The right sidebar has the **Model**, **Slice** and **Photo** tabs. The **Model** tab has Auto render, Render, the export buttons and the mesh data.
 
 The status bar at the bottom shows the render state and time, the OpenSCAD version and backend, the model size, triangles and volume, open edges, the slice or photo state, and the **Console** button with the OpenSCAD output.
 
@@ -123,11 +128,13 @@ scad-viewer photo model.scad -o model.png --size 1600x1200 --samples 256 --color
 OpenSCAD 2021.01 (the Debian package) uses the CGAL backend. CGAL is slow on large models: a model that takes 13 s with CGAL can take 0.3 s with Manifold. OpenSCAD development builds have the Manifold backend.
 
 - With no binary set, SCAD Viewer looks for `openscad-nightly`, then `openscad`, on the PATH and in the usual install folders.
-- Open **Settings** to set the OpenSCAD binary (for example a development AppImage), extra arguments and the theme.
+- Open **File > Settings** to set the OpenSCAD binary (for example a development AppImage), extra arguments and the theme.
 - When the binary supports Manifold, SCAD Viewer adds `--backend=manifold`. Turn this off in Settings, or set your own `--backend` argument.
 - `$OPENSCAD` and `$OPENSCAD_ARGS` override the saved values.
 
 The settings are saved in the settings folder. The CLI commands use them too.
+
+The settings folder also holds `recent`, the list of recent models.
 
 | System | Settings folder |
 |---|---|
@@ -201,6 +208,7 @@ A tag `v*` (for example `v0.2.0`) makes a GitHub release with all files attached
 | `src/ui.rs` | Dark and light palettes and widgets |
 | `src/params.rs` | Customizer parameter parser |
 | `src/presets.rs` | Parameter sets (OpenSCAD `.json` format) |
+| `src/recent.rs` | List of recent models |
 | `src/openscad.rs` | Runs `openscad` and reads the STL |
 | `src/mesh.rs` | Indexed mesh, STL reader, checks |
 | `src/export.rs` | STL, 3MF and STEP writers |

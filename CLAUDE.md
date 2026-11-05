@@ -17,6 +17,7 @@ SCAD Viewer (cgeosoft). A Rust desktop app that shows OpenSCAD models, edits Cus
 
 - Run `cargo test` after changes. Use `target/debug/scad-viewer export|slice|params` to test without the GUI.
 - The GUI may run on the user's live desktop. Do not send mouse or key input to it. For screenshots, start it with `--slice` or `--photo` when needed and capture the window.
+- To test clicks, start a private display (`Xephyr :9 -screen 1600x1040 -ac`), run the app there with `DISPLAY=:9 LIBGL_ALWAYS_SOFTWARE=1`, and send input with `xdotool` on `:9` only. Use separate `XDG_DATA_HOME` and `XDG_CONFIG_HOME`, so the user's window state and recent list stay as they are.
 - Targets: Linux (Debian first), Windows and macOS. GitHub Actions builds all three. Check other platforms locally with `cargo check --target x86_64-pc-windows-msvc` and `--target aarch64-apple-darwin`.
 - Keep `Depends` in `scripts/package-deb.sh` in sync with new runtime libraries.
 - CI runs `cargo clippy --all-targets -- -D warnings`. Keep it clean.

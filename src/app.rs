@@ -6,6 +6,7 @@ use crate::openscad;
 use crate::params::{self, Param, Value, Widget};
 use crate::pathtrace;
 use crate::presets;
+use crate::recent;
 use crate::render::{self, Renderer, View};
 use crate::slicer::{self, Kind, Settings, Sliced};
 use crate::ui::{self, ACCENT};
@@ -25,6 +26,46 @@ enum Mode {
     Slice,
     Photo,
 }
+
+#[derive(PartialEq, Clone, Copy)]
+enum Menu {
+    File,
+    Model,
+    View,
+    Help,
+}
+
+const MENUS: [(Menu, &str); 4] = [
+    (Menu::File, "File"),
+    (Menu::Model, "Model"),
+    (Menu::View, "View"),
+    (Menu::Help, "Help"),
+];
+
+/// Named camera views: label, yaw, pitch.
+const VIEWS: [(&str, f32, f32); 4] = [
+    ("Iso", -0.9, 0.55),
+    ("Top", -std::f32::consts::FRAC_PI_2, 1.5697),
+    ("Front", -std::f32::consts::FRAC_PI_2, 0.0),
+    ("Right", 0.0, 0.0),
+];
+
+const REPO: &str = "https://github.com/cgeosoft/scad-viewer";
+
+const SHORTCUTS: [(&str, &str); 12] = [
+    ("Ctrl+O", "Open a file"),
+    ("Ctrl+,", "Settings"),
+    ("Ctrl+Q", "Quit"),
+    ("Alt+F, M, V, H", "Open a menu"),
+    ("F5", "Render now"),
+    ("F, double click", "Fit the model"),
+    ("W", "Wireframe"),
+    ("S", "Model or Slice tab"),
+    ("P", "Model or Photo tab"),
+    ("Up, Down, PgUp, PgDn", "Change the slice layer"),
+    ("Left drag", "Orbit"),
+    ("Right drag, Shift + left drag", "Pan"),
+];
 
 /// What a photo render depends on. A change restarts the render.
 #[derive(Clone, Copy, PartialEq)]
@@ -176,6 +217,11 @@ pub struct App {
     renderer: Option<Arc<Mutex<Renderer>>>,
     toast: Option<(String, Instant)>,
     export_rx: Option<Receiver<Result<PathBuf, String>>>,
+    menu: Option<Menu>,
+    menu_at: egui::Pos2,
+    menu_bar_rect: egui::Rect,
+    recent: Vec<PathBuf>,
+    show_about: bool,
 }
 
 impl App {
@@ -255,6 +301,11 @@ impl App {
             renderer,
             toast: None,
             export_rx: None,
+            menu: None,
+            menu_at: egui::Pos2::ZERO,
+            menu_bar_rect: egui::Rect::NOTHING,
+            recent: recent::load(),
+            show_about: false,
         };
         if let Some(f) = file {
             app.open(f);
@@ -279,6 +330,7 @@ impl App {
                 self.slice_rev += 1;
                 self.fit_pending = true;
                 self.error = None;
+                self.recent = recent::add(self.file.as_ref().unwrap());
                 self.start_render();
             }
             Err(e) => self.error = Some(format!("cannot read {}: {e}", path.display())),
@@ -504,84 +556,249 @@ impl App {
         }
     }
 
-    fn top_bar(&mut self, ui: &mut egui::Ui) {
+    fn can_export(&self) -> bool {
+        self.mesh.is_some() && self.job.is_none() && self.export_rx.is_none()
+    }
+
+    fn menu_bar(&mut self, ui: &mut egui::Ui) {
+        self.menu_bar_rect = ui.max_rect();
         ui.horizontal_centered(|ui| {
-            // Brand and file.
-            let (r, _) = ui.allocate_exact_size(Vec2::splat(22.0), egui::Sense::hover());
-            ui.painter().rect_filled(r, 6.0, ui::ACCENT);
-            ui.painter().rect_filled(r.shrink(6.0), 2.0, ui::c().panel);
-            ui.label(RichText::new("SCAD Viewer").size(16.0).strong());
-            if let Some(f) = &self.file {
-                let name = f
-                    .file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .into_owned();
-                ui.label(RichText::new(name).color(ui::c().dim))
-                    .on_hover_text(f.display().to_string());
+            ui.spacing_mut().item_spacing.x = 2.0;
+            let (r, _) = ui.allocate_exact_size(Vec2::splat(16.0), egui::Sense::hover());
+            ui.painter().rect_filled(r, 4.0, ui::ACCENT);
+            ui.painter().rect_filled(r.shrink(4.5), 1.0, ui::c().bg);
+            ui.add_space(6.0);
+            for (menu, label) in MENUS {
+                let open = self.menu == Some(menu);
+                let r = ui::menu_trigger(ui, label, open);
+                if r.clicked() {
+                    self.menu = if open { None } else { Some(menu) };
+                } else if r.hovered() && self.menu.is_some() {
+                    self.menu = Some(menu);
+                }
+                if self.menu == Some(menu) {
+                    self.menu_at = r.rect.left_bottom();
+                }
             }
-            ui.add_space(12.0);
-            if ui
-                .add(ui::ghost("Open", false))
-                .on_hover_text("Ctrl+O")
-                .clicked()
-            {
-                self.pick_file();
-            }
-
-            // Right side, laid out from the right edge.
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let busy = self.job.is_some();
-                let can_export = self.mesh.is_some() && !busy && self.export_rx.is_none();
-                ui.add_enabled_ui(can_export, |ui| {
-                    egui::menu::menu_custom_button(ui, ui::primary("Export"), |ui| {
-                        ui.set_min_width(200.0);
-                        for fmt in Format::ALL {
-                            if ui
-                                .add(ui::ghost(fmt.label(), false).min_size(Vec2::new(200.0, 32.0)))
-                                .clicked()
-                            {
-                                ui.close_menu();
-                                self.export(fmt);
-                            }
-                        }
-                    });
-                });
-                if ui
-                    .add_enabled(self.file.is_some(), ui::ghost("Render", false))
-                    .on_hover_text("F5")
-                    .clicked()
-                {
-                    self.start_render();
-                }
-                ui.label(RichText::new("Auto").color(ui::c().dim));
-                ui::toggle(ui, &mut self.auto_render)
-                    .on_hover_text("Render when a parameter changes");
-                ui.add_space(8.0);
-                if ui
-                    .add(ui::ghost("Settings", self.cfg_edit.is_some()))
-                    .clicked()
-                {
-                    self.cfg_edit = Some(self.cfg.clone());
-                }
-
-                // Mode switch in the middle of the remaining space.
-                let free = ui.available_width();
-                ui.add_space(((free - 250.0) / 2.0).max(0.0));
-                let mut mode = self.mode;
-                if ui::segmented(
-                    ui,
-                    &mut mode,
-                    &[
-                        (Mode::Photo, "Photo"),
-                        (Mode::Slice, "Slice"),
-                        (Mode::Model, "Model"),
-                    ],
-                ) {
-                    self.set_mode(mode);
+                if let Some(f) = &self.file {
+                    let name = f.file_name().unwrap_or_default().to_string_lossy();
+                    ui.label(ui::dim(name.into_owned()).monospace().size(12.0))
+                        .on_hover_text(f.display().to_string());
                 }
             });
         });
+    }
+
+    /// The open dropdown. A click on a row or outside it closes the menu.
+    fn menu_popup(&mut self, ctx: &egui::Context) {
+        let Some(menu) = self.menu else {
+            return;
+        };
+        let area = egui::Area::new(egui::Id::new("menu"))
+            .order(egui::Order::Foreground)
+            .fixed_pos(self.menu_at + Vec2::new(0.0, 4.0))
+            .show(ctx, |ui| {
+                ui::dark_scope(ui, |ui| {
+                    ui::menu_frame(ui, |ui| match menu {
+                        Menu::File => self.file_menu(ui),
+                        Menu::Model => self.model_menu(ui),
+                        Menu::View => self.view_menu(ui),
+                        Menu::Help => self.help_menu(ui),
+                    })
+                })
+            });
+        let (pos, pressed, clicked, esc) = ctx.input(|i| {
+            (
+                i.pointer.interact_pos(),
+                i.pointer.any_pressed(),
+                i.pointer.any_click(),
+                i.key_pressed(egui::Key::Escape),
+            )
+        });
+        let on_menu = pos.is_some_and(|p| area.response.rect.contains(p));
+        let on_bar = pos.is_some_and(|p| self.menu_bar_rect.contains(p));
+        if esc || (pressed && !on_menu && !on_bar) || (clicked && on_menu) {
+            self.menu = None;
+        }
+    }
+
+    fn file_menu(&mut self, ui: &mut egui::Ui) {
+        if ui::menu_item(ui, "Open…", "Ctrl+O", true, false).clicked() {
+            self.pick_file();
+        }
+        ui::menu_header(ui, "Recent models");
+        if self.recent.is_empty() {
+            ui::menu_item(ui, "No recent models", "", false, false);
+        }
+        // The list is newest first, so the first entry is the open model.
+        for (i, path) in self.recent.clone().into_iter().enumerate() {
+            if recent_row(ui, &path, i == 0 && self.file.is_some()) {
+                self.open(path);
+            }
+        }
+        if !self.recent.is_empty() && ui::menu_item(ui, "Clear list", "", true, false).clicked() {
+            recent::clear();
+            self.recent.clear();
+        }
+        ui::menu_separator(ui);
+        if ui::menu_item(ui, "Settings", "Ctrl+,", true, false).clicked() {
+            self.cfg_edit = Some(self.cfg.clone());
+        }
+        ui::menu_separator(ui);
+        if ui::menu_item(ui, "Quit", "Ctrl+Q", true, false).clicked() {
+            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+        }
+    }
+
+    fn model_menu(&mut self, ui: &mut egui::Ui) {
+        if ui::menu_item(ui, "Render now", "F5", self.file.is_some(), false).clicked() {
+            self.start_render();
+        }
+        if ui::menu_item(ui, "Auto render", "", true, self.auto_render).clicked() {
+            self.auto_render = !self.auto_render;
+        }
+        ui::menu_separator(ui);
+        let can_export = self.can_export();
+        for fmt in Format::ALL {
+            let label = format!("Export {}", fmt.label());
+            if ui::menu_item(ui, &label, "", can_export, false).clicked() {
+                self.export(fmt);
+            }
+        }
+    }
+
+    fn view_menu(&mut self, ui: &mut egui::Ui) {
+        for (mode, label, key) in [
+            (Mode::Model, "Model", ""),
+            (Mode::Slice, "Slice", "S"),
+            (Mode::Photo, "Photo", "P"),
+        ] {
+            if ui::menu_item(ui, label, key, true, self.mode == mode).clicked() {
+                self.set_mode(mode);
+            }
+        }
+        ui::menu_separator(ui);
+        if ui::menu_item(ui, "Fit", "F", self.mesh.is_some(), false).clicked() {
+            self.fit();
+        }
+        for (label, yaw, pitch) in VIEWS {
+            if ui::menu_item(ui, label, "", true, false).clicked() {
+                self.set_view(yaw, pitch);
+            }
+        }
+        ui::menu_separator(ui);
+        if ui::menu_item(ui, "Wireframe", "W", true, self.wireframe).clicked() {
+            self.wireframe = !self.wireframe;
+        }
+        if ui::menu_item(ui, "Grid", "", true, self.grid).clicked() {
+            self.grid = !self.grid;
+        }
+        if ui::menu_item(ui, "OpenSCAD console", "", true, self.show_log).clicked() {
+            self.show_log = !self.show_log;
+        }
+    }
+
+    fn help_menu(&mut self, ui: &mut egui::Ui) {
+        if ui::menu_item(ui, "GitHub page", "", true, false).clicked() {
+            ui.ctx().open_url(egui::OpenUrl::new_tab(REPO));
+        }
+        ui::menu_separator(ui);
+        if ui::menu_item(ui, "About and shortcuts", "", true, false).clicked() {
+            self.show_about = true;
+        }
+    }
+
+    fn about_window(&mut self, ctx: &egui::Context) {
+        let mut open = self.show_about;
+        egui::Window::new("About SCAD Viewer")
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(false)
+            .default_width(420.0)
+            .show(ctx, |ui| {
+                ui.label(format!("Version {}", env!("CARGO_PKG_VERSION")));
+                ui.label(ui::dim("MIT license"));
+                ui.hyperlink(REPO);
+                ui.add_space(8.0);
+                ui::section(ui, "Shortcuts");
+                egui::Grid::new("shortcuts")
+                    .num_columns(2)
+                    .spacing([24.0, 6.0])
+                    .show(ui, |ui| {
+                        for (key, what) in SHORTCUTS {
+                            ui.label(RichText::new(key).monospace().color(ui::c().dim));
+                            ui.label(what);
+                            ui.end_row();
+                        }
+                    });
+            });
+        self.show_about = open;
+    }
+
+    fn model_panel(&mut self, ui: &mut egui::Ui) {
+        ui.label(ui::dim("Render the model and export it."));
+        ui.add_space(4.0);
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                ui::card(ui, |ui| {
+                    ui::section(ui, "Render");
+                    ui.horizontal(|ui| {
+                        ui.label("Auto render");
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui::toggle(ui, &mut self.auto_render)
+                                .on_hover_text("Render when a parameter changes");
+                        });
+                    });
+                    let render =
+                        egui::Button::new("Render").min_size(Vec2::new(ui.available_width(), 34.0));
+                    if ui
+                        .add_enabled(self.file.is_some(), render)
+                        .on_hover_text("F5")
+                        .clicked()
+                    {
+                        self.start_render();
+                    }
+                });
+                ui::card(ui, |ui| {
+                    ui::section(ui, "Export");
+                    let can_export = self.can_export();
+                    let w = (ui.available_width() - 2.0 * ui.spacing().item_spacing.x) / 3.0;
+                    let mut pick = None;
+                    ui.horizontal(|ui| {
+                        for fmt in Format::ALL {
+                            let b =
+                                ui::primary(&fmt.ext().to_uppercase()).min_size(Vec2::new(w, 34.0));
+                            if ui
+                                .add_enabled(can_export, b)
+                                .on_hover_text(fmt.label())
+                                .clicked()
+                            {
+                                pick = Some(fmt);
+                            }
+                        }
+                    });
+                    if let Some(fmt) = pick {
+                        self.export(fmt);
+                    }
+                });
+                if let (Some(i), Some(mesh)) = (&self.info, &self.mesh) {
+                    let size = i.bounds.size();
+                    ui::card(ui, |ui| {
+                        ui::section(ui, "Mesh");
+                        info_row(
+                            ui,
+                            "Size",
+                            &format!("{:.1} × {:.1} × {:.1} mm", size.x, size.y, size.z),
+                        );
+                        info_row(ui, "Volume", &format!("{:.2} cm³", i.volume / 1000.0));
+                        info_row(ui, "Triangles", &mesh.triangles.len().to_string());
+                        info_row(ui, "Open edges", &i.open_edges.to_string());
+                    });
+                }
+            });
     }
 
     fn set_mode(&mut self, mode: Mode) {
@@ -1197,7 +1414,6 @@ impl App {
     }
 
     fn photo_panel(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Photo");
         ui.label(ui::dim("Path-traced render of the current view."));
         ui.add_space(4.0);
         egui::ScrollArea::vertical()
@@ -1357,7 +1573,6 @@ impl App {
     }
 
     fn slice_panel(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Slice preview");
         ui.label(ui::dim("Rough preview for checking. Not for printing."));
         ui.add_space(4.0);
         let before = self.settings;
@@ -1612,12 +1827,7 @@ impl App {
                             {
                                 self.fit();
                             }
-                            for (label, yaw, pitch) in [
-                                ("Right", 0.0, 0.0),
-                                ("Front", -std::f32::consts::FRAC_PI_2, 0.0),
-                                ("Top", -std::f32::consts::FRAC_PI_2, 1.5697),
-                                ("Iso", -0.9, 0.55),
-                            ] {
+                            for (label, yaw, pitch) in VIEWS.into_iter().rev() {
                                 if ui.add(ui::ghost(label, false)).clicked() {
                                     self.set_view(yaw, pitch);
                                 }
@@ -1653,6 +1863,7 @@ impl App {
         // Empty view: say why.
         if self.mesh.is_none() && self.job.is_none() {
             let msg = match (&self.file, &self.error) {
+                (None, _) if !self.recent.is_empty() => None,
                 (None, _) => Some("Open a .scad file, or drop one here.".to_string()),
                 (Some(_), Some(e)) => Some(format!("Nothing to show.  {e}")),
                 _ => None,
@@ -1667,6 +1878,28 @@ impl App {
                     ui::c().text,
                     ui::glass(),
                 );
+            }
+        }
+
+        // Start view: the recent models.
+        if self.file.is_none() && !self.recent.is_empty() {
+            let size = Vec2::new(420.0, 86.0 + 29.0 * self.recent.len() as f32);
+            let area = egui::Rect::from_center_size(rect.center(), size);
+            let mut pick = None;
+            ui.scope_builder(egui::UiBuilder::new().max_rect(area), |ui| {
+                ui::card(ui, |ui| {
+                    ui.spacing_mut().item_spacing.y = 0.0;
+                    ui::section(ui, "Recent models");
+                    ui.add_space(8.0);
+                    for path in &self.recent {
+                        if recent_row(ui, path, false) {
+                            pick = Some(path.clone());
+                        }
+                    }
+                });
+            });
+            if let Some(path) = pick {
+                self.open(path);
             }
         }
 
@@ -1699,6 +1932,26 @@ impl App {
         }
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::O)) {
             self.pick_file();
+        }
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::Comma)) {
+            self.cfg_edit = Some(self.cfg.clone());
+        }
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::Q)) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        }
+        for (key, menu) in [
+            (egui::Key::F, Menu::File),
+            (egui::Key::M, Menu::Model),
+            (egui::Key::V, Menu::View),
+            (egui::Key::H, Menu::Help),
+        ] {
+            if ctx.input_mut(|i| i.consume_key(egui::Modifiers::ALT, key)) {
+                self.menu = if self.menu == Some(menu) {
+                    None
+                } else {
+                    Some(menu)
+                };
+            }
         }
         if ctx.wants_keyboard_input() {
             return;
@@ -1869,15 +2122,16 @@ impl eframe::App for App {
 
         let line = egui::Stroke::new(1.0_f32, ui::c().line);
         egui::TopBottomPanel::top("top")
-            .exact_height(60.0)
+            .exact_height(32.0)
             .frame(
                 egui::Frame::NONE
                     .fill(ui::dark().bg)
-                    .inner_margin(egui::Margin::symmetric(18, 0))
+                    .inner_margin(egui::Margin::symmetric(10, 0))
                     .stroke(egui::Stroke::new(1.0_f32, ui::dark().line)),
             )
-            .show(ctx, |ui| ui::dark_scope(ui, |ui| self.top_bar(ui)));
+            .show(ctx, |ui| ui::dark_scope(ui, |ui| self.menu_bar(ui)));
         self.settings_window(ctx);
+        self.about_window(ctx);
         egui::TopBottomPanel::bottom("status")
             .exact_height(28.0)
             .frame(
@@ -1922,25 +2176,34 @@ impl eframe::App for App {
             .width_range(280.0..=560.0)
             .frame(side)
             .show(ctx, |ui| self.param_panel(ui));
-        if self.mode == Mode::Photo {
-            egui::SidePanel::right("photo")
-                .resizable(true)
-                .default_width(320.0)
-                .width_range(280.0..=480.0)
-                .frame(side)
-                .show(ctx, |ui| self.photo_panel(ui));
-        }
-        if self.mode == Mode::Slice {
-            egui::SidePanel::right("slice")
-                .resizable(true)
-                .default_width(320.0)
-                .width_range(280.0..=480.0)
-                .frame(side)
-                .show(ctx, |ui| self.slice_panel(ui));
-        }
+        egui::SidePanel::right("side")
+            .resizable(true)
+            .default_width(320.0)
+            .width_range(280.0..=480.0)
+            .frame(side)
+            .show(ctx, |ui| {
+                let mut mode = self.mode;
+                if ui::tabs(
+                    ui,
+                    &mut mode,
+                    &[
+                        (Mode::Model, "Model"),
+                        (Mode::Slice, "Slice"),
+                        (Mode::Photo, "Photo"),
+                    ],
+                ) {
+                    self.set_mode(mode);
+                }
+                match self.mode {
+                    Mode::Model => self.model_panel(ui),
+                    Mode::Slice => self.slice_panel(ui),
+                    Mode::Photo => self.photo_panel(ui),
+                }
+            });
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
             .show(ctx, |ui| self.viewport(ui));
+        self.menu_popup(ctx);
     }
 
     fn on_exit(&mut self, gl: Option<&eframe::glow::Context>) {
@@ -1985,6 +2248,29 @@ fn setting<N: egui::emath::Numeric>(
         .changed();
     ui.add_space(4.0);
     changed
+}
+
+/// Dim label on the left, value on the right.
+fn info_row(ui: &mut egui::Ui, label: &str, value: &str) {
+    ui.horizontal(|ui| {
+        ui.label(ui::dim(label));
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.label(value);
+        });
+    });
+}
+
+/// Row for a recent model: file name and folder. A missing file cannot be picked.
+fn recent_row(ui: &mut egui::Ui, path: &std::path::Path, current: bool) -> bool {
+    let name = path.file_name().unwrap_or_default().to_string_lossy();
+    let dir = path
+        .parent()
+        .and_then(|d| d.file_name())
+        .unwrap_or_default()
+        .to_string_lossy();
+    ui::menu_item(ui, &name, &dir, path.exists(), current)
+        .on_hover_text(path.display().to_string())
+        .clicked()
 }
 
 fn stat(ui: &mut egui::Ui, value: &str, label: &str) {
