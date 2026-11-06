@@ -423,10 +423,32 @@ impl App {
                 .map(|p| (p.name.clone(), p.value.to_scad()))
                 .collect(),
         };
+        let target = match args["slicer"].as_str() {
+            Some(name) => Some(
+                export::Slicer::from_name(name)
+                    .ok_or_else(|| format!("slicer must be prusa or orca, got {name}"))?,
+            ),
+            None => None,
+        };
+        let job = match target {
+            Some(_) => {
+                let file = self.file.clone().ok_or("No model is open.")?;
+                Some((file, self.cfg.clone(), self.params.clone()))
+            }
+            None => None,
+        };
         self.note(format!("exporting {}", path.display()));
         let reply = reply.clone();
         std::thread::spawn(move || {
-            let r = export::write(&path, &mesh, &meta)
+            let written = match (job, target) {
+                (Some((file, cfg, params)), Some(slicer)) => {
+                    let cancel = Arc::new(AtomicBool::new(false));
+                    crate::parts::render(&cfg, &file, &params, &cancel)
+                        .and_then(|parts| export::write_parts(&path, &parts, &meta, slicer))
+                }
+                _ => export::write(&path, &mesh, &meta),
+            };
+            let r = written
                 .map(|_| {
                     let bytes = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
                     json!({ "path": path, "bytes": bytes })

@@ -424,7 +424,7 @@ fn tools() -> Json {
         ),
         tool(
             "export_model",
-            "Save the current mesh. The file extension sets the format: .stl, .3mf or .step. Waits for a running render. Fails when the last render failed.",
+            "Save the current mesh. The file extension sets the format: .stl, .3mf or .step. With slicer, renders each cocad_part part and writes a multicolor .3mf for that slicer. Waits for a running render. Fails when the last render failed.",
             false,
             true,
             json!({
@@ -432,6 +432,7 @@ fn tools() -> Json {
                 "properties": {
                     "path": { "type": "string", "description": "Absolute path of the output file" },
                     "overwrite": { "type": "boolean", "description": "Replace an existing file" },
+                    "slicer": { "type": "string", "enum": ["prusa", "orca"], "description": "Write a multicolor 3MF for this slicer" },
                 },
                 "required": ["path"],
             })

@@ -3,11 +3,13 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod app;
+mod examples;
 mod export;
 mod mcp;
 mod mesh;
 mod openscad;
 mod params;
+mod parts;
 mod pathtrace;
 mod presets;
 mod recent;
@@ -29,8 +31,9 @@ Usage:
   cocad mcp                              Serve MCP on stdin and stdout, for Claude Desktop and
                                                other MCP clients. Controls the open window.
   cocad params FILE.scad                 List the Customizer parameters
-  cocad export FILE.scad -o OUT [-P SET] [-D name=value]...
-                                               Render and write OUT (.stl, .3mf or .step)
+  cocad export FILE.scad -o OUT [-P SET] [-D name=value]... [--for prusa|orca]
+                                               Render and write OUT (.stl, .3mf or .step).
+                                               --for writes a multicolor 3MF for that slicer.
   cocad slice FILE.scad [-P SET] [-D name=value]... [--layer-height MM] [--infill PCT] [--walls N]
                                                Slice and print estimates
   cocad photo FILE.scad -o OUT.png [-P SET] [-D name=value]... [--size WxH] [--samples N]
@@ -130,6 +133,7 @@ struct Batch {
     out: Option<PathBuf>,
     params: Vec<params::Param>,
     settings: slicer::Settings,
+    target: Option<export::Slicer>,
 }
 
 fn parse_batch(args: &[String]) -> Result<Batch> {
@@ -140,6 +144,7 @@ fn parse_batch(args: &[String]) -> Result<Batch> {
     let mut set_file = None;
     let mut settings = slicer::Settings::default();
     let mut photo = PhotoArgs::default();
+    let mut target = None;
     let mut it = args.iter();
     while let Some(a) = it.next() {
         let mut val = |name: &str| {
@@ -152,6 +157,13 @@ fn parse_batch(args: &[String]) -> Result<Batch> {
             "-D" => defs.push(val("-D")?),
             "-P" => set = Some(val("-P")?),
             "-p" => set_file = Some(PathBuf::from(val("-p")?)),
+            "--for" => {
+                let v = val(a)?;
+                target = Some(
+                    export::Slicer::from_name(&v)
+                        .with_context(|| format!("--for must be prusa or orca, got {v}"))?,
+                );
+            }
             "--layer-height" => settings.layer_height = val(a)?.parse()?,
             "--first-layer" => settings.first_layer = val(a)?.parse()?,
             "--line-width" => settings.line_width = val(a)?.parse()?,
@@ -192,6 +204,7 @@ fn parse_batch(args: &[String]) -> Result<Batch> {
         out,
         params,
         settings,
+        target,
     })
 }
 
@@ -255,7 +268,6 @@ fn cmd_export(args: &[String]) -> Result<()> {
     let b = parse_batch(args)?;
     let out = b.out.clone().context("missing -o OUT")?;
     export::Format::from_path(&out).context("OUT must end in .stl, .3mf or .step")?;
-    let mesh = render(&b)?;
     let title = b
         .file
         .file_stem()
@@ -270,7 +282,21 @@ fn cmd_export(args: &[String]) -> Result<()> {
             .map(|p| (p.name.clone(), p.value.to_scad()))
             .collect(),
     };
-    export::write(&out, &mesh, &meta)?;
+    if let Some(target) = b.target {
+        let cancel = Arc::new(AtomicBool::new(false));
+        let parts = parts::render(&openscad::Config::load(), &b.file, &b.params, &cancel)?;
+        export::write_parts(&out, &parts, &meta, target)?;
+        for (i, p) in parts.iter().enumerate() {
+            eprintln!(
+                "filament {}: {} ({} triangles)",
+                i + 1,
+                p.name,
+                p.mesh.triangles.len()
+            );
+        }
+    } else {
+        export::write(&out, &render(&b)?, &meta)?;
+    }
     eprintln!("wrote {}", out.display());
     Ok(())
 }

@@ -1,6 +1,7 @@
 //! Exports a mesh as binary STL, 3MF or STEP.
 
 use crate::mesh::Mesh;
+use crate::parts::Part;
 use anyhow::{Result, bail};
 use glam::DVec3;
 use std::collections::{HashMap, HashSet};
@@ -93,12 +94,57 @@ fn xml_escape(s: &str) -> String {
         .replace('"', "&quot;")
 }
 
-pub fn threemf_bytes(mesh: &Mesh, meta: &Meta) -> Result<Vec<u8>> {
-    let mut model = String::with_capacity(mesh.vertices.len() * 60 + mesh.triangles.len() * 50);
-    model.push_str(
+const CONTENT_TYPES: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
+<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">\n \
+<Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/>\n \
+<Default Extension=\"model\" ContentType=\"application/vnd.ms-package.3dmanufacturing-3dmodel+xml\"/>\n</Types>\n";
+const CONTENT_TYPES_PARTS: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
+<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">\n \
+<Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/>\n \
+<Default Extension=\"model\" ContentType=\"application/vnd.ms-package.3dmanufacturing-3dmodel+xml\"/>\n \
+<Default Extension=\"config\" ContentType=\"text/xml\"/>\n</Types>\n";
+const RELS: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
+<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">\n \
+<Relationship Target=\"/3D/3dmodel.model\" Id=\"rel0\" \
+Type=\"http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel\"/>\n</Relationships>\n";
+/// The plate position of a model in an OrcaSlicer file, in mm.
+const ORCA_CENTER: f32 = 100.0;
+
+/// The slicer that a multicolor 3MF is for. Each one reads its own part data.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Slicer {
+    Prusa,
+    Orca,
+}
+
+impl Slicer {
+    pub const ALL: [Slicer; 2] = [Slicer::Prusa, Slicer::Orca];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Slicer::Prusa => "PrusaSlicer 2.9",
+            Slicer::Orca => "OrcaSlicer",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Slicer> {
+        match name.to_ascii_lowercase().as_str() {
+            "prusa" | "prusaslicer" => Some(Slicer::Prusa),
+            "orca" | "orcaslicer" => Some(Slicer::Orca),
+            _ => None,
+        }
+    }
+}
+
+/// The start of a 3MF model file, up to the `<resources>` element.
+fn model_head(meta: &Meta, namespaces: &str, metadata: &str) -> String {
+    let mut model = String::new();
+    let _ = writeln!(
+        model,
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<model unit=\"millimeter\" xml:lang=\"en-US\" \
-         xmlns=\"http://schemas.microsoft.com/3dmanufacturing/core/2015/02\">\n",
+         xmlns=\"http://schemas.microsoft.com/3dmanufacturing/core/2015/02\"{namespaces}>"
     );
+    model.push_str(metadata);
     let _ = writeln!(
         model,
         " <metadata name=\"Title\">{}</metadata>",
@@ -117,6 +163,27 @@ pub fn threemf_bytes(mesh: &Mesh, meta: &Meta) -> Result<Vec<u8>> {
             xml_escape(&desc.join("; "))
         );
     }
+    model
+}
+
+/// Zips the parts of a 3MF package. The files are `(name, content)`.
+fn package(files: &[(&str, &[u8])]) -> Result<Vec<u8>> {
+    let mut buf = std::io::Cursor::new(Vec::new());
+    {
+        let mut zip = zip::ZipWriter::new(&mut buf);
+        let opts = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+        for (name, content) in files {
+            zip.start_file(*name, opts)?;
+            zip.write_all(content)?;
+        }
+        zip.finish()?;
+    }
+    Ok(buf.into_inner())
+}
+
+pub fn threemf_bytes(mesh: &Mesh, meta: &Meta) -> Result<Vec<u8>> {
+    let mut model = model_head(meta, "", "");
     model.push_str(" <resources>\n  <object id=\"1\" type=\"model\">\n   <mesh>\n    <vertices>\n");
     for v in &mesh.vertices {
         let _ = writeln!(
@@ -135,29 +202,200 @@ pub fn threemf_bytes(mesh: &Mesh, meta: &Meta) -> Result<Vec<u8>> {
     }
     model.push_str("    </triangles>\n   </mesh>\n  </object>\n </resources>\n <build>\n  <item objectid=\"1\"/>\n </build>\n</model>\n");
 
-    let content_types = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
-<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">\n \
-<Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/>\n \
-<Default Extension=\"model\" ContentType=\"application/vnd.ms-package.3dmanufacturing-3dmodel+xml\"/>\n</Types>\n";
-    let rels = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
-<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">\n \
-<Relationship Target=\"/3D/3dmodel.model\" Id=\"rel0\" \
-Type=\"http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel\"/>\n</Relationships>\n";
+    package(&[
+        ("[Content_Types].xml", CONTENT_TYPES.as_bytes()),
+        ("_rels/.rels", RELS.as_bytes()),
+        ("3D/3dmodel.model", model.as_bytes()),
+    ])
+}
 
-    let mut buf = std::io::Cursor::new(Vec::new());
-    {
-        let mut zip = zip::ZipWriter::new(&mut buf);
-        let opts = zip::write::SimpleFileOptions::default()
-            .compression_method(zip::CompressionMethod::Deflated);
-        zip.start_file("[Content_Types].xml", opts)?;
-        zip.write_all(content_types.as_bytes())?;
-        zip.start_file("_rels/.rels", opts)?;
-        zip.write_all(rels.as_bytes())?;
-        zip.start_file("3D/3dmodel.model", opts)?;
-        zip.write_all(model.as_bytes())?;
-        zip.finish()?;
+/// Writes one mesh as `<vertices>` and `<triangles>`. Indices start at `first`.
+fn mesh_rows(model: &mut String, mesh: &Mesh, vertices: bool, first: u32) {
+    if vertices {
+        for v in &mesh.vertices {
+            let _ = writeln!(
+                model,
+                "     <vertex x=\"{}\" y=\"{}\" z=\"{}\"/>",
+                v.x, v.y, v.z
+            );
+        }
+    } else {
+        for t in &mesh.triangles {
+            let _ = writeln!(
+                model,
+                "     <triangle v1=\"{}\" v2=\"{}\" v3=\"{}\"/>",
+                t[0] + first,
+                t[1] + first,
+                t[2] + first
+            );
+        }
     }
-    Ok(buf.into_inner())
+}
+
+/// PrusaSlicer 2.9: one mesh with all parts. `Slic3r_PE_model.config` gives
+/// each part a triangle range and an extruder.
+fn prusa_bytes(parts: &[Part], meta: &Meta) -> Result<Vec<u8>> {
+    let mut model = model_head(meta, "", "");
+    model.push_str(" <resources>\n  <object id=\"1\" type=\"model\">\n   <mesh>\n    <vertices>\n");
+    for part in parts {
+        mesh_rows(&mut model, &part.mesh, true, 0);
+    }
+    model.push_str("    </vertices>\n    <triangles>\n");
+    let mut config = String::from(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<config>\n <object id=\"1\" instances_count=\"1\">\n",
+    );
+    let _ = writeln!(
+        config,
+        "  <metadata type=\"object\" key=\"name\" value=\"{}\"/>",
+        xml_escape(&meta.title)
+    );
+    let (mut first_vertex, mut first_triangle) = (0u32, 0usize);
+    for (i, part) in parts.iter().enumerate() {
+        mesh_rows(&mut model, &part.mesh, false, first_vertex);
+        let count = part.mesh.triangles.len();
+        let _ = writeln!(
+            config,
+            "  <volume firstid=\"{}\" lastid=\"{}\">\n   \
+             <metadata type=\"volume\" key=\"name\" value=\"{}\"/>\n   \
+             <metadata type=\"volume\" key=\"volume_type\" value=\"ModelPart\"/>\n   \
+             <metadata type=\"volume\" key=\"extruder\" value=\"{}\"/>\n  </volume>",
+            first_triangle,
+            first_triangle + count - 1,
+            xml_escape(&part.name),
+            i + 1
+        );
+        first_vertex += part.mesh.vertices.len() as u32;
+        first_triangle += count;
+    }
+    model.push_str("    </triangles>\n   </mesh>\n  </object>\n </resources>\n <build>\n  <item objectid=\"1\"/>\n </build>\n</model>\n");
+    config.push_str(" </object>\n</config>\n");
+    package(&[
+        ("[Content_Types].xml", CONTENT_TYPES_PARTS.as_bytes()),
+        ("_rels/.rels", RELS.as_bytes()),
+        ("3D/3dmodel.model", model.as_bytes()),
+        ("Metadata/Slic3r_PE_model.config", config.as_bytes()),
+    ])
+}
+
+/// OrcaSlicer: one mesh object for each part, joined by a component object.
+/// `model_settings.config` gives each part an extruder.
+///
+/// `project_settings.config` holds only the filament colors and the flush
+/// table, so the user's printer and process stay as they are. OrcaSlicer 2.4.2
+/// crashes when the file has colors but no flush table.
+fn orca_bytes(parts: &[Part], meta: &Meta) -> Result<Vec<u8>> {
+    const NS: &str = " xmlns:BambuStudio=\"http://schemas.bambulab.com/package/2021\" \
+                      xmlns:p=\"http://schemas.microsoft.com/3dmanufacturing/production/2015/06\" \
+                      requiredextensions=\"p\"";
+    const VERSION: &str = " <metadata name=\"BambuStudio:3mfVersion\">1</metadata>\n";
+    const PATH: &str = "/3D/Objects/parts.model";
+
+    let root_id = parts.len() + 1;
+    let mut objects = model_head(meta, NS, VERSION);
+    objects.push_str(" <resources>\n");
+    let mut components = String::new();
+    let mut part_settings = String::new();
+    for (i, part) in parts.iter().enumerate() {
+        let id = i + 1;
+        let _ = writeln!(
+            objects,
+            "  <object id=\"{id}\" type=\"model\">\n   <mesh>\n    <vertices>"
+        );
+        mesh_rows(&mut objects, &part.mesh, true, 0);
+        objects.push_str("    </vertices>\n    <triangles>\n");
+        mesh_rows(&mut objects, &part.mesh, false, 0);
+        objects.push_str("    </triangles>\n   </mesh>\n  </object>\n");
+        let _ = writeln!(
+            components,
+            "    <component p:path=\"{PATH}\" objectid=\"{id}\" transform=\"1 0 0 0 1 0 0 0 1 0 0 0\"/>"
+        );
+        let _ = writeln!(
+            part_settings,
+            "    <part id=\"{id}\" subtype=\"normal_part\">\n     \
+             <metadata key=\"name\" value=\"{}\"/>\n     \
+             <metadata key=\"extruder\" value=\"{id}\"/>\n    </part>",
+            xml_escape(&part.name)
+        );
+    }
+    objects.push_str(" </resources>\n <build/>\n</model>\n");
+
+    // Center the model near (100, 100) on the plate.
+    let (min, max) = parts
+        .iter()
+        .filter_map(|p| p.mesh.bounds())
+        .map(|b| (b.min, b.max))
+        .reduce(|a, b| (a.0.min(b.0), a.1.max(b.1)))
+        .ok_or_else(|| anyhow::anyhow!("nothing to export"))?;
+    let (x, y, z) = (
+        ORCA_CENTER - (min.x + max.x) / 2.0,
+        ORCA_CENTER - (min.y + max.y) / 2.0,
+        -min.z,
+    );
+    let mut root = model_head(meta, NS, VERSION);
+    let _ = write!(
+        root,
+        " <resources>\n  <object id=\"{root_id}\" type=\"model\">\n   <components>\n{components}   \
+         </components>\n  </object>\n </resources>\n <build>\n  \
+         <item objectid=\"{root_id}\" transform=\"1 0 0 0 1 0 0 0 1 {x} {y} {z}\" printable=\"1\"/>\n \
+         </build>\n</model>\n"
+    );
+    let rels = format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
+<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">\n \
+<Relationship Target=\"{PATH}\" Id=\"rel-1\" \
+Type=\"http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel\"/>\n</Relationships>\n"
+    );
+    let settings = format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<config>\n  <object id=\"{root_id}\">\n    \
+         <metadata key=\"name\" value=\"{title}\"/>\n    \
+         <metadata key=\"extruder\" value=\"1\"/>\n{part_settings}  </object>\n  <plate>\n    \
+         <metadata key=\"plater_id\" value=\"1\"/>\n    <model_instance>\n      \
+         <metadata key=\"object_id\" value=\"{root_id}\"/>\n      \
+         <metadata key=\"instance_id\" value=\"0\"/>\n      \
+         <metadata key=\"identify_id\" value=\"{root_id}\"/>\n    </model_instance>\n  </plate>\n</config>\n",
+        title = xml_escape(&meta.title)
+    );
+    let n = parts.len();
+    let flush: Vec<&str> = (0..n * n)
+        .map(|i| if i % (n + 1) == 0 { "0" } else { "280" })
+        .collect();
+    let colors: Vec<String> = parts
+        .iter()
+        .map(|p| format!("#{:02X}{:02X}{:02X}", p.color[0], p.color[1], p.color[2]))
+        .collect();
+    let project = serde_json::json!({
+        "filament_colour": colors,
+        "flush_volumes_matrix": flush,
+    })
+    .to_string();
+    package(&[
+        ("[Content_Types].xml", CONTENT_TYPES_PARTS.as_bytes()),
+        ("_rels/.rels", RELS.as_bytes()),
+        ("3D/3dmodel.model", root.as_bytes()),
+        ("3D/_rels/3dmodel.model.rels", rels.as_bytes()),
+        ("3D/Objects/parts.model", objects.as_bytes()),
+        ("Metadata/model_settings.config", settings.as_bytes()),
+        ("Metadata/project_settings.config", project.as_bytes()),
+    ])
+}
+
+pub fn parts_bytes(parts: &[Part], meta: &Meta, slicer: Slicer) -> Result<Vec<u8>> {
+    if parts.is_empty() || parts.iter().any(|p| p.mesh.is_empty()) {
+        bail!("nothing to export");
+    }
+    match slicer {
+        Slicer::Prusa => prusa_bytes(parts, meta),
+        Slicer::Orca => orca_bytes(parts, meta),
+    }
+}
+
+/// Writes a multicolor 3MF. The path must end in `.3mf`.
+pub fn write_parts(path: &Path, parts: &[Part], meta: &Meta, slicer: Slicer) -> Result<()> {
+    if !matches!(Format::from_path(path), Some(Format::ThreeMf)) {
+        bail!("a multicolor export must end in .3mf");
+    }
+    std::fs::write(path, parts_bytes(parts, meta, slicer)?)?;
+    Ok(())
 }
 
 /// One planar face of the STEP output: an outer loop and holes, as vertex indices.
@@ -473,6 +711,54 @@ mod tests {
         assert_eq!(s.matches("FACE_SURFACE").count(), 6);
         assert_eq!(s.matches("CARTESIAN_POINT").count(), 8 + 1);
         assert!(s.contains("CLOSED_SHELL"));
+    }
+
+    fn two_parts() -> Vec<Part> {
+        ["body", "star"]
+            .into_iter()
+            .map(|name| Part {
+                name: name.into(),
+                color: [0xff, 0, 0],
+                mesh: cube(1.0),
+            })
+            .collect()
+    }
+
+    fn read(bytes: Vec<u8>, name: &str) -> String {
+        let mut z = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+        std::io::read_to_string(z.by_name(name).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn prusa_file_has_a_range_for_each_part() {
+        let tris = cube(1.0).triangles.len();
+        let b = parts_bytes(&two_parts(), &Meta::default(), Slicer::Prusa).unwrap();
+        let config = read(b.clone(), "Metadata/Slic3r_PE_model.config");
+        assert!(config.contains(&format!("firstid=\"{tris}\" lastid=\"{}\"", 2 * tris - 1)));
+        assert!(config.contains("key=\"extruder\" value=\"2\""));
+        let model = read(b, "3D/3dmodel.model");
+        let last = 2 * cube(1.0).vertices.len() - 1;
+        assert!(model.contains(&format!("=\"{last}\"")));
+    }
+
+    #[test]
+    fn orca_file_has_flush_table_and_extruders() {
+        let b = parts_bytes(&two_parts(), &Meta::default(), Slicer::Orca).unwrap();
+        let settings = read(b.clone(), "Metadata/model_settings.config");
+        assert!(settings.contains("<part id=\"2\""));
+        assert!(settings.contains("key=\"extruder\" value=\"2\""));
+        let project: serde_json::Value =
+            serde_json::from_str(&read(b, "Metadata/project_settings.config")).unwrap();
+        assert_eq!(project["filament_colour"][1], "#FF0000");
+        assert_eq!(
+            project["flush_volumes_matrix"],
+            serde_json::json!(["0", "280", "280", "0"])
+        );
+    }
+
+    #[test]
+    fn empty_parts_are_refused() {
+        assert!(parts_bytes(&[], &Meta::default(), Slicer::Orca).is_err());
     }
 
     #[test]

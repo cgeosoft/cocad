@@ -17,6 +17,8 @@ OpenSCAD does the geometry. CoCAD runs the `openscad` CLI in the background, rea
 - **Export.** Binary STL, 3MF with the parameters in the metadata, and STEP AP214 with real planar faces.
 - **Slice preview.** Walls, infill and top and bottom skin as round strands, with a layer slider and a time, length and weight estimate.
 - **Photo render.** A path tracer makes a studio photo of the current view, in a plastic color and finish you choose.
+- **Multicolor 3MF.** A model can list parts with a `cocad_part` parameter. CoCAD renders each part and writes a 3MF for PrusaSlicer 2.9 or OrcaSlicer, with one filament for each part.
+- **Examples.** **File > Examples** opens a sample model. The app writes the models to `examples/` in its settings folder. Your edits to these copies stay.
 - **Mesh check.** Size, volume, triangles and open edges. Back faces show in purple.
 - **CLI.** Batch export, slice and photo without the window.
 - **MCP server.** Claude Desktop and other MCP clients can read the model, change parameters, render and export in the open window.
@@ -102,7 +104,7 @@ The client starts `cocad mcp`. This process has no window. It sends each tool ca
 | `set_params`, `reset_params` | Change parameters or reset them, then render |
 | `render` | Run OpenSCAD again |
 | `load_parameter_set`, `save_parameter_set` | Load or save a parameter set |
-| `export_model` | Write STL, 3MF or STEP |
+| `export_model` | Write STL, 3MF or STEP. With `slicer`, write a multicolor 3MF |
 | `save_photo` | Write a path traced PNG |
 | `slice` | Slice and return layers, filament, weight and a rough print time |
 | `set_view` | Change the tab, camera direction, wireframe, grid and slice layer |
@@ -164,12 +166,40 @@ The **Photo** view path-traces the current camera view on all CPU cores. The ima
 | 3MF | Mesh, with the parameter values in the metadata. |
 | STEP | AP214. Coplanar triangles become planar faces. A closed mesh becomes one `FACETED_BREP` solid that CAD tools can edit. |
 
+### Multicolor 3MF
+
+List the parts in a `cocad_part` parameter. Show each part only when it is selected:
+
+```openscad
+cocad_part = "all"; // [all, plate, star]
+
+module part(name, col) {
+    if (cocad_part == "all" || cocad_part == name) {
+        echo(cocad_color = col);
+        color(col) children();
+    }
+}
+```
+
+- CoCAD renders each part in a separate OpenSCAD run. A model with N parts takes N renders.
+- The list order sets the filament number. `echo(cocad_color = ...)` sets the color: a `#RRGGBB` value or a common color name.
+- `import()` ignores SVG fill colors. Use one SVG file for each color. See `examples/multicolor-badge.scad`.
+- Parts must not overlap. Cut a pocket in one part for the other part.
+- With a model that has parts, the Model tab and the **File** menu show one export for each slicer. On the command line, use `--for prusa` or `--for orca`.
+
+The two slicers read different part data, so one file does not work in both. Tests used PrusaSlicer 2.9.7 and OrcaSlicer 2.4.2.
+
+- **PrusaSlicer 2.9**: each part gets its extruder. The file holds no colors. Use a multi-material printer profile. A profile with one filament shows all parts in one color.
+- **OrcaSlicer**: each part gets its filament, and the file holds the colors. The printer and process settings stay as they are.
+- **PrusaSlicer 3.0 alpha** is not supported. It loads the PrusaSlicer file as one volume.
+
 ## Command line
 
 ```bash
 cocad params model.scad
 cocad export model.scad -o model.3mf -D width=80 -D 'shape="square"'
 cocad export model.scad -o big.stl -P big          # saved set 'big' from model.json
+cocad export badge.scad -o badge.3mf --for orca     # multicolor 3MF for OrcaSlicer
 cocad slice model.scad --layer-height 0.2 --infill 20 --walls 3
 cocad photo model.scad -o model.png --size 1600x1200 --samples 256 --color eb6f40 --finish satin --layer-lines
 ```
@@ -280,13 +310,15 @@ A tag `v*` (for example `v0.2.0`) also makes a GitHub release with all files att
 | `src/params.rs` | Customizer parameter parser |
 | `src/presets.rs` | Parameter sets (OpenSCAD `.json` format) |
 | `src/recent.rs` | List of recent models |
+| `src/examples.rs` | Example models in the File menu |
 | `src/telemetry.rs` | Optional analytics and error reports (PostHog) |
 | `src/openscad.rs` | Runs `openscad` and reads the STL |
 | `src/mesh.rs` | Indexed mesh, STL reader, checks |
-| `src/export.rs` | STL, 3MF and STEP writers |
+| `src/parts.rs` | Finds the parts of a multicolor model and renders each one |
+| `src/export.rs` | STL, 3MF, multicolor 3MF and STEP writers |
 | `src/slicer.rs` | Preview slicer |
 | `src/pathtrace.rs` | Path tracer for photo renders (BVH, plastic material, studio light) |
-| `examples/` | Test models |
+| `examples/` | Test models. The binary embeds the models that render. |
 | `scripts/` | Build and packaging scripts |
 | `packaging/` | Desktop entry, icon, MIME type for the `.deb` |
 | `images/` | README images |
@@ -307,6 +339,7 @@ Stack: Rust 2024, `eframe`/`egui` 0.31 with the `glow` (OpenGL 3.3) backend and 
 | `vase.scad` | linear_extrude with twist and scale, sloped walls, 450 layers |
 | `bracket.scad` | Holes, slots, a gusset, overhangs |
 | `honeycomb-tray.scad` | Many holes per layer, thin webs, `include <lib/hex.scad>` |
+| `multicolor-badge.scad` | SVG inlays, one part for each color in touching solids |
 | `open-mesh.scad` | Open mesh: open-edge warning, STEP as an open shell |
 | `flat-2d.scad` | 2D only: must fail with a clear error |
 | `empty.scad` | No geometry: must fail with a clear error |
