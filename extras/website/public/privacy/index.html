@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Privacy Policy - CoCAD</title>
-  <meta name="description" content="What the CoCAD website collects, how optional PostHog analytics work, and how to change your choice. The desktop app sends no data.">
+  <meta name="description" content="What the CoCAD website collects, how optional PostHog analytics work, and how to change your choice. The desktop app sends data only if you accept it.">
   <link rel="canonical" href="https://cocad.cgeosoft.com/privacy/">
   <link rel="icon" type="image/svg+xml" href="/assets/app-icon.svg">
   <meta name="theme-color" content="#0f1114">
@@ -26,12 +26,12 @@
   <main class="section container legal">
     <p class="label"><span class="dot"></span>Privacy</p>
     <h1 class="big-title">Privacy policy</h1>
-    <p class="legal-date mono">Last updated: November 5, 2026</p>
+    <p class="legal-date mono">Last updated: November 6, 2026</p>
 
     <section>
       <h2>Summary</h2>
       <ul>
-        <li>The desktop app sends no data. It has no telemetry and no account.</li>
+        <li>The desktop app has no account. It sends usage analytics and error reports only if you accept them. Each one is a separate choice.</li>
         <li>This website uses PostHog analytics only if you accept them.</li>
         <li>The website sets no cookies.</li>
         <li>The website has no forms and no accounts.</li>
@@ -88,7 +88,17 @@
 
     <section id="app">
       <h2>The desktop app</h2>
-      <p>CoCAD makes no connection to a server of ours. It has no telemetry, no update check and no account. Your models stay on your computer.</p>
+      <p>CoCAD has no account and no update check. Your models stay on your computer.</p>
+      <p>The app asks you one time about two optional kinds of data. Both boxes start clear. If you leave a box clear, the app does not send that kind of data. The app sends them to PostHog (EU cloud). The legal basis is your consent. Only the app window sends data. The command line and <code>cocad mcp</code> send nothing.</p>
+      <div class="card legal-table"><table>
+        <thead><tr><th>Choice</th><th>Why</th><th>What the app sends</th></tr></thead>
+        <tbody>
+          <tr><td>Usage analytics</td><td>To see which features people use, so that we can improve them</td><td>App start, view changes, model open with the number of parameters, export format, photo save with the sample count, version, system, processor type, a random ID</td></tr>
+          <tr><td>Error reports</td><td>To find and repair failures</td><td>Failure type, error text with file paths removed, the place in the source code, version, system, processor type, a random ID that changes at each start</td></tr>
+        </tbody>
+      </table></div>
+      <p>The app does not send model contents, file names, parameter values or OpenSCAD output. PostHog sees your IP address during the connection. The app replaces that address in each event with 0.0.0.0, and it tells PostHog not to find your location, so the stored events do not hold your address. The two random IDs are different, so an error report does not link to your analytics.</p>
+      <p>To change your choice, open File &gt; Settings. When you turn analytics off, the app removes their random ID from your computer. To ask for the removal of data that PostHog already has, write to the contact address.</p>
       <p>The MCP server listens on 127.0.0.1 only. If you connect an AI client, that client sends what it reads to its own model provider. The policy of that provider applies.</p>
     </section>
 

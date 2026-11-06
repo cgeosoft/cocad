@@ -22,6 +22,11 @@ if [ "$test" = 1 ]; then
     cargo test --quiet
 fi
 if [ "$profile" = release ]; then
+    # Without a key, the app sends no data and does not ask the user about it.
+    if [ -z "${POSTHOG_API_KEY:-}" ] && [ -f extras/website/.env ]; then
+        POSTHOG_API_KEY=$(sed -n 's/^POSTHOG_API_KEY=//p' extras/website/.env)
+        export POSTHOG_API_KEY
+    fi
     cargo build --release --locked
 else
     cargo build --locked

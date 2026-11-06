@@ -49,4 +49,5 @@ cargo check --target aarch64-apple-darwin
 11. Warn before you delete files. Push only when the owner asks.
 12. `origin` is the private main repo. `github` is the public mirror. The branch is `main`.
 13. A release bumps the minor version by default. Bump the patch only when the owner says so.
-14. Write all repo text in ASD-STE100. Do not use em-dashes, emojis or hype. State only verified facts.
+14. When `src/telemetry.rs` sends new data, update the consent text in `src/app.rs`, `README.md` and the website privacy page.
+15. Write all repo text in ASD-STE100. Do not use em-dashes, emojis or hype. State only verified facts.

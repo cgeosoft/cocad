@@ -114,7 +114,7 @@ const STEPS: [Step; 9] = [
         title: "Settings and shortcuts",
         intro: "You are ready to start.",
         points: &[
-            "File > Settings sets the theme and the OpenSCAD binary.",
+            "File > Settings sets the theme, the OpenSCAD binary and your privacy choices.",
             "An OpenSCAD development build with Manifold is much faster.",
             "Help > About and shortcuts lists all keys.",
             "The CLI exports, slices and makes photos without the window. Run cocad --help.",

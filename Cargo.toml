@@ -23,6 +23,14 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 zune-core = "0.5"
 zune-jpeg = "0.5"
 
+# Linux uses rustls, so the package needs no OpenSSL. Windows and macOS use the
+# TLS of the system, so `cargo check` for them works from Linux.
+[target.'cfg(target_os = "linux")'.dependencies]
+ureq = { version = "3", default-features = false, features = ["rustls"] }
+
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+ureq = { version = "3", default-features = false, features = ["native-tls"] }
+
 [profile.release]
 opt-level = 3
 lto = "thin"

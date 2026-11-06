@@ -20,6 +20,7 @@ OpenSCAD does the geometry. CoCAD runs the `openscad` CLI in the background, rea
 - **Mesh check.** Size, volume, triangles and open edges. Back faces show in purple.
 - **CLI.** Batch export, slice and photo without the window.
 - **MCP server.** Claude Desktop and other MCP clients can read the model, change parameters, render and export in the open window.
+- **Privacy choices.** Usage analytics and error reports are optional. Each stays off until you accept it.
 - Linux, Windows and macOS. Dark and light themes.
 
 ## Install
@@ -214,6 +215,19 @@ label = "Hi";          // [10]
 $fn = 64;
 ```
 
+## Privacy
+
+At the first start, CoCAD asks about two optional kinds of data. Both boxes start clear, and you can change them in File > Settings.
+
+| Choice | Why | What CoCAD sends |
+|---|---|---|
+| Usage analytics | To see which features people use | App start, view changes, model open with the number of parameters, export format, photo save with the sample count, version, system, processor type, a random ID |
+| Error reports | To find and repair failures | Failure type, error text with file paths removed, source location, version, system, processor type, a random ID that changes at each start |
+
+CoCAD sends this data to PostHog (EU cloud). It does not send model contents, file names, parameter values or OpenSCAD output. Each event replaces the IP address with `0.0.0.0` and turns off location lookup. The CLI and `cocad mcp` send nothing. See the [privacy policy](https://cocad.cgeosoft.com/privacy/).
+
+A build reads the PostHog project key from `POSTHOG_API_KEY` at compile time. A build with no key sends nothing and does not ask. CI reads the key from the `POSTHOG_API_KEY` repository secret. `scripts/build.sh` also reads it from `extras/website/.env` for a release build.
+
 ## Build
 
 Requirements: Rust (stable, 1.85 or later) and OpenSCAD.
@@ -266,6 +280,7 @@ A tag `v*` (for example `v0.2.0`) also makes a GitHub release with all files att
 | `src/params.rs` | Customizer parameter parser |
 | `src/presets.rs` | Parameter sets (OpenSCAD `.json` format) |
 | `src/recent.rs` | List of recent models |
+| `src/telemetry.rs` | Optional analytics and error reports (PostHog) |
 | `src/openscad.rs` | Runs `openscad` and reads the STL |
 | `src/mesh.rs` | Indexed mesh, STL reader, checks |
 | `src/export.rs` | STL, 3MF and STEP writers |

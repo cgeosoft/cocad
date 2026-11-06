@@ -12,6 +12,7 @@ use crate::slicer::{self, Kind, Settings, Sliced};
 use crate::ui;
 use eframe::egui::{self, Color32, RichText, Vec2};
 use glam::{Mat4, Vec3};
+use serde_json::json;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, channel};
@@ -227,6 +228,8 @@ pub struct App {
     show_about: bool,
     /// Welcome tour, while it is open.
     tour: Option<tour::Tour>,
+    /// Privacy question, while it is open: the analytics and error report boxes.
+    consent: Option<(bool, bool)>,
     /// Listener for MCP tool calls, when the option is on.
     server: Option<crate::mcp::Server>,
     pending: Vec<remote::Pending>,
@@ -235,13 +238,21 @@ pub struct App {
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>, file: Option<PathBuf>, mode: &str) -> App {
         ui::fonts(&cc.egui_ctx);
+        let mut failures = Vec::new();
         let renderer = cc.gl.as_ref().and_then(|gl| match Renderer::new(gl) {
             Ok(r) => Some(Arc::new(Mutex::new(r))),
             Err(e) => {
                 eprintln!("renderer: {e}");
+                failures.push(e.to_string());
                 None
             }
         });
+        let cfg = openscad::Config::load();
+        crate::telemetry::apply(cfg.analytics, cfg.error_reports);
+        for e in failures {
+            crate::telemetry::error("renderer_failed", &e);
+        }
+        crate::telemetry::event("app_started", json!({ "view": mode }));
         let mut app = App {
             file: None,
             mtime: None,
@@ -303,7 +314,9 @@ impl App {
             new_set: None,
             confirm_delete: false,
             collapsed: Default::default(),
-            cfg: openscad::Config::load(),
+            consent: (crate::telemetry::available() && !cfg.privacy_asked)
+                .then_some((false, false)),
+            cfg,
             cfg_edit: None,
             engine: String::new(),
             renderer,
@@ -343,6 +356,7 @@ impl App {
                 self.fit_pending = true;
                 self.error = None;
                 self.recent = recent::add(self.file.as_ref().unwrap());
+                crate::telemetry::event("model_opened", json!({ "parameters": self.params.len() }));
                 self.start_render();
             }
             Err(e) => self.error = Some(format!("cannot read {}: {e}", path.display())),
@@ -472,8 +486,15 @@ impl App {
             self.export_rx = None;
             self.toast = Some((
                 match r {
-                    Ok(p) => format!("Saved {}", p.display()),
-                    Err(e) => format!("Export failed: {e}"),
+                    Ok(p) => {
+                        let format = p.extension().map(|e| e.to_string_lossy().to_lowercase());
+                        crate::telemetry::event("model_exported", json!({ "format": format }));
+                        format!("Saved {}", p.display())
+                    }
+                    Err(e) => {
+                        crate::telemetry::error("export_failed", &e);
+                        format!("Export failed: {e}")
+                    }
                 },
                 Instant::now(),
             ));
@@ -729,6 +750,65 @@ impl App {
         }
     }
 
+    /// Asks one time. Both boxes start clear, and a clear box is a valid answer.
+    /// The window has no close button, so that the user makes a choice.
+    fn consent_window(&mut self, ctx: &egui::Context) {
+        let Some((mut analytics, mut errors)) = self.consent else {
+            return;
+        };
+        let mut save = false;
+        let frame = egui::Frame::NONE
+            .fill(ui::c().panel)
+            .corner_radius(14)
+            .inner_margin(egui::Margin::same(18))
+            .stroke(egui::Stroke::new(1.0_f32, ui::c().line));
+        egui::Modal::new(egui::Id::new("consent"))
+            .frame(frame)
+            .show(ctx, |ui| {
+                ui.set_width(460.0);
+                ui.heading("Your privacy");
+                ui.add_space(6.0);
+                ui.label(
+                    "CoCAD can send two kinds of data to PostHog (EU cloud). Both are \
+                     optional. Each one stays off until you select it. CoCAD does not send \
+                     your models, file names or parameter values.",
+                );
+                ui.add_space(12.0);
+                ui.checkbox(&mut analytics, "Send usage analytics");
+                ui.indent("analytics_note", |ui| {
+                    ui.label(ui::dim(ANALYTICS_NOTE).size(12.5))
+                });
+                ui.add_space(10.0);
+                ui.checkbox(&mut errors, "Send error reports");
+                ui.indent("errors_note", |ui| {
+                    ui.label(ui::dim(ERRORS_NOTE).size(12.5))
+                });
+                ui.add_space(12.0);
+                ui.label(ui::dim("You can change this at any time in File > Settings.").size(12.5));
+                ui.hyperlink_to("Privacy policy", crate::telemetry::PRIVACY_URL);
+                ui.add_space(12.0);
+                let row = Vec2::new(ui.available_width(), 34.0);
+                let rtl = egui::Layout::right_to_left(egui::Align::Center);
+                ui.allocate_ui_with_layout(row, rtl, |ui| {
+                    ui.spacing_mut().button_padding = Vec2::new(16.0, 7.0);
+                    save = ui.add(ui::primary("Save choice")).clicked();
+                });
+            });
+        if !save {
+            self.consent = Some((analytics, errors));
+            return;
+        }
+        self.consent = None;
+        self.cfg.analytics = analytics;
+        self.cfg.error_reports = errors;
+        self.cfg.privacy_asked = true;
+        if let Err(e) = self.cfg.save() {
+            self.toast = Some((format!("Cannot save settings: {e}"), Instant::now()));
+        }
+        crate::telemetry::apply(analytics, errors);
+        crate::telemetry::event("app_started", json!({ "first_run": true }));
+    }
+
     fn about_window(&mut self, ctx: &egui::Context) {
         let mut open = self.show_about;
         egui::Window::new("About CoCAD")
@@ -822,6 +902,14 @@ impl App {
     }
 
     fn set_mode(&mut self, mode: Mode) {
+        if mode != self.mode {
+            let view = match mode {
+                Mode::Model => "model",
+                Mode::Slice => "slice",
+                Mode::Photo => "photo",
+            };
+            crate::telemetry::event("view_changed", json!({ "view": view }));
+        }
         self.mode = mode;
         if mode == Mode::Slice && self.slice_for_rev != self.mesh_rev {
             self.start_slice();
@@ -1425,8 +1513,14 @@ impl App {
         let Some(path) = d.save_file() else { return };
         let f = job.frame.lock().unwrap();
         let msg = match pathtrace::save_png(&path, &f) {
-            Ok(()) => format!("Saved {} ({} samples)", path.display(), f.samples),
-            Err(e) => format!("Cannot save: {e}"),
+            Ok(()) => {
+                crate::telemetry::event("photo_saved", json!({ "samples": f.samples }));
+                format!("Saved {} ({} samples)", path.display(), f.samples)
+            }
+            Err(e) => {
+                crate::telemetry::error("photo_save_failed", &e.to_string());
+                format!("Cannot save: {e}")
+            }
         };
         drop(f);
         self.toast = Some((msg, Instant::now()));
@@ -1953,7 +2047,7 @@ impl App {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
         // The tour uses the arrow keys, and the app waits behind it.
-        if self.tour.is_some() {
+        if self.tour.is_some() || self.consent.is_some() {
             return;
         }
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::O)) {
@@ -2104,6 +2198,15 @@ impl App {
                                 &mut edit.mcp,
                             );
                         });
+                        if crate::telemetry::available() {
+                            ui::card(ui, |ui| {
+                                ui::section(ui, "Privacy");
+                                ui.add_space(4.0);
+                                toggle_row(ui, "Usage analytics", ANALYTICS_NOTE, &mut edit.analytics);
+                                toggle_row(ui, "Error reports", ERRORS_NOTE, &mut edit.error_reports);
+                                ui.hyperlink_to("Privacy policy", crate::telemetry::PRIVACY_URL);
+                            });
+                        }
                     });
                 ui.add_space(12.0);
                 let row = Vec2::new(ui.available_width(), 34.0);
@@ -2124,6 +2227,7 @@ impl App {
             let rerender = (&edit.binary, &edit.args, edit.manifold)
                 != (&self.cfg.binary, &self.cfg.args, self.cfg.manifold);
             self.cfg = edit;
+            crate::telemetry::apply(self.cfg.analytics, self.cfg.error_reports);
             self.sync_server(ctx);
             if rerender {
                 self.start_render();
@@ -2199,6 +2303,13 @@ fn openscad_settings(ui: &mut egui::Ui, edit: &mut openscad::Config) {
 }
 
 /// Title and note on the left, switch on the right.
+const ANALYTICS_NOTE: &str = "This shows which features people use, so that we can improve \
+    them. CoCAD sends the app start, view changes, the number of parameters, the export format, \
+    the photo sample count, the version, the system, the processor type and a random ID.";
+const ERRORS_NOTE: &str = "This helps us find and repair failures. When CoCAD fails, it sends \
+    the error text with file paths removed, the place in the source code, the version, the \
+    system, the processor type and a random ID that changes at each start.";
+
 fn toggle_row(ui: &mut egui::Ui, title: &str, note: &str, on: &mut bool) {
     let row = Vec2::new(ui.available_width(), 38.0);
     let rtl = egui::Layout::right_to_left(egui::Align::Center);
@@ -2265,7 +2376,11 @@ impl eframe::App for App {
             .show(ctx, |ui| ui::dark_scope(ui, |ui| self.menu_bar(ui)));
         self.settings_window(ctx);
         self.about_window(ctx);
-        self.tour_window(ctx);
+        if self.consent.is_some() {
+            self.consent_window(ctx);
+        } else {
+            self.tour_window(ctx);
+        }
         egui::TopBottomPanel::bottom("status")
             .exact_height(28.0)
             .frame(

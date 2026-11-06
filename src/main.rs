@@ -13,6 +13,7 @@ mod presets;
 mod recent;
 mod render;
 mod slicer;
+mod telemetry;
 mod ui;
 
 use anyhow::{Context, Result, bail};
@@ -79,6 +80,7 @@ fn main() -> Result<()> {
 
 fn gui(file: Option<PathBuf>, mode: &str) -> Result<()> {
     let mode = mode.to_string();
+    telemetry::install_panic_hook();
     let options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
             .with_inner_size([1400.0, 900.0])

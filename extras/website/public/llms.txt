@@ -2,7 +2,7 @@
 
 > CoCAD is a free, MIT licensed desktop app for OpenSCAD models on Linux, Windows and macOS. An AI agent changes the model over MCP, the window renders it again, and the user checks a slice preview for errors before printing. It exports STL, 3MF and STEP, and it makes path traced photo renders.
 
-OpenSCAD does the geometry through its CLI, so the user must install OpenSCAD too. A development snapshot with the Manifold backend is much faster than the 2021 release. The slice view is for preview only: it has no travel moves, supports or bridges, and it writes no G-code. The app has no telemetry.
+OpenSCAD does the geometry through its CLI, so the user must install OpenSCAD too. A development snapshot with the Manifold backend is much faster than the 2021 release. The slice view is for preview only: it has no travel moves, supports or bridges, and it writes no G-code. Usage analytics and error reports are optional, and each stays off until the user accepts it.
 
 ## Docs
 
