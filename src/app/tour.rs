@@ -36,6 +36,7 @@ const STEPS: [Step; 9] = [
         points: &[
             "Press Ctrl+O to open a .scad file, or drop it on the window.",
             "The start view and the File menu list your recent models.",
+            "File > Examples opens a sample model.",
             "When the file changes on disk, the model reloads and keeps your values.",
             "Left drag orbits. Right drag pans. The wheel zooms.",
         ],
@@ -68,6 +69,7 @@ const STEPS: [Step; 9] = [
             "Check the size, volume, triangles and open edges.",
             "Back faces show in purple. Press W for the wireframe.",
             "Export binary STL, 3MF with the parameters, or STEP AP214.",
+            "A model with a cocad_part list also exports a multicolor 3MF.",
         ],
         image: shot!("4-export"),
     },

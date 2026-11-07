@@ -1,6 +1,7 @@
 //! The egui application: parameter panel, 3D view, export and slice preview.
 
-use crate::export::{self, Format, Meta};
+use crate::examples;
+use crate::export::{self, Format, Meta, Slicer};
 use crate::mesh::{Bounds, Mesh};
 use crate::openscad;
 use crate::params::{self, Param, Value, Widget};
@@ -234,6 +235,8 @@ pub struct App {
     menu: Option<Menu>,
     menu_at: egui::Pos2,
     menu_bar_rect: egui::Rect,
+    /// The Examples row while its submenu is open.
+    examples_row: Option<egui::Rect>,
     recent: Vec<PathBuf>,
     show_about: bool,
     /// Welcome tour, while it is open.
@@ -379,6 +382,7 @@ impl App {
             menu: None,
             menu_at: egui::Pos2::ZERO,
             menu_bar_rect: egui::Rect::NOTHING,
+            examples_row: None,
             recent: recent::load(),
             show_about: false,
             tour: tour::first_start().then(tour::Tour::new),
@@ -640,6 +644,42 @@ impl App {
         self.export_rx = Some(rx);
     }
 
+    /// Renders each part, then writes a multicolor 3MF for `slicer`.
+    fn export_parts(&mut self, slicer: Slicer) {
+        let Some(file) = self.file.clone() else {
+            return;
+        };
+        let mut dialog = rfd::FileDialog::new()
+            .set_file_name(export::suggested_name(&self.stem(), Format::ThreeMf))
+            .add_filter(slicer.label(), &["3mf"]);
+        if let Some(dir) = file.parent() {
+            dialog = dialog.set_directory(dir);
+        }
+        let Some(path) = dialog.save_file() else {
+            return;
+        };
+        let meta = Meta {
+            title: self.stem(),
+            params: self
+                .params
+                .iter()
+                .map(|p| (p.name.clone(), p.value.to_scad()))
+                .collect(),
+        };
+        let (cfg, params) = (self.cfg.clone(), self.params.clone());
+        let (tx, rx) = channel();
+        std::thread::spawn(move || {
+            let cancel = Arc::new(AtomicBool::new(false));
+            let _ = tx.send(
+                crate::parts::render(&cfg, &file, &params, &cancel)
+                    .and_then(|parts| export::write_parts(&path, &parts, &meta, slicer))
+                    .map(|_| path)
+                    .map_err(|e| e.to_string()),
+            );
+        });
+        self.export_rx = Some(rx);
+    }
+
     fn pick_file(&mut self) {
         let mut d = rfd::FileDialog::new().add_filter("OpenSCAD", &["scad"]);
         if let Some(dir) = self.file.as_ref().and_then(|f| f.parent()) {
@@ -702,6 +742,14 @@ impl App {
                     })
                 })
             });
+        if menu != Menu::File {
+            self.examples_row = None;
+        }
+        let sub_rect = self.examples_row.map(|row| {
+            // The submenu touches the menu, so the pointer can move across.
+            let at = egui::pos2(area.response.rect.right() - 2.0, row.top() - 7.0);
+            self.examples_popup(ctx, at)
+        });
         let (pos, pressed, clicked, esc) = ctx.input(|i| {
             (
                 i.pointer.interact_pos(),
@@ -712,14 +760,56 @@ impl App {
         });
         let on_menu = pos.is_some_and(|p| area.response.rect.contains(p));
         let on_bar = pos.is_some_and(|p| self.menu_bar_rect.contains(p));
-        if esc || (pressed && !on_menu && !on_bar) || (clicked && on_menu) {
+        let on_sub = pos.is_some_and(|p| sub_rect.is_some_and(|r| r.contains(p)));
+        // The row spans the menu height only, so its margin keeps the submenu open.
+        let on_row = pos.is_some_and(|p| {
+            self.examples_row
+                .is_some_and(|r| on_menu && r.y_range().contains(p.y))
+        });
+        if on_menu && !on_row {
+            self.examples_row = None;
+        }
+        let picked = clicked && (on_sub || (on_menu && !on_row));
+        if esc || (pressed && !on_menu && !on_bar && !on_sub) || picked {
             self.menu = None;
+            self.examples_row = None;
+        }
+    }
+
+    /// The Examples submenu at `at`. Returns its rectangle.
+    fn examples_popup(&mut self, ctx: &egui::Context, at: egui::Pos2) -> egui::Rect {
+        egui::Area::new(egui::Id::new("examples_menu"))
+            .order(egui::Order::Foreground)
+            .fixed_pos(at)
+            .show(ctx, |ui| {
+                ui::dark_scope(ui, |ui| {
+                    ui::menu_frame(ui, |ui| {
+                        for (label, file) in examples::MENU {
+                            if ui::menu_item(ui, label, "", true, false).clicked() {
+                                self.open_example(file);
+                            }
+                        }
+                    })
+                })
+            })
+            .response
+            .rect
+    }
+
+    fn open_example(&mut self, file: &str) {
+        match examples::extract(file) {
+            Ok(path) => self.open(path),
+            Err(e) => self.error = Some(format!("cannot write the examples: {e}")),
         }
     }
 
     fn file_menu(&mut self, ui: &mut egui::Ui) {
         if ui::menu_item(ui, "Open…", "Ctrl+O", true, false).clicked() {
             self.pick_file();
+        }
+        let examples = ui::menu_item(ui, "Examples", "\u{25B6}", true, false);
+        if examples.hovered() {
+            self.examples_row = Some(examples.rect);
         }
         ui::menu_header(ui, "Recent models");
         if self.recent.is_empty() {
@@ -758,6 +848,14 @@ impl App {
             let label = format!("Export {}", fmt.label());
             if ui::menu_item(ui, &label, "", can_export, false).clicked() {
                 self.export(fmt);
+            }
+        }
+        if !crate::parts::names(&self.params).is_empty() {
+            for slicer in Slicer::ALL {
+                let label = format!("Export multicolor 3MF for {}", slicer.label());
+                if ui::menu_item(ui, &label, "", can_export, false).clicked() {
+                    self.export_parts(slicer);
+                }
             }
         }
     }
@@ -948,6 +1046,22 @@ impl App {
                     });
                     if let Some(fmt) = pick {
                         self.export(fmt);
+                    }
+                    if !crate::parts::names(&self.params).is_empty() {
+                        ui.label(ui::dim("Multicolor 3MF"));
+                        let w = (ui.available_width() - ui.spacing().item_spacing.x) / 2.0;
+                        let mut pick = None;
+                        ui.horizontal(|ui| {
+                            for slicer in Slicer::ALL {
+                                let b = ui::primary(slicer.label()).min_size(Vec2::new(w, 34.0));
+                                if ui.add_enabled(can_export, b).clicked() {
+                                    pick = Some(slicer);
+                                }
+                            }
+                        });
+                        if let Some(slicer) = pick {
+                            self.export_parts(slicer);
+                        }
                     }
                 });
                 if let (Some(i), Some(mesh)) = (&self.info, &self.mesh) {
