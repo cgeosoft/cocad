@@ -92,6 +92,15 @@ struct PhotoKey {
     samples: u32,
 }
 
+/// Pages of the Settings window.
+#[derive(Clone, Copy, PartialEq)]
+enum SettingsPage {
+    Appearance,
+    OpenScad,
+    Mcp,
+    Privacy,
+}
+
 /// Photo render settings shown in the Photo panel.
 struct PhotoSettings {
     color: [u8; 3],
@@ -228,6 +237,7 @@ pub struct App {
     collapsed: std::collections::HashSet<String>,
     cfg: openscad::Config,
     cfg_edit: Option<openscad::Config>,
+    settings_page: SettingsPage,
     engine: String,
     renderer: Option<Arc<Mutex<Renderer>>>,
     toast: Option<(String, Instant)>,
@@ -375,6 +385,7 @@ impl App {
             privacy: PrivacyEdit::default(),
             cfg,
             cfg_edit: None,
+            settings_page: SettingsPage::Appearance,
             engine: String::new(),
             renderer,
             toast: None,
@@ -2319,11 +2330,33 @@ impl App {
             .corner_radius(14)
             .inner_margin(egui::Margin::same(18))
             .stroke(egui::Stroke::new(1.0_f32, ui::c().line));
-        let max_height = (ctx.screen_rect().height() - 170.0).max(160.0);
+        // A fixed size keeps the buttons in place when the page changes.
+        let screen = ctx.screen_rect().size();
+        let width = (screen.x - 80.0).clamp(420.0, 604.0);
+        let height = (screen.y - 170.0).clamp(160.0, 360.0);
+        let probe = settings_probe(ctx, &edit);
+        let missing = probe.as_ref().is_some_and(|p| p.version == "not found");
+        let mut page = self.settings_page;
+        let mut pages = vec![
+            (SettingsPage::Appearance, "Appearance", None),
+            (
+                SettingsPage::OpenScad,
+                "OpenSCAD",
+                missing.then_some(ui::c().danger),
+            ),
+            (
+                SettingsPage::Mcp,
+                "MCP server",
+                running.then_some(ui::GOOD),
+            ),
+        ];
+        if crate::telemetry::available() {
+            pages.push((SettingsPage::Privacy, "Privacy", None));
+        }
         egui::Modal::new(egui::Id::new("settings"))
             .frame(frame)
             .show(ctx, |ui| {
-                ui.set_width(460.0);
+                ui.set_width(width);
                 ui.horizontal(|ui| {
                     ui.heading("Settings");
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -2331,62 +2364,42 @@ impl App {
                     });
                 });
                 ui.add_space(10.0);
-                egui::ScrollArea::vertical()
-                    .max_height(max_height)
-                    .auto_shrink([false, true])
-                    .show(ui, |ui| {
-                        ui.spacing_mut().item_spacing.y = 10.0;
-                        ui::card(ui, |ui| {
-                            let row = Vec2::new(ui.available_width(), 36.0);
-                            let rtl = egui::Layout::right_to_left(egui::Align::Center);
-                            ui.allocate_ui_with_layout(row, rtl, |ui| {
-                                let mut theme: &str = match edit.theme.as_str() {
-                                    "dark" => "dark",
-                                    "light" => "light",
-                                    _ => "system",
-                                };
-                                // Right to left: the last item comes first on screen.
-                                let options =
-                                    [("light", "Light"), ("dark", "Dark"), ("system", "System")];
-                                ui::segmented(ui, &mut theme, &options);
-                                edit.theme = theme.to_string();
-                                let ltr = egui::Layout::left_to_right(egui::Align::Center);
-                                ui.with_layout(ltr, |ui| ui.label("Theme"));
-                            });
-                        });
-                        ui::card(ui, |ui| openscad_settings(ui, &mut edit));
-                        ui::card(ui, |ui| {
-                            let (ok, text) = match (edit.mcp, running) {
-                                (true, true) => (true, "Running"),
-                                (false, false) => (false, "Off"),
-                                (true, false) => (false, "Starts when you save"),
-                                (false, true) => (true, "Stops when you save"),
-                            };
-                            let color = if ok { ui::GOOD } else { ui::c().dim };
-                            card_header(ui, "MCP server", color, text);
-                            ui.add_space(4.0);
-                            toggle_row(
-                                ui,
-                                "Allow MCP clients",
-                                "Clients on this computer, such as Claude Desktop, can control this window.",
-                                &mut edit.mcp,
-                            );
-                        });
-                        if crate::telemetry::available() {
-                            ui::card(ui, |ui| {
-                                ui::section(ui, "Privacy");
-                                ui.add_space(4.0);
-                                let p = &mut self.privacy;
-                                toggle_row(ui, "Usage analytics", ANALYTICS_NOTE, &mut p.analytics);
-                                toggle_row(ui, "Error reports", ERRORS_NOTE, &mut p.errors);
-                                ui.label(ui::dim(VENDOR_NOTE).size(12.5));
-                                ui.add_space(6.0);
-                                install_id_row(ui, p);
-                                ui.add_space(6.0);
-                                ui.hyperlink_to("Privacy Notice", telemetry::PRIVACY_URL);
-                            });
+                let ltr = egui::Layout::left_to_right(egui::Align::Min);
+                ui.allocate_ui_with_layout(Vec2::new(width, height), ltr, |ui| {
+                    ui.set_min_height(height);
+                    let nav = Vec2::new(140.0, height);
+                    let down = egui::Layout::top_down(egui::Align::Min);
+                    ui.allocate_ui_with_layout(nav, down, |ui| {
+                        ui.set_width(nav.x);
+                        ui.spacing_mut().item_spacing.y = 2.0;
+                        for &(value, label, dot) in &pages {
+                            if ui::nav_item(ui, label, page == value, dot).clicked() {
+                                page = value;
+                            }
                         }
                     });
+                    ui.add_space(16.0);
+                    let body = Vec2::new(ui.available_width(), height);
+                    ui.allocate_ui_with_layout(body, down, |ui| {
+                        egui::ScrollArea::vertical()
+                            .id_salt("settings-page")
+                            .auto_shrink([false, false])
+                            .show(ui, |ui| match page {
+                                SettingsPage::Appearance => {
+                                    ui::card(ui, |ui| theme_row(ui, &mut edit));
+                                }
+                                SettingsPage::OpenScad => {
+                                    ui::card(ui, |ui| openscad_settings(ui, &mut edit, &probe));
+                                }
+                                SettingsPage::Mcp => {
+                                    ui::card(ui, |ui| mcp_settings(ui, &mut edit, running));
+                                }
+                                SettingsPage::Privacy => {
+                                    ui::card(ui, |ui| privacy_settings(ui, &mut self.privacy));
+                                }
+                            });
+                    });
+                });
                 ui.add_space(12.0);
                 let row = Vec2::new(ui.available_width(), 34.0);
                 let rtl = egui::Layout::right_to_left(egui::Align::Center);
@@ -2397,8 +2410,13 @@ impl App {
                         .on_disabled_hover_text("No changes")
                         .clicked();
                     close |= ui.add(ui::ghost("Cancel", false)).clicked();
+                    if dirty {
+                        let ltr = egui::Layout::left_to_right(egui::Align::Center);
+                        ui.with_layout(ltr, |ui| ui.label(ui::dim("Unsaved changes").size(12.5)));
+                    }
                 });
             });
+        self.settings_page = page;
         if save {
             if let Err(e) = edit.save() {
                 self.toast = Some((format!("Cannot save settings: {e}"), Instant::now()));
@@ -2422,13 +2440,76 @@ impl App {
     }
 }
 
-/// The OpenSCAD card of the Settings window.
-fn openscad_settings(ui: &mut egui::Ui, edit: &mut openscad::Config) {
+/// Id of the OpenSCAD binary field.
+fn binary_id() -> egui::Id {
+    egui::Id::new("settings-binary")
+}
+
+/// Checks the OpenSCAD binary, except while its name is being typed.
+fn settings_probe(ctx: &egui::Context, edit: &openscad::Config) -> Option<openscad::Probe> {
     // A half typed name must not run as a program.
-    let binary_id = egui::Id::new("settings-binary");
-    let typing = ui.memory(|m| m.has_focus(binary_id));
-    let probe = (!typing).then(|| openscad::probe(&edit.binary()));
-    match &probe {
+    let typing = ctx.memory(|m| m.has_focus(binary_id()));
+    (!typing).then(|| openscad::probe(&edit.binary()))
+}
+
+/// The Appearance page of the Settings window.
+fn theme_row(ui: &mut egui::Ui, edit: &mut openscad::Config) {
+    let row = Vec2::new(ui.available_width(), 36.0);
+    let rtl = egui::Layout::right_to_left(egui::Align::Center);
+    ui.allocate_ui_with_layout(row, rtl, |ui| {
+        let mut theme: &str = match edit.theme.as_str() {
+            "dark" => "dark",
+            "light" => "light",
+            _ => "system",
+        };
+        // Right to left: the last item comes first on screen.
+        let options = [("light", "Light"), ("dark", "Dark"), ("system", "System")];
+        ui::segmented(ui, &mut theme, &options);
+        edit.theme = theme.to_string();
+        let ltr = egui::Layout::left_to_right(egui::Align::Center);
+        ui.with_layout(ltr, |ui| ui.label("Theme"));
+    });
+}
+
+/// The MCP server page of the Settings window.
+fn mcp_settings(ui: &mut egui::Ui, edit: &mut openscad::Config, running: bool) {
+    let (ok, text) = match (edit.mcp, running) {
+        (true, true) => (true, "Running"),
+        (false, false) => (false, "Off"),
+        (true, false) => (false, "Starts when you save"),
+        (false, true) => (true, "Stops when you save"),
+    };
+    let color = if ok { ui::GOOD } else { ui::c().dim };
+    card_header(ui, "MCP server", color, text);
+    ui.add_space(4.0);
+    toggle_row(
+        ui,
+        "Allow MCP clients",
+        "Clients on this computer, such as Claude Desktop, can control this window.",
+        &mut edit.mcp,
+    );
+}
+
+/// The Privacy page of the Settings window.
+fn privacy_settings(ui: &mut egui::Ui, p: &mut PrivacyEdit) {
+    toggle_row(ui, "Usage analytics", ANALYTICS_NOTE, &mut p.analytics);
+    ui.add_space(8.0);
+    toggle_row(ui, "Error reports", ERRORS_NOTE, &mut p.errors);
+    ui.add_space(8.0);
+    ui.label(ui::dim(VENDOR_NOTE).size(12.5));
+    ui.add_space(6.0);
+    install_id_row(ui, p);
+    ui.add_space(6.0);
+    ui.hyperlink_to("Privacy Notice", telemetry::PRIVACY_URL);
+}
+
+/// The OpenSCAD page of the Settings window.
+fn openscad_settings(
+    ui: &mut egui::Ui,
+    edit: &mut openscad::Config,
+    probe: &Option<openscad::Probe>,
+) {
+    match probe {
         None => card_header(
             ui,
             "OpenSCAD",
@@ -2456,7 +2537,7 @@ fn openscad_settings(ui: &mut egui::Ui, edit: &mut openscad::Config) {
         }
         ui.add(
             egui::TextEdit::singleline(&mut edit.binary)
-                .id(binary_id)
+                .id(binary_id())
                 .hint_text(ui::dim("Automatic"))
                 .desired_width(f32::INFINITY)
                 .margin(Vec2::new(10.0, 6.0)),

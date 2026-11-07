@@ -112,8 +112,10 @@ mcp set_params '{"values":{"sides":5,"twist":240,"taper":0.8}}'
 mcp set_view '{"view":"iso","fit":true}'
 shot 7-agent
 
-# Settings with the MCP server card.
+# Settings on the MCP server page.
 xdotool key ctrl+comma
+sleep 1
+xdotool mousemove 320 254 click 1
 shot 8-connect
 xdotool key Escape
 sleep 0.5
