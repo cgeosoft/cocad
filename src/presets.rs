@@ -75,14 +75,17 @@ fn write(path: &Path, mut root: Map<String, Json>) -> Result<()> {
 
 /// Names of the sets in the file, in file order.
 pub fn names(path: &Path) -> Vec<String> {
-    read(path)
-        .ok()
-        .and_then(|r| {
-            r.get("parameterSets")
-                .and_then(|s| s.as_object())
-                .map(|s| s.keys().cloned().collect())
-        })
-        .unwrap_or_default()
+    try_names(path).unwrap_or_default()
+}
+
+/// Like `names`, but a file that cannot be read or parsed is an error.
+/// A missing file has no sets.
+pub fn try_names(path: &Path) -> Result<Vec<String>> {
+    Ok(read(path)?
+        .get("parameterSets")
+        .and_then(|s| s.as_object())
+        .map(|s| s.keys().cloned().collect())
+        .unwrap_or_default())
 }
 
 /// The value as the Customizer writes it: strings bare, the rest as source.
@@ -151,6 +154,19 @@ pub fn apply(path: &Path, name: &str, params: &mut [Param]) -> Result<Vec<String
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn try_names_reports_a_bad_file() {
+        let dir = std::env::temp_dir().join(format!("cocad-names-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("m.json");
+        assert!(try_names(&path).unwrap().is_empty());
+        std::fs::write(&path, "{ \"parameterSets\": { \"a\"").unwrap();
+        assert!(try_names(&path).is_err());
+        std::fs::write(&path, "{ \"parameterSets\": { \"b\": {}, \"a\": {} } }").unwrap();
+        assert_eq!(try_names(&path).unwrap(), ["b", "a"]);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 
     #[test]
     fn save_apply_delete() {

@@ -229,6 +229,7 @@ pub struct App {
     /// Parameter sets in `<model>.json`.
     sets: Vec<String>,
     sets_file: PathBuf,
+    sets_mtime: Option<SystemTime>,
     active_set: Option<String>,
     set_edited: bool,
     /// Name being typed for "Save as".
@@ -369,6 +370,7 @@ impl App {
             themed: false,
             sets: Vec::new(),
             sets_file: PathBuf::new(),
+            sets_mtime: None,
             active_set: None,
             set_edited: false,
             new_set: None,
@@ -414,6 +416,7 @@ impl App {
                 self.mtime = mtime(&path);
                 self.sets_file = presets::file_for(&path);
                 self.sets = presets::names(&self.sets_file);
+                self.sets_mtime = mtime(&self.sets_file);
                 self.active_set = None;
                 self.new_set = None;
                 self.file = Some(path);
@@ -451,9 +454,45 @@ impl App {
             }
         }
         self.params = fresh;
-        self.sets = presets::names(&self.sets_file);
+        self.reload_sets();
         self.mtime = mtime(&path);
         self.start_render();
+    }
+
+    /// Re-reads the sets file after a change. The active set takes the new
+    /// values, unless it has edits. A file that cannot be parsed, for example
+    /// during a write, stays unread and the next poll tries it again.
+    fn reload_sets(&mut self) {
+        let m = mtime(&self.sets_file);
+        if m == self.sets_mtime {
+            return;
+        }
+        let Ok(names) = presets::try_names(&self.sets_file) else {
+            return;
+        };
+        self.sets_mtime = m;
+        self.sets = names;
+        let Some(name) = self.active_set.clone() else {
+            return;
+        };
+        if !self.sets.contains(&name) {
+            self.active_set = None;
+            self.set_edited = false;
+            self.confirm_delete = false;
+            self.toast = Some((format!("Set {name} is not in the file"), Instant::now()));
+        } else if !self.set_edited {
+            let before: Vec<_> = self.params.iter().map(|p| p.value.clone()).collect();
+            let skipped = presets::apply(&self.sets_file, &name, &mut self.params);
+            if self.params.iter().map(|p| &p.value).ne(before.iter()) {
+                let text = match skipped {
+                    Ok(s) if !s.is_empty() => format!("Skipped: {}", s.join(", ")),
+                    Ok(_) => format!("Set {name} reloaded"),
+                    Err(e) => e.to_string(),
+                };
+                self.toast = Some((text, Instant::now()));
+                self.dirty_since = Some(Instant::now());
+            }
+        }
     }
 
     fn start_render(&mut self) {
@@ -579,6 +618,7 @@ impl App {
                 if m.is_some() && m != self.mtime {
                     self.reload();
                 }
+                self.reload_sets();
             }
         }
 
@@ -1411,6 +1451,7 @@ impl App {
             }
             path = p;
             self.sets_file = path.clone();
+            self.sets_mtime = mtime(&path);
             self.active_set = None;
             self.set_edited = false;
             self.confirm_delete = false;

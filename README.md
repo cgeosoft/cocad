@@ -128,6 +128,7 @@ The **Parameter set** card at the top of the panel holds named sets of values.
 
 - The first line shows the sets file. **Open file** loads sets from any `.json` file. **New file** picks a place and name for a new sets file. It is written on the first save.
 - The app remembers the sets file for each model. Without one, it uses `<model>.json` next to `<model>.scad`.
+- When the sets file changes on disk, the list of sets updates. The active set takes the new values, unless it has edits.
 - Select a set to load it. **Model defaults** sets all values back to the `.scad` defaults.
 - **Save** writes the values to the selected set. With no set selected, it asks for a name.
 - **Save as** saves the values as a new set. **Delete** removes the selected set (click two times).

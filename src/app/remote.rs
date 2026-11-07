@@ -375,6 +375,7 @@ impl App {
                 }
             }
             Some(n) => {
+                self.reload_sets();
                 if !self.sets.contains(n) {
                     return Err(format!("No parameter set named {n}."));
                 }
