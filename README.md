@@ -217,16 +217,20 @@ $fn = 64;
 
 ## Privacy
 
-At the first start, CoCAD asks about two optional kinds of data. Both boxes start clear, and you can change them in File > Settings.
+At the first start, CoCAD asks about two optional kinds of data. Both boxes start clear, and you can change them in File > Settings. A change applies at once. CoCAD asks again if the data, the purpose or the recipient changes.
 
 | Choice | Why | What CoCAD sends |
 |---|---|---|
-| Usage analytics | To see which features people use | App start, view changes, model open with the number of parameters, export format, photo save with the sample count, version, system, processor type, a random ID |
-| Error reports | To find and repair failures | Failure type, error text with file paths removed, source location, version, system, processor type, a random ID that changes at each start |
+| Usage analytics | To see which features people use | App start, view changes, model open with the number of parameters, export format, photo save with the sample count, version, system, processor type, notice version, a random install ID |
+| Error reports | To find and repair failures | Error type, a fixed failure code, location in our own source code, version, release channel, system, processor type, notice version, a new random ID for each report |
 
-CoCAD sends this data to PostHog (EU cloud). It does not send model contents, file names, parameter values or OpenSCAD output. Each event replaces the IP address with `0.0.0.0` and turns off location lookup. The CLI and `cocad mcp` send nothing. See the [privacy policy](https://cocad.cgeosoft.com/privacy/).
+An error report holds no install ID and no error message. CoCAD does not send model contents, file names, parameter values or OpenSCAD output.
 
-A build reads the PostHog project key from `POSTHOG_API_KEY` at compile time. A build with no key sends nothing and does not ask. CI reads the key from the `POSTHOG_API_KEY` repository secret. `scripts/build.sh` also reads it from `extras/website/.env` for a release build.
+PostHog receives this data. It sees your IP address and does not store it. The app window sends the data. The `params`, `export`, `slice` and `photo` commands and the `cocad mcp` process send nothing. If you connect an MCP client, the window sends the same data as when you use it yourself.
+
+File > Settings shows the install ID, with Copy and Reset. A request to delete your analytics data needs this ID. See the [Privacy Notice](https://cocad.cgeosoft.com/privacy/).
+
+A build reads the PostHog project key from `POSTHOG_API_KEY` at compile time. A debug build or a build with no key sends nothing and does not ask. CI uses the `POSTHOG_API_KEY` repository secret for tag builds only. `scripts/build.sh` also reads it from `extras/website/.env` for a release build. The plan for this code is in [docs/telemetry-consent.md](docs/telemetry-consent.md).
 
 ## Build
 
@@ -280,7 +284,9 @@ A tag `v*` (for example `v0.2.0`) also makes a GitHub release with all files att
 | `src/params.rs` | Customizer parameter parser |
 | `src/presets.rs` | Parameter sets (OpenSCAD `.json` format) |
 | `src/recent.rs` | List of recent models |
-| `src/telemetry.rs` | Optional analytics and error reports (PostHog) |
+| `src/telemetry.rs` | Optional analytics and error reports (PostHog), final allowlist |
+| `src/telemetry/consent.rs` | Consent record and migration |
+| `src/telemetry/report.rs` | Error report fields, safe stack frames, rate limit |
 | `src/openscad.rs` | Runs `openscad` and reads the STL |
 | `src/mesh.rs` | Indexed mesh, STL reader, checks |
 | `src/export.rs` | STL, 3MF and STEP writers |

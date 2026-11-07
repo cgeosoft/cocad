@@ -3,24 +3,39 @@
  * PostHog loads only after the visitor accepts. Before that, the page makes
  * no request to it. deploy.sh writes the project key. With no key, this file
  * does nothing and the box does not show.
+ *
+ * Add an event or a property only with a change to public/privacy/index.html.
+ * Raise NOTICE_VERSION, as in src/telemetry/consent.rs, when the data, the
+ * purpose or the recipient changes.
  */
 (function () {
   "use strict";
 
   const KEY = "YOUR_POSTHOG_PROJECT_API_KEY";
   const SCRIPT = "https://eu-assets.i.posthog.com/static/array.js";
-  const CONSENT_KEY = "cocad_consent_v1";
+  const CONSENT_KEY = "cocad_consent_v2";
+  const OLD_KEY = "cocad_consent_v1";
   const CONSENT_MS = 365 * 24 * 60 * 60 * 1000;
+  const NOTICE_VERSION = 1;
+  const EVENTS = ["page_view", "download_clicked", "demo_prompt"];
+  const PROPERTIES = [
+    "token", "distinct_id", "$lib", "$lib_version", "$insert_id", "$time", "$process_person_profile",
+    "$geoip_disable", "site", "consent_version", "os", "type", "model",
+  ];
   const enabled = /^phc_/.test(KEY);
 
   let choice = null;
   let box = null;
   let loading = null;
+  let source = "setup";
 
+  /** A choice for an older notice does not count, so the box shows again. */
   function read() {
     try {
+      localStorage.removeItem(OLD_KEY);
       const saved = JSON.parse(localStorage.getItem(CONSENT_KEY) || "null");
-      if (saved && Date.now() - saved.at < CONSENT_MS) return saved.value;
+      const fresh = saved && Date.now() - Date.parse(saved.at) < CONSENT_MS;
+      if (fresh && saved.version === NOTICE_VERSION) return saved.value;
     } catch (err) { /* Storage can be blocked. */ }
     return null;
   }
@@ -28,8 +43,20 @@
   function save(value) {
     choice = value;
     try {
-      localStorage.setItem(CONSENT_KEY, JSON.stringify({ value, at: Date.now() }));
+      const record = { value, at: new Date().toISOString(), source, version: NOTICE_VERSION };
+      localStorage.setItem(CONSENT_KEY, JSON.stringify(record));
     } catch (err) { /* The choice stays for this page view. */ }
+  }
+
+  /** The last step before a send. Events and fields that are not listed go. */
+  function allow(event) {
+    if (!event || !EVENTS.includes(event.event)) return null;
+    const properties = {};
+    PROPERTIES.forEach((key) => {
+      if (key in event.properties) properties[key] = event.properties[key];
+    });
+    const { $set, $set_once, ...rest } = event;
+    return { ...rest, properties };
   }
 
   function clearStored() {
@@ -50,15 +77,16 @@
           persistence: "localStorage",
           person_profiles: "identified_only",
           autocapture: false,
-          capture_pageview: true,
+          capture_pageview: false,
           capture_pageleave: false,
           disable_session_recording: true,
           disable_surveys: true,
           advanced_disable_feature_flags: true,
           disable_external_dependency_loading: true,
           respect_dnt: true,
+          before_send: allow,
         });
-        window.posthog.register({ site: "cocad" });
+        window.posthog.register({ site: "cocad", consent_version: NOTICE_VERSION, $geoip_disable: true });
         resolve();
       };
       script.onerror = reject;
@@ -71,7 +99,10 @@
   function apply(value) {
     save(value);
     if (value === "accepted") {
-      load().then(() => window.posthog.opt_in_capturing()).catch(() => {});
+      load().then(() => {
+        window.posthog.opt_in_capturing();
+        track("page_view");
+      }).catch(() => {});
     } else {
       if (window.posthog && window.posthog.opt_out_capturing) window.posthog.opt_out_capturing();
       clearStored();
@@ -93,11 +124,11 @@
       '<div class="consent-title" id="consent-title">Analytics?</div>' +
       "<p>With your OK, PostHog counts page views, download clicks and demo use. " +
       "It keeps a random ID in your browser storage. It sets no cookies and records no sessions. " +
-      '<a href="/privacy/">Privacy policy</a>.</p>' +
+      '<a href="/privacy/">Privacy Notice</a>.</p>' +
       '<p class="consent-state mono" data-consent-status hidden></p>' +
       '<div class="consent-actions">' +
       '<button type="button" class="btn" data-choice="declined">Decline</button>' +
-      '<button type="button" class="btn btn-primary" data-choice="accepted">Accept</button>' +
+      '<button type="button" class="btn" data-choice="accepted">Accept</button>' +
       "</div>";
     box.addEventListener("click", (e) => {
       const button = e.target.closest("[data-choice]");
@@ -125,13 +156,16 @@
 
   document.querySelectorAll("[data-cookie-settings]").forEach((b) => {
     b.hidden = !enabled;
-    b.addEventListener("click", open);
+    b.addEventListener("click", () => {
+      source = "settings";
+      open();
+    });
   });
   if (!enabled) return;
 
   choice = read();
   syncStatus();
-  if (choice === "accepted") load().catch(() => {});
+  if (choice === "accepted") load().then(() => track("page_view")).catch(() => {});
   // The box does not cover the policy that it links to.
   else if (!choice && !document.body.hasAttribute("data-no-consent-prompt")) setTimeout(open, 1200);
 })();

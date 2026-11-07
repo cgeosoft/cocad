@@ -5,6 +5,7 @@
   "description": "Website of CoCAD, static files for Cloudflare Pages",
   "scripts": {
     "dev": "bunx serve public",
-    "deploy": "./deploy.sh"
+    "deploy": "./deploy.sh",
+    "test": "bun test"
   }
 }

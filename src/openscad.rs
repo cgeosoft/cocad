@@ -29,12 +29,6 @@ pub struct Config {
     pub theme: String,
     /// Let MCP clients on this computer control the window.
     pub mcp: bool,
-    /// The user accepted usage analytics.
-    pub analytics: bool,
-    /// The user accepted error reports.
-    pub error_reports: bool,
-    /// The user answered the privacy question.
-    pub privacy_asked: bool,
 }
 
 impl Default for Config {
@@ -45,9 +39,6 @@ impl Default for Config {
             manifold: true,
             theme: "system".into(),
             mcp: true,
-            analytics: false,
-            error_reports: false,
-            privacy_asked: false,
         }
     }
 }
@@ -85,9 +76,6 @@ impl Config {
                         "manifold" => c.manifold = v != "false",
                         "theme" => c.theme = v,
                         "mcp" => c.mcp = v != "false",
-                        "analytics" => c.analytics = v == "true",
-                        "error_reports" => c.error_reports = v == "true",
-                        "privacy_asked" => c.privacy_asked = v == "true",
                         _ => {}
                     }
                 }
@@ -99,22 +87,17 @@ impl Config {
     pub fn save(&self) -> Result<()> {
         let path = config_path().ok_or_else(|| anyhow::anyhow!("no config folder"))?;
         std::fs::create_dir_all(path.parent().unwrap())?;
-        std::fs::write(
-            &path,
-            format!(
-                "openscad = {}\nopenscad_args = {}\nmanifold = {}\ntheme = {}\nmcp = {}\n\
-                 analytics = {}\nerror_reports = {}\nprivacy_asked = {}\n",
-                self.binary,
-                self.args,
-                self.manifold,
-                self.theme,
-                self.mcp,
-                self.analytics,
-                self.error_reports,
-                self.privacy_asked
-            ),
-        )?;
+        std::fs::write(&path, self.text())?;
         Ok(())
+    }
+
+    /// Consent is not here: see `telemetry::set_consent`. A save drops the
+    /// consent keys of older versions.
+    pub(crate) fn text(&self) -> String {
+        format!(
+            "openscad = {}\nopenscad_args = {}\nmanifold = {}\ntheme = {}\nmcp = {}\n",
+            self.binary, self.args, self.manifold, self.theme, self.mcp
+        )
     }
 
     /// The binary to run: `$OPENSCAD`, else the saved value, else the

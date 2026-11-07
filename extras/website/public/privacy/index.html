@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Privacy Policy - CoCAD</title>
-  <meta name="description" content="What the CoCAD website collects, how optional PostHog analytics work, and how to change your choice. The desktop app sends data only if you accept it.">
+  <title>Privacy Notice - CoCAD</title>
+  <meta name="description" content="What the CoCAD desktop app and website send, who receives it, how long it stays, and how to change your choice. Both app options are off until you turn them on.">
   <link rel="canonical" href="https://cocad.cgeosoft.com/privacy/">
   <link rel="icon" type="image/svg+xml" href="/assets/app-icon.svg">
   <meta name="theme-color" content="#0f1114">
@@ -25,22 +25,52 @@
 
   <main class="section container legal">
     <p class="label"><span class="dot"></span>Privacy</p>
-    <h1 class="big-title">Privacy policy</h1>
-    <p class="legal-date mono">Last updated: November 6, 2026</p>
+    <h1 class="big-title">Privacy Notice</h1>
+    <p class="legal-date mono">Notice version 1. Last updated: November 6, 2026</p>
 
     <section>
       <h2>Summary</h2>
       <ul>
-        <li>The desktop app has no account. It sends usage analytics and error reports only if you accept them. Each one is a separate choice.</li>
-        <li>This website uses PostHog analytics only if you accept them.</li>
-        <li>The website sets no cookies.</li>
-        <li>The website has no forms and no accounts.</li>
+        <li>The desktop app has two options: usage analytics and error reports. Each option is a separate choice. Both are off until you turn them on.</li>
+        <li>The app works the same way if you leave both options off.</li>
+        <li>The app never sends your models, file names or parameter values.</li>
+        <li>The website uses PostHog analytics only if you accept them. It sets no cookies. It has no forms and no accounts.</li>
       </ul>
     </section>
 
     <section>
       <h2>Who is responsible</h2>
-      <p>Christos Georgiou (cgeosoft) runs this website. Contact: <a href="mailto:christos@cgeosoft.com">christos@cgeosoft.com</a>.</p>
+      <p>Christos Georgiou (cgeosoft) is the controller of this data. Contact: <a href="mailto:christos@cgeosoft.com">christos@cgeosoft.com</a>.</p>
+    </section>
+
+    <section id="app">
+      <h2>The desktop app</h2>
+      <p>CoCAD has no account and no update check. The app asks you about the two options at the first start, and again if this Notice changes what the app sends. Until you answer, it sends nothing. To change your choice, open File &gt; Settings. A change applies at once.</p>
+      <div class="card legal-table"><table>
+        <thead><tr><th>Option</th><th>Why</th><th>What the app sends</th><th>Example</th></tr></thead>
+        <tbody>
+          <tr><td>Usage analytics</td><td>To see which features people use, so that we can improve them</td><td>Feature events: app started, model opened with the number of parameters, model exported with the format, view changed, photo saved with the sample count. Each event also has a random install ID, the app version, the operating system, the processor type and the notice version</td><td class="mono">app_started, view: model, first_run: false, version 0.3.1, linux, x86_64, ID 3f9a...</td></tr>
+          <tr><td>Error reports</td><td>To find and repair failures</td><td>When the app fails: the error type, a fixed code for the failure point, the location in our own source code, the app version, the release channel, the operating system, the processor type and the notice version</td><td class="mono">panic, window:panic, cocad::app::App::open, src/app.rs line 42, version 0.3.1, linux, x86_64</td></tr>
+        </tbody>
+      </table></div>
+      <p>The legal basis for each option is your consent (GDPR Art. 6(1)(a)). You can withdraw it at any time in File &gt; Settings.</p>
+      <p>An error report holds no install ID and no error message. Each report has a new random ID, so a report does not link to your analytics or to another report.</p>
+      <p>The app does not send model contents, file names, parameter values or OpenSCAD output. PostHog sees your IP address during the connection and does not store it. The app tells PostHog not to look up your location.</p>
+      <p>Only the app window sends data. The <code>params</code>, <code>export</code>, <code>slice</code> and <code>photo</code> commands send nothing, and the <code>cocad mcp</code> process sends nothing. If you connect an MCP client, the window sends the same data as when you use it yourself, if you turned the options on.</p>
+    </section>
+
+    <section id="connections">
+      <h2>Connections of the desktop app</h2>
+      <div class="card legal-table"><table>
+        <thead><tr><th>Connection</th><th>When</th><th>What it carries</th></tr></thead>
+        <tbody>
+          <tr><td>PostHog (<span class="mono">eu.i.posthog.com</span>)</td><td>Only for an option that you turned on</td><td>The data above. Your system also looks up this host name</td></tr>
+          <tr><td>Your web browser</td><td>Only when you click a link, such as the GitHub page or this Notice</td><td>A normal browser request</td></tr>
+          <tr><td>127.0.0.1 (MCP server)</td><td>When the MCP option is on, which is the default</td><td>Tool calls on your computer only. Nothing leaves the computer through this port</td></tr>
+        </tbody>
+      </table></div>
+      <p>If you connect an AI client, that client sends what it reads to its own model provider. The policy of that provider applies.</p>
+      <p>CoCAD runs the OpenSCAD program that you choose, on your computer. In our test on Linux, an OpenSCAD export made no network connection. OpenSCAD is a separate program, so its own terms apply.</p>
     </section>
 
     <section id="services">
@@ -49,20 +79,19 @@
         <table>
           <thead><tr><th>Service</th><th>When</th><th>What it receives</th><th>Why</th></tr></thead>
           <tbody>
-            <tr><td>Cloudflare Pages</td><td>Each visit</td><td>IP address, browser data, the pages you request</td><td>Hosting and security</td></tr>
+            <tr><td>Cloudflare Pages</td><td>Each visit</td><td>IP address, browser data, the pages you request. Cloudflare can add its own scripts to a page for security and email protection</td><td>Hosting and security</td></tr>
             <tr><td>GitHub API</td><td>Each visit, at most one time in 10 minutes</td><td>IP address, browser data</td><td>Latest version and download links</td></tr>
-            <tr><td>PostHog (EU cloud)</td><td>Only after you accept</td><td>IP address, browser data, page views, download clicks, demo use, a random ID</td><td>To see which parts of the site people use</td></tr>
+            <tr><td>PostHog</td><td>Only after you accept</td><td>The request for the PostHog script, then the events below with a random ID. PostHog sees your IP address and browser data during the connection</td><td>To see which parts of the site people use</td></tr>
           </tbody>
         </table>
       </div>
-      <p>The legal basis for PostHog is your consent. The legal basis for the other services is the legitimate interest in running the site. These companies can process data outside the EU, under their own privacy policies.</p>
+      <p>The legal basis for PostHog is your consent (GDPR Art. 6(1)(a)). The legal basis for the other services is the legitimate interest in running the site (GDPR Art. 6(1)(f)). Cloudflare and GitHub process data under their own privacy policies, and they can process it outside the EU.</p>
     </section>
 
     <section id="analytics">
-      <h2>Analytics</h2>
+      <h2>Website analytics</h2>
       <p>The site loads PostHog only after you accept. If you decline, the page makes no request to PostHog.</p>
-      <p>After you accept, PostHog records these events: page view, download click (system and file type) and demo prompt. It does not record your clicks in general, your keystrokes or your session. No event holds your name or your email address.</p>
-      <p>PostHog keeps the events for the retention period of the project. To ask for their removal, write to the contact address.</p>
+      <p>After you accept, the site sends these events: page view, download click (system and file type) and demo prompt (example model). Each event has a random ID and the notice version. An event does not hold the page address, the referring page or your browser type. The site does not record your clicks in general, your keystrokes or your session.</p>
     </section>
 
     <section id="cookies">
@@ -72,7 +101,7 @@
         <table>
           <thead><tr><th>Name</th><th>Purpose</th><th>Kept for</th></tr></thead>
           <tbody>
-            <tr><td class="mono">cocad_consent_v1</td><td>Your analytics choice</td><td>12 months, then the site asks again</td></tr>
+            <tr><td class="mono">cocad_consent_v2</td><td>Your analytics choice, its time and the notice version</td><td>12 months, then the site asks again</td></tr>
             <tr><td class="mono">cocad_release_v1</td><td>Latest version data, so the site asks GitHub less often</td><td>Replaced after 10 minutes</td></tr>
             <tr><td class="mono">ph_*, __ph_*</td><td>Random PostHog ID and its opt-in state. Only after you accept</td><td>Until you decline or clear the storage</td></tr>
           </tbody>
@@ -81,35 +110,36 @@
     </section>
 
     <section id="choice">
-      <h2>Change your choice</h2>
+      <h2>Change your website choice</h2>
       <p>You can change your choice at any time. When you decline, the site stops the analytics and removes the PostHog ID from your browser. <span class="mono" data-consent-status></span></p>
-      <button type="button" class="btn btn-soft" data-cookie-settings hidden>Cookie settings</button>
+      <button type="button" class="btn btn-soft" data-cookie-settings hidden>Analytics choice</button>
     </section>
 
-    <section id="app">
-      <h2>The desktop app</h2>
-      <p>CoCAD has no account and no update check. Your models stay on your computer.</p>
-      <p>The app asks you one time about two optional kinds of data. Both boxes start clear. If you leave a box clear, the app does not send that kind of data. The app sends them to PostHog (EU cloud). The legal basis is your consent. Only the app window sends data. The command line and <code>cocad mcp</code> send nothing.</p>
-      <div class="card legal-table"><table>
-        <thead><tr><th>Choice</th><th>Why</th><th>What the app sends</th></tr></thead>
-        <tbody>
-          <tr><td>Usage analytics</td><td>To see which features people use, so that we can improve them</td><td>App start, view changes, model open with the number of parameters, export format, photo save with the sample count, version, system, processor type, a random ID</td></tr>
-          <tr><td>Error reports</td><td>To find and repair failures</td><td>Failure type, error text with file paths removed, the place in the source code, version, system, processor type, a random ID that changes at each start</td></tr>
-        </tbody>
-      </table></div>
-      <p>The app does not send model contents, file names, parameter values or OpenSCAD output. PostHog sees your IP address during the connection. The app replaces that address in each event with 0.0.0.0, and it tells PostHog not to find your location, so the stored events do not hold your address. The two random IDs are different, so an error report does not link to your analytics.</p>
-      <p>To change your choice, open File &gt; Settings. When you turn analytics off, the app removes their random ID from your computer. To ask for the removal of data that PostHog already has, write to the contact address.</p>
-      <p>The MCP server listens on 127.0.0.1 only. If you connect an AI client, that client sends what it reads to its own model provider. The policy of that provider applies.</p>
+    <section id="recipient">
+      <h2>Who receives the data</h2>
+      <p>PostHog receives this data for us, as our processor. App and website data go to the same PostHog project. The app ID and the website ID are different, and we do not link them.</p>
+      <p>We use PostHog Cloud EU, which stores data in Germany. The data can also leave the EU: the PostHog <a href="https://posthog.com/subprocessors" target="_blank" rel="noopener noreferrer">sub-processor list</a> names Cloudflare for traffic at global edge locations, and PostHog companies in Germany and the United Kingdom. PostHog, Inc. is the parent company. That list can change.</p>
+    </section>
+
+    <section id="retention">
+      <h2>How long the data stays</h2>
+      <p>PostHog keeps usage analytics, website events and error reports for up to 12 months. PostHog can delete expired events some time after that date. If you ask for erasure, removal runs in batches and can take time.</p>
     </section>
 
     <section id="rights">
       <h2>Your rights</h2>
-      <p>You can ask for access to your data, and for its correction or deletion. You can object to its use, and you can withdraw consent. To do this, write to the contact address. You can also complain to your data protection authority.</p>
+      <p>You can ask for access to your data, and for its correction or erasure. You can object to its use, and you can withdraw consent at any time. You can also complain to your data protection authority.</p>
+      <p>To make a request, write to <a href="mailto:christos@cgeosoft.com">christos@cgeosoft.com</a>.</p>
+      <ul>
+        <li><strong>Usage analytics:</strong> your request must give the install ID. The ID is in File &gt; Settings. It stays there when you turn analytics off. Copy it before you press Reset, because without it we cannot find your data.</li>
+        <li><strong>Error reports:</strong> a report has no ID that leads to you, so we cannot find the reports of one person.</li>
+        <li><strong>Website analytics:</strong> the ID is only in your browser, and we cannot link it to you. To remove it from your browser, decline the analytics. Its events expire after the period above.</li>
+      </ul>
     </section>
 
     <section>
       <h2>Changes</h2>
-      <p>This page shows the date of the last change.</p>
+      <p>This page shows the notice version and the date of the last change. If the data, the purpose or the recipient changes, the version goes up, and the app and the site ask you again.</p>
     </section>
   </main>
 

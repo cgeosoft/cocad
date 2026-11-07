@@ -19,4 +19,4 @@ The client runs `cocad mcp` as a stdio server. Tools: `get_state`, `get_params`,
 ## Optional
 
 - [Source code](https://github.com/cgeosoft/cocad): Rust, egui and an own OpenGL renderer
-- [Privacy policy](https://cocad.cgeosoft.com/privacy/): Website analytics and storage
+- [Privacy Notice](https://cocad.cgeosoft.com/privacy/): What the desktop app and the website send, who receives it and how long it stays

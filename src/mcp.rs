@@ -266,7 +266,7 @@ fn photo_props() -> Json {
     })
 }
 
-fn tools() -> Json {
+pub(crate) fn tools() -> Json {
     let mut photo = photo_props();
     let m = photo.as_object_mut().unwrap();
     m.insert(

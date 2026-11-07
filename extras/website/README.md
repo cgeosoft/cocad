@@ -11,13 +11,14 @@ The look follows the Portfolio website (`portfolio/extras/website`). The colors 
 | `public/index.html` | The page |
 | `public/style.css` | All styles |
 | `public/boot.js` | Sets `.js` before first paint, for the reveal effect |
-| `public/analytics.js` | Consent box and PostHog. The key comes from `deploy.sh` |
+| `public/analytics.js` | Consent box, consent record and PostHog. The key comes from `deploy.sh` |
+| `test/analytics.test.js` | Consent and allowlist tests |
 | `public/script.js` | OS detection, download links, scroll reveal, screenshot tabs, lightbox |
 | `public/viewer.js` | WebGL2 viewer: solid, wire and slice modes |
 | `public/demo.js` | Hero loop and the agent demo |
 | `public/assets/mesh/` | Generated. Example meshes and `models.json` |
 | `public/assets/img/` | Generated. WebP copies of `images/` |
-| `public/privacy/index.html` | Privacy policy |
+| `public/privacy/index.html` | Privacy Notice for the app and the site |
 | `public/llms.txt`, `robots.txt`, `sitemap.xml` | Files for crawlers and LLMs |
 | `public/assets/fonts/` | Self-hosted fonts (Latin subset) with their OFL licenses |
 | `public/_headers` | Security and cache headers |
@@ -50,10 +51,12 @@ The chat text is scripted. The tool names and the numbers are real. The page dra
 ## Analytics
 
 - `analytics.js` loads PostHog from the EU cloud only after the visitor accepts. Before that, the page makes no request to PostHog.
-- PostHog runs with `localStorage` persistence, so the site sets no cookies. Autocapture, session recording, surveys and feature flags are off.
-- The events are `$pageview`, `download_clicked` (os, type) and `demo_prompt` (model). Each event has `site: cocad`.
-- The choice lasts 12 months. The footer `cookies` button opens the box again.
-- When you add a service, event or storage key, update `public/privacy/index.html`.
+- PostHog runs with `localStorage` persistence, so the site sets no cookies. Autocapture, page view autocapture, session recording, surveys and feature flags are off.
+- The events are `page_view`, `download_clicked` (os, type) and `demo_prompt` (model). Each event has `site: cocad` and `consent_version`.
+- The `before_send` hook drops other events and removes all properties that `PROPERTIES` does not list, such as the page address and the referrer.
+- `cocad_consent_v2` stores the value, the time, the source and the notice version. The choice lasts 12 months. A choice for an older `NOTICE_VERSION` does not count. The footer `analytics` button opens the box again.
+- When you add a service, event, property or storage key, update `public/privacy/index.html` and `PROPERTIES`.
+- `bun test` in `extras/website` runs the consent tests. They use a fake browser and reach no vendor.
 
 Put the key in `extras/website/.env` (git-ignored):
 

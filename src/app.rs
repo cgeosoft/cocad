@@ -9,10 +9,10 @@ use crate::presets;
 use crate::recent;
 use crate::render::{self, Renderer, View};
 use crate::slicer::{self, Kind, Settings, Sliced};
+use crate::telemetry::{self, Event, Screen, Source};
 use crate::ui;
 use eframe::egui::{self, Color32, RichText, Vec2};
 use glam::{Mat4, Vec3};
-use serde_json::json;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, channel};
@@ -29,6 +29,16 @@ enum Mode {
     Model,
     Slice,
     Photo,
+}
+
+impl Mode {
+    fn screen(self) -> Screen {
+        match self {
+            Mode::Model => Screen::Model,
+            Mode::Slice => Screen::Slice,
+            Mode::Photo => Screen::Photo,
+        }
+    }
 }
 
 #[derive(PartialEq, Clone, Copy)]
@@ -228,31 +238,72 @@ pub struct App {
     show_about: bool,
     /// Welcome tour, while it is open.
     tour: Option<tour::Tour>,
-    /// Privacy question, while it is open: the analytics and error report boxes.
-    consent: Option<(bool, bool)>,
+    /// Privacy question, while it is open.
+    consent: Option<ConsentPrompt>,
+    /// Privacy card of the Settings window.
+    privacy: PrivacyEdit,
     /// Listener for MCP tool calls, when the option is on.
     server: Option<crate::mcp::Server>,
     pending: Vec<remote::Pending>,
 }
 
+/// The boxes of the privacy question.
+struct ConsentPrompt {
+    analytics: bool,
+    errors: bool,
+    source: Source,
+}
+
+/// The privacy card of the Settings window. `saved` is the record when the
+/// window opened. Consent has its own file, so this is not part of `Config`.
+#[derive(Default)]
+struct PrivacyEdit {
+    analytics: bool,
+    errors: bool,
+    saved: (bool, bool),
+    id: Option<String>,
+    confirm_reset: bool,
+}
+
+impl PrivacyEdit {
+    fn current() -> PrivacyEdit {
+        let record = telemetry::load_consent().record;
+        let (analytics, errors) = (record.analytics.granted, record.errors.granted);
+        PrivacyEdit {
+            analytics,
+            errors,
+            saved: (analytics, errors),
+            id: telemetry::install_id(),
+            confirm_reset: false,
+        }
+    }
+
+    fn dirty(&self) -> bool {
+        (self.analytics, self.errors) != self.saved
+    }
+}
+
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>, file: Option<PathBuf>, mode: &str) -> App {
         ui::fonts(&cc.egui_ctx);
-        let mut failures = Vec::new();
         let renderer = cc.gl.as_ref().and_then(|gl| match Renderer::new(gl) {
             Ok(r) => Some(Arc::new(Mutex::new(r))),
             Err(e) => {
                 eprintln!("renderer: {e}");
-                failures.push(e.to_string());
                 None
             }
         });
         let cfg = openscad::Config::load();
-        crate::telemetry::apply(cfg.analytics, cfg.error_reports);
-        for e in failures {
-            crate::telemetry::error("renderer_failed", &e);
-        }
-        crate::telemetry::event("app_started", json!({ "view": mode }));
+        let start_mode = match mode {
+            "slice" => Mode::Slice,
+            "photo" => Mode::Photo,
+            _ => Mode::Model,
+        };
+        let consent = telemetry::load_consent();
+        telemetry::event(Event::AppStarted {
+            view: start_mode.screen(),
+            first_run: false,
+        });
         let mut app = App {
             file: None,
             mtime: None,
@@ -268,11 +319,7 @@ impl App {
             mesh_rev: 0,
             info: None,
             fit_pending: true,
-            mode: match mode {
-                "slice" => Mode::Slice,
-                "photo" => Mode::Photo,
-                _ => Mode::Model,
-            },
+            mode: start_mode,
             settings: Settings::default(),
             sliced: None,
             slice_rev: 0,
@@ -314,8 +361,15 @@ impl App {
             new_set: None,
             confirm_delete: false,
             collapsed: Default::default(),
-            consent: (crate::telemetry::available() && !cfg.privacy_asked)
-                .then_some((false, false)),
+            consent: consent
+                .prompt
+                .filter(|_| telemetry::available())
+                .map(|source| ConsentPrompt {
+                    analytics: consent.record.analytics.granted,
+                    errors: consent.record.errors.granted,
+                    source,
+                }),
+            privacy: PrivacyEdit::default(),
             cfg,
             cfg_edit: None,
             engine: String::new(),
@@ -356,7 +410,9 @@ impl App {
                 self.fit_pending = true;
                 self.error = None;
                 self.recent = recent::add(self.file.as_ref().unwrap());
-                crate::telemetry::event("model_opened", json!({ "parameters": self.params.len() }));
+                telemetry::event(Event::ModelOpened {
+                    parameters: self.params.len(),
+                });
                 self.start_render();
             }
             Err(e) => self.error = Some(format!("cannot read {}: {e}", path.display())),
@@ -487,14 +543,12 @@ impl App {
             self.toast = Some((
                 match r {
                     Ok(p) => {
-                        let format = p.extension().map(|e| e.to_string_lossy().to_lowercase());
-                        crate::telemetry::event("model_exported", json!({ "format": format }));
+                        if let Some(format) = Format::from_path(&p) {
+                            telemetry::event(Event::ModelExported { format });
+                        }
                         format!("Saved {}", p.display())
                     }
-                    Err(e) => {
-                        crate::telemetry::error("export_failed", &e);
-                        format!("Export failed: {e}")
-                    }
+                    Err(e) => format!("Export failed: {e}"),
                 },
                 Instant::now(),
             ));
@@ -503,6 +557,8 @@ impl App {
         // Watch the file for outside edits.
         if self.last_poll.elapsed() > Duration::from_millis(700) {
             self.last_poll = Instant::now();
+            // Another window can change consent.
+            telemetry::reload_consent();
             if let Some(f) = &self.file {
                 let m = mtime(f);
                 if m.is_some() && m != self.mtime {
@@ -681,7 +737,7 @@ impl App {
         }
         ui::menu_separator(ui);
         if ui::menu_item(ui, "Settings", "Ctrl+,", true, false).clicked() {
-            self.cfg_edit = Some(self.cfg.clone());
+            self.open_settings();
         }
         ui::menu_separator(ui);
         if ui::menu_item(ui, "Quit", "Ctrl+Q", true, false).clicked() {
@@ -750,10 +806,17 @@ impl App {
         }
     }
 
-    /// Asks one time. Both boxes start clear, and a clear box is a valid answer.
-    /// The window has no close button, so that the user makes a choice.
+    fn open_settings(&mut self) {
+        self.cfg_edit = Some(self.cfg.clone());
+        self.privacy = PrivacyEdit::current();
+    }
+
+    /// Asks at the first start and when the notice changes. At the first start
+    /// both boxes are clear, and a clear box is a valid answer. The window has
+    /// no close button, so that the user makes a choice. Each answer goes through
+    /// the same button, so yes and no have the same weight.
     fn consent_window(&mut self, ctx: &egui::Context) {
-        let Some((mut analytics, mut errors)) = self.consent else {
+        let Some(mut prompt) = self.consent.take() else {
             return;
         };
         let mut save = false;
@@ -769,23 +832,28 @@ impl App {
                 ui.heading("Your privacy");
                 ui.add_space(6.0);
                 ui.label(
-                    "CoCAD can send two kinds of data to PostHog (EU cloud). Both are \
-                     optional. Each one stays off until you select it. CoCAD does not send \
-                     your models, file names or parameter values.",
+                    "CoCAD can send two kinds of data. Both are optional. Each one stays \
+                     off until you select it. CoCAD never sends your models, file names or \
+                     parameter values.",
                 );
+                if prompt.source == Source::UpdatePrompt {
+                    ui.add_space(6.0);
+                    ui.label(UPDATE_NOTE);
+                }
                 ui.add_space(12.0);
-                ui.checkbox(&mut analytics, "Send usage analytics");
+                ui.checkbox(&mut prompt.analytics, "Send usage analytics");
                 ui.indent("analytics_note", |ui| {
                     ui.label(ui::dim(ANALYTICS_NOTE).size(12.5))
                 });
                 ui.add_space(10.0);
-                ui.checkbox(&mut errors, "Send error reports");
+                ui.checkbox(&mut prompt.errors, "Send error reports");
                 ui.indent("errors_note", |ui| {
                     ui.label(ui::dim(ERRORS_NOTE).size(12.5))
                 });
                 ui.add_space(12.0);
+                ui.label(ui::dim(VENDOR_NOTE).size(12.5));
                 ui.label(ui::dim("You can change this at any time in File > Settings.").size(12.5));
-                ui.hyperlink_to("Privacy policy", crate::telemetry::PRIVACY_URL);
+                ui.hyperlink_to("Privacy Notice", telemetry::PRIVACY_URL);
                 ui.add_space(12.0);
                 let row = Vec2::new(ui.available_width(), 34.0);
                 let rtl = egui::Layout::right_to_left(egui::Align::Center);
@@ -795,18 +863,16 @@ impl App {
                 });
             });
         if !save {
-            self.consent = Some((analytics, errors));
+            self.consent = Some(prompt);
             return;
         }
-        self.consent = None;
-        self.cfg.analytics = analytics;
-        self.cfg.error_reports = errors;
-        self.cfg.privacy_asked = true;
-        if let Err(e) = self.cfg.save() {
-            self.toast = Some((format!("Cannot save settings: {e}"), Instant::now()));
+        if let Err(e) = telemetry::set_consent(prompt.analytics, prompt.errors, prompt.source) {
+            self.toast = Some((format!("Cannot save your choice: {e}"), Instant::now()));
         }
-        crate::telemetry::apply(analytics, errors);
-        crate::telemetry::event("app_started", json!({ "first_run": true }));
+        telemetry::event(Event::AppStarted {
+            view: self.mode.screen(),
+            first_run: prompt.source == Source::Setup,
+        });
     }
 
     fn about_window(&mut self, ctx: &egui::Context) {
@@ -903,12 +969,9 @@ impl App {
 
     fn set_mode(&mut self, mode: Mode) {
         if mode != self.mode {
-            let view = match mode {
-                Mode::Model => "model",
-                Mode::Slice => "slice",
-                Mode::Photo => "photo",
-            };
-            crate::telemetry::event("view_changed", json!({ "view": view }));
+            telemetry::event(Event::ViewChanged {
+                view: mode.screen(),
+            });
         }
         self.mode = mode;
         if mode == Mode::Slice && self.slice_for_rev != self.mesh_rev {
@@ -1514,13 +1577,10 @@ impl App {
         let f = job.frame.lock().unwrap();
         let msg = match pathtrace::save_png(&path, &f) {
             Ok(()) => {
-                crate::telemetry::event("photo_saved", json!({ "samples": f.samples }));
+                telemetry::event(Event::PhotoSaved { samples: f.samples });
                 format!("Saved {} ({} samples)", path.display(), f.samples)
             }
-            Err(e) => {
-                crate::telemetry::error("photo_save_failed", &e.to_string());
-                format!("Cannot save: {e}")
-            }
+            Err(e) => format!("Cannot save: {e}"),
         };
         drop(f);
         self.toast = Some((msg, Instant::now()));
@@ -2054,7 +2114,7 @@ impl App {
             self.pick_file();
         }
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::Comma)) {
-            self.cfg_edit = Some(self.cfg.clone());
+            self.open_settings();
         }
         for (key, menu) in [
             (egui::Key::F, Menu::File),
@@ -2138,7 +2198,7 @@ impl App {
         };
         let mut close = ctx.input(|i| i.key_pressed(egui::Key::Escape));
         let mut save = false;
-        let dirty = edit != self.cfg;
+        let dirty = edit != self.cfg || self.privacy.dirty();
         let running = self.server.is_some();
         let frame = egui::Frame::NONE
             .fill(ui::c().panel)
@@ -2202,9 +2262,14 @@ impl App {
                             ui::card(ui, |ui| {
                                 ui::section(ui, "Privacy");
                                 ui.add_space(4.0);
-                                toggle_row(ui, "Usage analytics", ANALYTICS_NOTE, &mut edit.analytics);
-                                toggle_row(ui, "Error reports", ERRORS_NOTE, &mut edit.error_reports);
-                                ui.hyperlink_to("Privacy policy", crate::telemetry::PRIVACY_URL);
+                                let p = &mut self.privacy;
+                                toggle_row(ui, "Usage analytics", ANALYTICS_NOTE, &mut p.analytics);
+                                toggle_row(ui, "Error reports", ERRORS_NOTE, &mut p.errors);
+                                ui.label(ui::dim(VENDOR_NOTE).size(12.5));
+                                ui.add_space(6.0);
+                                install_id_row(ui, p);
+                                ui.add_space(6.0);
+                                ui.hyperlink_to("Privacy Notice", telemetry::PRIVACY_URL);
                             });
                         }
                     });
@@ -2227,7 +2292,12 @@ impl App {
             let rerender = (&edit.binary, &edit.args, edit.manifold)
                 != (&self.cfg.binary, &self.cfg.args, self.cfg.manifold);
             self.cfg = edit;
-            crate::telemetry::apply(self.cfg.analytics, self.cfg.error_reports);
+            if self.privacy.dirty() {
+                let p = &self.privacy;
+                if let Err(e) = telemetry::set_consent(p.analytics, p.errors, Source::Settings) {
+                    self.toast = Some((format!("Cannot save your choice: {e}"), Instant::now()));
+                }
+            }
             self.sync_server(ctx);
             if rerender {
                 self.start_render();
@@ -2302,14 +2372,57 @@ fn openscad_settings(ui: &mut egui::Ui, edit: &mut openscad::Config) {
     }
 }
 
-/// Title and note on the left, switch on the right.
-const ANALYTICS_NOTE: &str = "This shows which features people use, so that we can improve \
-    them. CoCAD sends the app start, view changes, the number of parameters, the export format, \
-    the photo sample count, the version, the system, the processor type and a random ID.";
-const ERRORS_NOTE: &str = "This helps us find and repair failures. When CoCAD fails, it sends \
-    the error text with file paths removed, the place in the source code, the version, the \
-    system, the processor type and a random ID that changes at each start.";
+const ANALYTICS_NOTE: &str = "Send feature events, such as app started, with a random install \
+    ID. This shows us which features people use.";
+const ERRORS_NOTE: &str = "Send a crash report when the app fails. A report holds the error \
+    type, the code location, the app version and your operating system. It holds no install ID \
+    and no error message.";
+const VENDOR_NOTE: &str = "PostHog receives this data for us. It sees your IP address and does \
+    not store it.";
+const UPDATE_NOTE: &str = "The error report changed, so CoCAD asks you again. It sends nothing \
+    until you save your choice.";
 
+/// The ID that a deletion request needs, with Copy and Reset.
+fn install_id_row(ui: &mut egui::Ui, p: &mut PrivacyEdit) {
+    ui.label("Install ID");
+    let Some(id) = p.id.clone() else {
+        ui.label(ui::dim(
+            "None yet. CoCAD makes one when it sends the first event.",
+        ));
+        return;
+    };
+    ui.label(RichText::new(&id).monospace().size(12.0));
+    ui.label(ui::dim(
+        "A request to delete your analytics data needs this ID.",
+    ));
+    ui.add_space(4.0);
+    ui.horizontal(|ui| {
+        if p.confirm_reset {
+            if ui.add(ui::ghost("Keep ID", false)).clicked() {
+                p.confirm_reset = false;
+            }
+            if ui.add(ui::ghost("Reset ID", false)).clicked() {
+                telemetry::reset_install_id();
+                p.id = None;
+                p.confirm_reset = false;
+            }
+        } else {
+            if ui.add(ui::ghost("Copy", false)).clicked() {
+                ui.ctx().copy_text(id.clone());
+            }
+            if ui.add(ui::ghost("Reset", false)).clicked() {
+                p.confirm_reset = true;
+            }
+        }
+    });
+    if p.confirm_reset {
+        ui.label(ui::dim(
+            "Copy the ID first. Without the old ID, we cannot find and delete your old data.",
+        ));
+    }
+}
+
+/// Title and note on the left, switch on the right.
 fn toggle_row(ui: &mut egui::Ui, title: &str, note: &str, on: &mut bool) {
     let row = Vec2::new(ui.available_width(), 38.0);
     let rtl = egui::Layout::right_to_left(egui::Align::Center);
