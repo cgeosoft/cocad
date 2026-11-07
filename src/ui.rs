@@ -469,6 +469,41 @@ fn accent_tint() -> Color32 {
     Color32::from_rgba_unmultiplied(0xff, 0x93, 0x00, 42)
 }
 
+/// Row of a side navigation list, with an optional state dot at the right.
+pub fn nav_item(
+    ui: &mut egui::Ui,
+    label: &str,
+    active: bool,
+    dot: Option<Color32>,
+) -> egui::Response {
+    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 34.0), Sense::click());
+    let fill = if active {
+        accent_tint()
+    } else if resp.hovered() {
+        c().card
+    } else {
+        Color32::TRANSPARENT
+    };
+    let fg = if active || resp.hovered() {
+        c().text
+    } else {
+        c().dim
+    };
+    let p = ui.painter();
+    p.rect_filled(rect, 8.0, fill);
+    p.text(
+        rect.left_center() + vec2(10.0, 0.0),
+        Align2::LEFT_CENTER,
+        label,
+        FontId::proportional(14.5),
+        fg,
+    );
+    if let Some(color) = dot {
+        p.circle_filled(rect.right_center() - vec2(12.0, 0.0), 4.0, color);
+    }
+    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
 /// Menu bar button. `open` marks the menu that is showing.
 pub fn menu_trigger(ui: &mut egui::Ui, text: &str, open: bool) -> egui::Response {
     let galley = one_line(ui, text, FontId::monospace(12.5), f32::INFINITY);
