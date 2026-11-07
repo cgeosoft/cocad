@@ -3,7 +3,7 @@
 Standard: App Telemetry and Consent, in the owner's notebook at `CGEO/SOFT/App Telemetry and Consent.md`
 Standard reviewed: 2026-11-06
 
-Status: approved by the owner on 2026-11-06. Implemented on branch `telemetry-consent`. Not released. See [Release gate](#release-gate). The standard is a draft, and a lawyer has not reviewed it.
+Status: approved by the owner on 2026-11-06. Merged to `main` and released in `v0.3.2` on 2026-11-07, on the instruction of the owner. Open items are in the [Release gate](#release-gate). The standard is a draft, and a lawyer has not reviewed it.
 
 The standard's template gives the full path of the standard. This file uses a short path, because repo rule 8 forbids personal paths and the repo has a public mirror.
 
@@ -382,7 +382,7 @@ Do not tag a release until the owner confirms each item. The published text depe
 
 - [ ] Sign the DPA.
 - [x] The project is on PostHog Cloud EU (owner, 2026-11-06). The code uses `eu.i.posthog.com`.
-- [ ] Turn on "Discard client IP data" on the project. The consent text and the Notice say that PostHog does not store the IP address.
+- [x] (2026-11-07) Turn on "Discard client IP data" on the project. Console log capture is also off. The consent text and the Notice say that PostHog does not store the IP address.
 - [ ] Confirm retention of 12 months. The Free plan has a fixed 1 year. A paid plan has a default of 2 years, so set it to 12 months.
 - [x] Read the sub-processor list (2026-11-06). It names AWS and Modal (Germany for EU Cloud), Wiz (Germany, France), Cloudflare (global edge locations), Hiberly Ltd. (United Kingdom) and PostHog GmbH (Germany). The Notice says that data can leave the EU.
 - [ ] Ask PostHog support how to delete events by install ID. Then add the deletion runbook.
