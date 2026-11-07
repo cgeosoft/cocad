@@ -440,3 +440,23 @@ Use the `gui-test` skill for the window tests. Run `cargo test`, clippy and the 
 Tests are in `src/telemetry.rs`, `src/telemetry/consent.rs`, `src/telemetry/report.rs` and `extras/website/test/analytics.test.js`. Run the website tests with `bun test` in `extras/website`.
 
 The website test uses a fake browser, so no test proves that `posthog-js` accepts the `before_send` result. Check one page view against a test project before the release.
+
+### Window tests, 2026-11-07
+
+These are manual runs on a private display on Linux, with private settings. The builds were release builds with a fake key and a local stub in place of PostHog. All of them passed.
+
+| Test | Result |
+|---|---|
+| First start | Both boxes clear. 0 requests before the answer. After the answer, one `app_started` with `first_run: true` |
+| Settings ID row | Shows the ID. Copy puts it on the clipboard. Reset warns first and removes it only after the second press. The next event makes a new ID |
+| Turn analytics off | No request after that, and the ID stays. Only that option changes in the record. Turning it on again sends events with the same ID |
+| Update prompt from 0.3.1 settings | Analytics selected, error reports clear, explanation shown. 0 requests, also with an MCP action while the prompt was open. The record then shows `update-prompt` |
+| Old `config` keys | The next `Config::save` removes them. Consent does not change |
+| MCP action after consent | The window sends `view_changed`, as the Notice says |
+| Second window | With analytics turned off in window B, an MCP action in window A sends nothing. A shows the new value in Settings. A save from A does not change the record |
+| Panic, error reports on | One `$exception` with only the listed fields. The panic text is only in the local stderr. The process exits with code 101 |
+| Panic, stripped binary as in the `.deb` | One report with `[external]` and the location frame only |
+| Panic, error reports off | 0 requests |
+| Panic with a stalled network | The process ended 2.5 seconds after the trigger: the poll delay of the test, then the 2 second wait |
+
+The panic was added to a throwaway copy of the source. A real report still needs a check against PostHog. See [Release gate](#release-gate). I did not run these tests on Windows or macOS.
