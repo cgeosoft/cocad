@@ -26,7 +26,7 @@
   <main class="section container legal">
     <p class="label"><span class="dot"></span>Privacy</p>
     <h1 class="big-title">Privacy Notice</h1>
-    <p class="legal-date mono">Notice version 1. Last updated: November 6, 2026</p>
+    <p class="legal-date mono">Notice version 2. Last updated: November 8, 2026</p>
 
     <section>
       <h2>Summary</h2>
@@ -45,7 +45,7 @@
 
     <section id="app">
       <h2>The desktop app</h2>
-      <p>CoCAD has no account and no update check. The app asks you about the two options at the first start, and again if this Notice changes what the app sends. Until you answer, it sends nothing. To change your choice, open File &gt; Settings. A change applies at once.</p>
+      <p>CoCAD has no account. The app asks you about the two options at the first start, and again if this Notice changes what the app sends. Until you answer, it sends nothing. To change your choice, open File &gt; Settings. A change applies at once.</p>
       <div class="card legal-table"><table>
         <thead><tr><th>Option</th><th>Why</th><th>What the app sends</th><th>Example</th></tr></thead>
         <tbody>
@@ -65,7 +65,8 @@
         <thead><tr><th>Connection</th><th>When</th><th>What it carries</th></tr></thead>
         <tbody>
           <tr><td>PostHog (<span class="mono">eu.i.posthog.com</span>)</td><td>Only for an option that you turned on</td><td>The data above. Your system also looks up this host name</td></tr>
-          <tr><td>Your web browser</td><td>Only when you click a link, such as the GitHub page or this Notice</td><td>A normal browser request</td></tr>
+          <tr><td>GitHub API (<span class="mono">api.github.com</span>)</td><td>When the app window opens and once a day after that, unless you turn off File &gt; Settings &gt; Updates &gt; Check for new versions</td><td>A request for the list of releases. GitHub sees your IP address and the app version. This is not part of the two options above and holds no analytics. Your system also looks up this host name</td></tr>
+          <tr><td>Your web browser</td><td>Only when you click a link, such as the GitHub page, the download button or this Notice</td><td>A normal browser request</td></tr>
           <tr><td>127.0.0.1 (MCP server)</td><td>When the MCP option is on, which is the default</td><td>Tool calls on your computer only. Nothing leaves the computer through this port</td></tr>
         </tbody>
       </table></div>

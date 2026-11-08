@@ -89,7 +89,7 @@ test("decline makes no request and records the choice", () => {
   expect(b.scripts.length).toBe(0);
   const record = JSON.parse(b.storage.get("cocad_consent_v2"));
   expect(record.value).toBe("declined");
-  expect(record.version).toBe(1);
+  expect(record.version).toBe(2);
   expect(record.source).toBe("setup");
   expect(Date.parse(record.at)).toBeGreaterThan(0);
 });
@@ -112,7 +112,7 @@ test("accept loads PostHog with no autocapture and sends a named page view", asy
   expect(c.capture_pageview).toBe(false);
   expect(c.disable_session_recording).toBe(true);
   expect(c.persistence).toBe("localStorage");
-  expect(b.posthog.registered.consent_version).toBe(1);
+  expect(b.posthog.registered.consent_version).toBe(2);
   expect(b.captured.map((e) => e.name)).toEqual(["page_view"]);
 });
 
@@ -129,7 +129,7 @@ test("the send hook keeps only listed events and properties", async () => {
     $set: { $current_url: "https://x/?secret" },
     $set_once: { $initial_referrer: "https://y/" },
     properties: {
-      token: "t", distinct_id: "d", os: "linux", type: "deb", site: "cocad", consent_version: 1,
+      token: "t", distinct_id: "d", os: "linux", type: "deb", site: "cocad", consent_version: 2,
       $current_url: "https://x/?secret", $referrer: "https://y/", $pathname: "/secret", $browser: "b",
       $screen_height: 1, $session_id: "s", other: "z",
     },
@@ -154,7 +154,7 @@ test("decline after accept stops PostHog and removes its ID", async () => {
 });
 
 test("a saved accept starts PostHog on the next visit", async () => {
-  const record = { value: "accepted", at: new Date().toISOString(), source: "setup", version: 1 };
+  const record = { value: "accepted", at: new Date().toISOString(), source: "setup", version: 2 };
   const b = browser({ stored: { cocad_consent_v2: JSON.stringify(record) } });
   expect(b.boxes.length).toBe(0);
   await b.loadSdk();
@@ -162,7 +162,7 @@ test("a saved accept starts PostHog on the next visit", async () => {
 });
 
 test("an old notice or an old key asks again", () => {
-  const older = { value: "accepted", at: new Date().toISOString(), source: "setup", version: 0 };
+  const older = { value: "accepted", at: new Date().toISOString(), source: "setup", version: 1 };
   const b = browser({ stored: { cocad_consent_v2: JSON.stringify(older) } });
   expect(b.scripts.length).toBe(0);
   expect(b.boxes.length).toBe(1);
@@ -174,7 +174,7 @@ test("an old notice or an old key asks again", () => {
 
 test("a choice older than 12 months asks again", () => {
   const at = new Date(Date.now() - 366 * 24 * 60 * 60 * 1000).toISOString();
-  const record = { value: "accepted", at, source: "setup", version: 1 };
+  const record = { value: "accepted", at, source: "setup", version: 2 };
   const b = browser({ stored: { cocad_consent_v2: JSON.stringify(record) } });
   expect(b.scripts.length).toBe(0);
   expect(b.boxes.length).toBe(1);

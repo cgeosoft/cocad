@@ -16,7 +16,7 @@
   const CONSENT_KEY = "cocad_consent_v2";
   const OLD_KEY = "cocad_consent_v1";
   const CONSENT_MS = 365 * 24 * 60 * 60 * 1000;
-  const NOTICE_VERSION = 1;
+  const NOTICE_VERSION = 2;
   const EVENTS = ["page_view", "download_clicked", "demo_prompt"];
   const PROPERTIES = [
     "token", "distinct_id", "$lib", "$lib_version", "$insert_id", "$time", "$process_person_profile",
