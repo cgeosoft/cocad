@@ -3,7 +3,7 @@
 Standard: App Telemetry and Consent, in the owner's notebook at `CGEO/SOFT/App Telemetry and Consent.md`
 Standard reviewed: 2026-11-06
 
-Status: approved by the owner on 2026-11-06. Merged to `main` and released in `v0.3.2` on 2026-11-07, on the instruction of the owner. Open items are in the [Release gate](#release-gate). The standard is a draft, and a lawyer has not reviewed it.
+Status: approved by the owner on 2026-11-06. Merged to `main` and released in `v0.3.2` on 2026-11-07, on the instruction of the owner. Notice version 2, with the update check, released in `v0.4.0` on 2026-11-08. Open items are in the [Release gate](#release-gate). The standard is a draft, and a lawyer has not reviewed it.
 
 The standard's template gives the full path of the standard. This file uses a short path, because repo rule 8 forbids personal paths and the repo has a public mirror.
 
