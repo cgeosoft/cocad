@@ -11,7 +11,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 /// The version of the consent text and the Privacy Notice. Raise it only when
 /// the data, the purpose or the recipient changes.
-pub const NOTICE_VERSION: u32 = 1;
+pub const NOTICE_VERSION: u32 = 2;
 
 const FILE: &str = "consent";
 

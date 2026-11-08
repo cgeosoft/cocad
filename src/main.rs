@@ -7,6 +7,7 @@ mod examples;
 mod export;
 mod mcp;
 mod mesh;
+mod net;
 mod openscad;
 mod params;
 mod parts;
@@ -17,6 +18,7 @@ mod render;
 mod slicer;
 mod telemetry;
 mod ui;
+mod update;
 
 use anyhow::{Context, Result, bail};
 use std::path::PathBuf;

@@ -12,6 +12,7 @@ use crate::render::{self, Renderer, View};
 use crate::slicer::{self, Kind, Settings, Sliced};
 use crate::telemetry::{self, Event, Screen, Source};
 use crate::ui;
+use crate::update;
 use eframe::egui::{self, Color32, RichText, Vec2};
 use glam::{Mat4, Vec3};
 use std::path::PathBuf;
@@ -98,6 +99,7 @@ enum SettingsPage {
     Appearance,
     OpenScad,
     Mcp,
+    Updates,
     Privacy,
 }
 
@@ -259,6 +261,9 @@ pub struct App {
     /// Listener for MCP tool calls, when the option is on.
     server: Option<crate::mcp::Server>,
     pending: Vec<remote::Pending>,
+    update: update::Checker,
+    /// The window with the changes of the new versions, while it is open.
+    show_changes: bool,
 }
 
 /// The boxes of the privacy question.
@@ -401,6 +406,8 @@ impl App {
             tour: tour::first_start().then(tour::Tour::new),
             server: None,
             pending: Vec::new(),
+            update: update::Checker::new(),
+            show_changes: false,
         };
         app.sync_server(&cc.egui_ctx);
         if let Some(f) = file {
@@ -1022,6 +1029,117 @@ impl App {
             view: self.mode.screen(),
             first_run: prompt.source == Source::Setup,
         });
+    }
+
+    /// A small notice at the bottom right. A click opens the list of changes.
+    /// It waits while another window covers the app.
+    fn update_notice(&mut self, ctx: &egui::Context) {
+        let covered = self.consent.is_some()
+            || self.tour.is_some()
+            || self.cfg_edit.is_some()
+            || self.show_changes;
+        if covered || !self.cfg.update_check {
+            return;
+        }
+        let Some(latest) = self.update.offer() else {
+            return;
+        };
+        let mut dismiss = false;
+        let frame = egui::Frame::NONE
+            .fill(ui::c().panel)
+            .corner_radius(10)
+            .inner_margin(egui::Margin::symmetric(14, 10))
+            .stroke(egui::Stroke::new(1.5_f32, ui::ACCENT))
+            .shadow(ctx.style().visuals.popup_shadow);
+        let notice = egui::Area::new(egui::Id::new("update_notice"))
+            .order(egui::Order::Foreground)
+            .anchor(egui::Align2::RIGHT_BOTTOM, [-14.0, -40.0])
+            .sense(egui::Sense::click())
+            .show(ctx, |ui| {
+                frame.show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.vertical(|ui| {
+                            ui.spacing_mut().item_spacing.y = 2.0;
+                            let title = format!("CoCAD {latest} is available");
+                            ui.add(egui::Label::new(title).selectable(false));
+                            let hint = ui::dim("Click to see the changes").size(12.5);
+                            ui.add(egui::Label::new(hint).selectable(false));
+                        });
+                        ui.add_space(10.0);
+                        let close = RichText::new("×").size(18.0).color(ui::c().dim);
+                        dismiss = ui
+                            .add(egui::Button::new(close).frame(false))
+                            .on_hover_text("Do not show this version again")
+                            .clicked();
+                    });
+                });
+            });
+        let notice = notice
+            .response
+            .on_hover_cursor(egui::CursorIcon::PointingHand);
+        if dismiss {
+            self.update.dismiss();
+        } else if notice.clicked() {
+            self.show_changes = true;
+        }
+    }
+
+    /// Lists the new versions. The button opens the download part of the website.
+    fn changes_window(&mut self, ctx: &egui::Context) {
+        if !self.show_changes {
+            return;
+        }
+        let installed = update::Version::current();
+        let mut close = false;
+        let mut download = false;
+        let frame = egui::Frame::NONE
+            .fill(ui::c().panel)
+            .corner_radius(14)
+            .inner_margin(egui::Margin::same(18))
+            .stroke(egui::Stroke::new(1.0_f32, ui::c().line));
+        let height = (ctx.screen_rect().height() - 170.0).clamp(120.0, 420.0);
+        let modal = egui::Modal::new(egui::Id::new("changes"))
+            .frame(frame)
+            .show(ctx, |ui| {
+                ui.set_width(460.0);
+                ui.heading("A new version is available");
+                ui.add_space(4.0);
+                ui.label(ui::dim(format!("You have version {installed}.")));
+                ui.add_space(10.0);
+                egui::ScrollArea::vertical()
+                    .max_height(height)
+                    .auto_shrink([false, true])
+                    .show(ui, |ui| {
+                        for release in self.update.releases() {
+                            let mut title = release.version.to_string();
+                            if release.version == installed {
+                                title.push_str(" (installed)");
+                            }
+                            ui.label(RichText::new(title).strong());
+                            for change in &release.changes {
+                                ui.label(format!("•  {change}"));
+                            }
+                            if release.changes.is_empty() {
+                                ui.label(ui::dim("No notes for this version."));
+                            }
+                            ui.add_space(10.0);
+                        }
+                    });
+                ui.add_space(8.0);
+                let row = Vec2::new(ui.available_width(), 34.0);
+                let rtl = egui::Layout::right_to_left(egui::Align::Center);
+                ui.allocate_ui_with_layout(row, rtl, |ui| {
+                    ui.spacing_mut().button_padding = Vec2::new(16.0, 7.0);
+                    download = ui.add(ui::primary("Go to downloads")).clicked();
+                    close = ui.add(ui::ghost("Close", false)).clicked();
+                });
+            });
+        if download {
+            ctx.open_url(egui::OpenUrl::new_tab(update::DOWNLOAD_URL));
+        }
+        if download || close || modal.should_close() {
+            self.show_changes = false;
+        }
     }
 
     fn about_window(&mut self, ctx: &egui::Context) {
@@ -2385,11 +2503,8 @@ impl App {
                 "OpenSCAD",
                 missing.then_some(ui::c().danger),
             ),
-            (
-                SettingsPage::Mcp,
-                "MCP server",
-                running.then_some(ui::GOOD),
-            ),
+            (SettingsPage::Mcp, "MCP server", running.then_some(ui::GOOD)),
+            (SettingsPage::Updates, "Updates", None),
         ];
         if crate::telemetry::available() {
             pages.push((SettingsPage::Privacy, "Privacy", None));
@@ -2401,7 +2516,13 @@ impl App {
                 ui.horizontal(|ui| {
                     ui.heading("Settings");
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        close |= ui.add(egui::Button::new(RichText::new("×").size(20.0).color(ui::c().dim)).frame(false)).on_hover_text("Close (Esc)").clicked();
+                        close |= ui
+                            .add(
+                                egui::Button::new(RichText::new("×").size(20.0).color(ui::c().dim))
+                                    .frame(false),
+                            )
+                            .on_hover_text("Close (Esc)")
+                            .clicked();
                     });
                 });
                 ui.add_space(10.0);
@@ -2434,6 +2555,9 @@ impl App {
                                 }
                                 SettingsPage::Mcp => {
                                     ui::card(ui, |ui| mcp_settings(ui, &mut edit, running));
+                                }
+                                SettingsPage::Updates => {
+                                    ui::card(ui, |ui| update_settings(ui, &mut edit));
                                 }
                                 SettingsPage::Privacy => {
                                     ui::card(ui, |ui| privacy_settings(ui, &mut self.privacy));
@@ -2531,6 +2655,19 @@ fn mcp_settings(ui: &mut egui::Ui, edit: &mut openscad::Config, running: bool) {
     );
 }
 
+/// The Updates page of the Settings window.
+fn update_settings(ui: &mut egui::Ui, edit: &mut openscad::Config) {
+    ui::section(ui, "Updates");
+    ui.add_space(4.0);
+    toggle_row(
+        ui,
+        "Check for new versions",
+        "Asks GitHub for the list of releases when the window opens and once a day. GitHub sees \
+         your IP address and the app version. CoCAD does not install anything.",
+        &mut edit.update_check,
+    );
+}
+
 /// The Privacy page of the Settings window.
 fn privacy_settings(ui: &mut egui::Ui, p: &mut PrivacyEdit) {
     toggle_row(ui, "Usage analytics", ANALYTICS_NOTE, &mut p.analytics);
@@ -2615,8 +2752,10 @@ const ERRORS_NOTE: &str = "Send a crash report when the app fails. A report hold
     and no error message.";
 const VENDOR_NOTE: &str = "PostHog receives this data for us. It sees your IP address and does \
     not store it.";
-const UPDATE_NOTE: &str = "The error report changed, so CoCAD asks you again. It sends nothing \
-    until you save your choice.";
+const UPDATE_NOTE: &str = "The Privacy Notice changed, so CoCAD asks you again. CoCAD now asks \
+    GitHub for new versions. GitHub sees your IP address and the app version. You can turn this \
+    off in File > Settings > Updates. Version 0.3.2 also changed the error report. CoCAD sends no \
+    analytics and no error reports until you save your choice.";
 
 /// The ID that a deletion request needs, with Copy and Reset.
 fn install_id_row(ui: &mut egui::Ui, p: &mut PrivacyEdit) {
@@ -2703,6 +2842,7 @@ impl eframe::App for App {
             self.themed = true;
         }
         self.poll(ctx);
+        self.update.poll(ctx, self.cfg.update_check);
         self.shortcuts(ctx);
         let title = match &self.file {
             Some(f) => format!(
@@ -2730,6 +2870,7 @@ impl eframe::App for App {
         } else {
             self.tour_window(ctx);
         }
+        self.changes_window(ctx);
         egui::TopBottomPanel::bottom("status")
             .exact_height(28.0)
             .frame(
@@ -2802,6 +2943,7 @@ impl eframe::App for App {
             .frame(egui::Frame::NONE)
             .show(ctx, |ui| self.viewport(ui));
         self.menu_popup(ctx);
+        self.update_notice(ctx);
     }
 
     fn on_exit(&mut self, gl: Option<&eframe::glow::Context>) {

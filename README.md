@@ -246,6 +246,17 @@ label = "Hi";          // [10]
 $fn = 64;
 ```
 
+## Updates
+
+When the window opens and once a day after that, CoCAD asks GitHub for the list of releases. If a newer version exists, a small notice shows at the bottom right.
+
+- Click the notice to see the changes. For a latest version of 0.4.5, the list shows 0.4.0 to 0.4.5, plus all versions between your version and 0.4.0.
+- The button in that window opens the download section of the website. CoCAD does not download or install anything.
+- Click × to hide the notice until a newer version comes.
+- To stop the check, turn off "Check for new versions" in File > Settings > Updates.
+
+The release workflow writes the notes from the commit subjects since the last tag. It leaves out `Version` and `Website:` commits. Each `*` line in the notes is one bullet in the app.
+
 ## Privacy
 
 At the first start, CoCAD asks about two optional kinds of data. Both boxes start clear, and you can change them in File > Settings. A change applies at once. CoCAD asks again if the data, the purpose or the recipient changes.
@@ -258,6 +269,8 @@ At the first start, CoCAD asks about two optional kinds of data. Both boxes star
 An error report holds no install ID and no error message. CoCAD does not send model contents, file names, parameter values or OpenSCAD output.
 
 PostHog receives this data. It sees your IP address and does not store it. The app window sends the data. The `params`, `export`, `slice` and `photo` commands and the `cocad mcp` process send nothing. If you connect an MCP client, the window sends the same data as when you use it yourself.
+
+The update check is separate from these two choices. It sends no analytics. GitHub sees your IP address and the app version. See [Updates](#updates).
 
 File > Settings shows the install ID, with Copy and Reset. A request to delete your analytics data needs this ID. See the [Privacy Notice](https://cocad.cgeosoft.com/privacy/).
 
@@ -319,6 +332,8 @@ A tag `v*` (for example `v0.2.0`) also makes a GitHub release with all files att
 | `src/telemetry.rs` | Optional analytics and error reports (PostHog), final allowlist |
 | `src/telemetry/consent.rs` | Consent record and migration |
 | `src/telemetry/report.rs` | Error report fields, safe stack frames, rate limit |
+| `src/update.rs` | Update check on GitHub, list of changes, dismissed version |
+| `src/net.rs` | HTTP client setup |
 | `src/openscad.rs` | Runs `openscad` and reads the STL |
 | `src/mesh.rs` | Indexed mesh, STL reader, checks |
 | `src/parts.rs` | Finds the parts of a multicolor model and renders each one |

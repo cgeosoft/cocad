@@ -29,6 +29,8 @@ pub struct Config {
     pub theme: String,
     /// Let MCP clients on this computer control the window.
     pub mcp: bool,
+    /// Ask GitHub for new versions.
+    pub update_check: bool,
 }
 
 impl Default for Config {
@@ -39,6 +41,7 @@ impl Default for Config {
             manifold: true,
             theme: "system".into(),
             mcp: true,
+            update_check: true,
         }
     }
 }
@@ -76,6 +79,7 @@ impl Config {
                         "manifold" => c.manifold = v != "false",
                         "theme" => c.theme = v,
                         "mcp" => c.mcp = v != "false",
+                        "update_check" => c.update_check = v != "false",
                         _ => {}
                     }
                 }
@@ -95,8 +99,8 @@ impl Config {
     /// consent keys of older versions.
     pub(crate) fn text(&self) -> String {
         format!(
-            "openscad = {}\nopenscad_args = {}\nmanifold = {}\ntheme = {}\nmcp = {}\n",
-            self.binary, self.args, self.manifold, self.theme, self.mcp
+            "openscad = {}\nopenscad_args = {}\nmanifold = {}\ntheme = {}\nmcp = {}\nupdate_check = {}\n",
+            self.binary, self.args, self.manifold, self.theme, self.mcp, self.update_check
         )
     }
 

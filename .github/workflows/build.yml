@@ -93,6 +93,16 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # The update notice of the app lists the bullets of the release notes.
+      # GitHub lists only pull requests, and most changes go directly to main.
+      - name: Write release notes
+        run: |
+          prev=$(git describe --tags --abbrev=0 "$GITHUB_REF_NAME^" 2>/dev/null || true)
+          git log --no-merges --pretty='* %s' "${prev:+$prev..}$GITHUB_REF_NAME" \
+            | { grep -vE '^\* (Version |Website: )' || true; } > notes.md
       - uses: actions/download-artifact@v4
         with:
           path: dist
@@ -100,4 +110,5 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           files: dist/*
+          body_path: notes.md
           generate_release_notes: true

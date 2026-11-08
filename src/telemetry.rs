@@ -159,16 +159,7 @@ impl Sink for Http {
     /// Sends one event. It does not retry: a lost event is not important.
     fn send(&self, body: &Value) {
         let url = format!("{}/i/v0/e/", HOST.unwrap_or(EU_HOST));
-        let config = ureq::Agent::config_builder().timeout_global(Some(TIMEOUT));
-        // Linux uses rustls, so the app needs no OpenSSL. `cargo check` for Windows
-        // and macOS must work on Linux, and ring needs a C toolchain for the target.
-        #[cfg(not(target_os = "linux"))]
-        let config = config.tls_config(
-            ureq::tls::TlsConfig::builder()
-                .provider(ureq::tls::TlsProvider::NativeTls)
-                .build(),
-        );
-        let agent: ureq::Agent = config.build().into();
+        let agent = crate::net::agent(TIMEOUT);
         let _ = agent
             .post(&url)
             .content_type("application/json")

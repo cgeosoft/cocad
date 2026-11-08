@@ -52,7 +52,8 @@ The table above and the rest of this audit describe the state before these actio
 
 | Connection | When | Data | Disclosed now | Note |
 |---|---|---|---|---|
-| `https://eu.i.posthog.com/i/v0/e/` | After consent, in the window process only | Events and error reports | Yes, but with wrong detail | The only network call in the Rust code |
+| `https://eu.i.posthog.com/i/v0/e/` | After consent, in the window process only | Events and error reports | Yes, but with wrong detail | The only network call of the audit date. `src/update.rs` added the GitHub call below |
+| `https://api.github.com/repos/cgeosoft/cocad/releases` | Window process only, at window start and each 24 hours, unless the user turns off the update check | IP address, app version in `User-Agent` | Yes | Added 2026-11-07. Not part of analytics or error reports, so it has no consent option. GitHub is a new recipient of the IP address, so the owner raised `NOTICE_VERSION` to 2 on 2026-11-08. The app and the site ask again. The Privacy Notice lists the connection |
 | DNS lookup for that host | Before each new connection | Host name, through the system resolver | No | Add to the Notice as part of the connection |
 | System browser: GitHub repo, privacy page | Only when the user clicks a link | Normal browser request | No | The app opens the link. It does not fetch it |
 | `127.0.0.1` on a free port (MCP) | When the MCP option is on | Tool calls, with a random token | Yes | Loopback only. It stays on the computer |
@@ -62,7 +63,7 @@ The table above and the rest of this audit describe the state before these actio
 These checks found no other network path:
 
 - `Cargo.lock` has `ureq` and no other HTTP client.
-- The code has no update check, ads, remote fonts or data providers.
+- The code has no ads, remote fonts or data providers.
 - `ui::fonts` reads a local font file, or uses the embedded fonts.
 - `src/examples.rs` (uncommitted) writes embedded models. It makes no connection.
 
