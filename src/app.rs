@@ -244,6 +244,8 @@ pub struct App {
     photo_tex: Option<(egui::TextureHandle, u32)>,
     photo_started: Instant,
     themed: bool,
+    /// The window title that was sent last. A title command asks for a repaint.
+    title: String,
     /// Parameter sets in `<model>.json`.
     sets: Vec<String>,
     sets_file: PathBuf,
@@ -392,6 +394,7 @@ impl App {
             photo_tex: None,
             photo_started: Instant::now(),
             themed: false,
+            title: String::new(),
             sets: Vec::new(),
             sets_file: PathBuf::new(),
             sets_mtime: None,
@@ -2937,7 +2940,10 @@ impl eframe::App for App {
             ),
             None => "CoCAD".into(),
         };
-        ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
+        if title != self.title {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
+            self.title = title;
+        }
 
         let line = egui::Stroke::new(1.0_f32, ui::c().line);
         egui::TopBottomPanel::top("top")
