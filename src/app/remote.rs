@@ -45,9 +45,18 @@ fn absolute(args: &Json) -> Result<PathBuf, String> {
     }
 }
 
-/// An absolute output path that may be written.
+fn has_ext(p: &std::path::Path, ext: &str) -> bool {
+    p.extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case(ext))
+}
+
+/// An absolute output path that may be written. A symbolic link is refused,
+/// because it can point at a file that the caller did not name.
 fn output(args: &Json) -> Result<PathBuf, String> {
     let p = absolute(args)?;
+    if p.symlink_metadata().is_ok_and(|m| m.file_type().is_symlink()) {
+        return Err(format!("{} is a symbolic link", p.display()));
+    }
     if p.exists() && !flag(args, "overwrite", false) {
         return Err(format!(
             "{} exists. Set overwrite to replace it.",
@@ -181,6 +190,9 @@ impl App {
             }
             "open_model" => {
                 let path = absolute(args)?;
+                if !has_ext(&path, "scad") {
+                    return Err("The path must end in .scad.".into());
+                }
                 if !path.is_file() {
                     return Err(format!("{} is not a file", path.display()));
                 }
@@ -500,6 +512,9 @@ impl App {
     fn save_photo_to(&mut self, args: &Json, reply: &Reply) -> Outcome {
         let mesh = self.current_mesh()?;
         let path = output(args)?;
+        if !has_ext(&path, "png") {
+            return Err("The path must end in .png.".into());
+        }
         let view = view_angles(args)?;
         let width = side(args, "width", self.photo.width as u64, MAX_IMAGE_SIDE)?;
         let height = side(args, "height", self.photo.height as u64, MAX_IMAGE_SIDE)?;
@@ -639,5 +654,33 @@ fn finish_photo(job: &pathtrace::Job, samples: u32) -> Result<u32, String> {
             return Err("The render made no sample in time. Use a smaller image.".into());
         }
         std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extension_check_ignores_case() {
+        assert!(has_ext(std::path::Path::new("/a/model.SCAD"), "scad"));
+        assert!(!has_ext(std::path::Path::new("/a/id_ed25519"), "scad"));
+        assert!(!has_ext(std::path::Path::new("/a/.bashrc"), "png"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn output_refuses_symlink() {
+        let dir = std::env::temp_dir().join(format!("cocad-test-link-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let target = dir.join("target.png");
+        let link = dir.join("link.png");
+        std::fs::write(&target, b"x").unwrap();
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        let args = json!({ "path": link, "overwrite": true });
+        assert!(output(&args).unwrap_err().contains("symbolic link"));
+        let args = json!({ "path": target, "overwrite": true });
+        assert!(output(&args).is_ok());
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

@@ -117,6 +117,7 @@ Behavior:
 - `export_model` and `save_photo` do not replace a file without `overwrite`. They and `view_model` fail when the last render failed, so that they do not use an old mesh.
 - `view_model` and `save_photo` put the whole model in the frame. They use the camera direction of the window, or the given `view`.
 - `save_photo` stops after 40 seconds and saves the samples it has.
+- `open_model` opens only `.scad` files. `save_photo` writes only `.png` files. `export_model` and `save_photo` do not write through a symbolic link.
 - The tools cannot delete a parameter set or a file.
 - A minimized window may not answer until you restore it.
 
