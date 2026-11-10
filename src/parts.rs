@@ -12,6 +12,7 @@ use crate::mesh::Mesh;
 use crate::openscad::{self, Config};
 use crate::params::{self, Param, Value, Widget};
 use anyhow::{Context, Result, bail};
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -47,6 +48,83 @@ pub fn names(params: &[Param]) -> Vec<String> {
         .filter_map(|(value, _)| match value {
             Value::Str(s) if s != ALL => Some(s.clone()),
             _ => None,
+        })
+        .collect()
+}
+
+/// The selected `cocad_part` value, or `None` for a model without parts.
+pub fn selected(params: &[Param]) -> Option<String> {
+    if names(params).is_empty() {
+        return None;
+    }
+    match &params.iter().find(|p| p.name == PARAM)?.value {
+        Value::Str(s) => Some(s.clone()),
+        _ => None,
+    }
+}
+
+/// True when the 3D view must render each part to color the model:
+/// the model has parts and shows all of them.
+pub fn needs_render(params: &[Param]) -> bool {
+    selected(params).is_some_and(|s| s == ALL)
+}
+
+/// The color of the one part that the model shows, from the log of the
+/// main render. `None` when the model shows all parts or has no parts.
+pub fn shown_color(params: &[Param], log: &str) -> Option<[u8; 3]> {
+    let name = selected(params).filter(|s| s != ALL)?;
+    let i = names(params).iter().position(|n| *n == name)?;
+    Some(echoed_color(log).unwrap_or(PALETTE[i % PALETTE.len()]))
+}
+
+/// The part color of each triangle of `mesh`, the model with all parts.
+/// A triangle gets the color of the part that holds two or more of its
+/// corners. Other triangles, for example from parts of the model that are
+/// in no part, get `None`.
+pub fn face_colors(mesh: &Mesh, parts: &[Part]) -> Vec<Option<[u8; 3]>> {
+    const SHARED: usize = usize::MAX;
+    let key = |v: glam::Vec3| {
+        [
+            (v.x + 0.0).to_bits(),
+            (v.y + 0.0).to_bits(),
+            (v.z + 0.0).to_bits(),
+        ]
+    };
+    let mut owner: HashMap<[u32; 3], usize> = HashMap::new();
+    for (i, part) in parts.iter().enumerate() {
+        for v in &part.mesh.vertices {
+            owner
+                .entry(key(*v))
+                .and_modify(|o| {
+                    if *o != i {
+                        *o = SHARED;
+                    }
+                })
+                .or_insert(i);
+        }
+    }
+    mesh.triangles
+        .iter()
+        .map(|t| {
+            let mut votes: Vec<usize> = Vec::with_capacity(3);
+            let mut shared = 0;
+            for &v in t {
+                match owner.get(&key(mesh.vertices[v as usize])) {
+                    Some(&SHARED) => shared += 1,
+                    Some(&o) => votes.push(o),
+                    None => {}
+                }
+            }
+            votes.sort_unstable();
+            // Two corners of one part, or one corner and the other two on a
+            // seam between parts.
+            let winner = match votes.as_slice() {
+                [a, b, ..] if a == b => Some(*a),
+                [_, b, c] if b == c => Some(*b),
+                [a] if shared == 2 => Some(*a),
+                _ => None,
+            };
+            winner.map(|i| parts[i].color)
         })
         .collect()
 }
@@ -148,5 +226,42 @@ mod tests {
         assert_eq!(parse_color("#102030"), Some([0x10, 0x20, 0x30]));
         assert_eq!(echoed_color("no color"), None);
         assert_eq!(parse_color("#12"), None);
+    }
+
+    fn part(name: &str, color: [u8; 3], soup: &[[glam::Vec3; 3]]) -> Part {
+        Part {
+            name: name.into(),
+            color,
+            mesh: Mesh::from_soup(soup),
+        }
+    }
+
+    #[test]
+    fn faces_take_the_color_of_their_part() {
+        use glam::Vec3;
+        let v = |x: f32, y: f32| Vec3::new(x, y, 0.0);
+        let a = [v(0.0, 0.0), v(1.0, 0.0), v(0.0, 1.0)];
+        let b = [v(1.0, 0.0), v(2.0, 0.0), v(1.0, 1.0)];
+        let other = [v(5.0, 5.0), v(6.0, 5.0), v(5.0, 6.0)];
+        let parts = [part("a", [1, 0, 0], &[a]), part("b", [0, 0, 1], &[b])];
+        let model = Mesh::from_soup(&[a, b, other]);
+        assert_eq!(
+            face_colors(&model, &parts),
+            [Some([1, 0, 0]), Some([0, 0, 1]), None]
+        );
+    }
+
+    #[test]
+    fn one_selected_part_takes_its_color() {
+        let p = params::parse("cocad_part = \"star\"; // [all, plate, star]\n");
+        assert_eq!(shown_color(&p, ""), Some(PALETTE[1]));
+        assert_eq!(
+            shown_color(&p, "ECHO: cocad_color = \"blue\""),
+            Some([0, 0, 0xff])
+        );
+        assert!(!needs_render(&p));
+        let all = params::parse("cocad_part = \"all\"; // [all, plate, star]\n");
+        assert_eq!(shown_color(&all, ""), None);
+        assert!(needs_render(&all));
     }
 }

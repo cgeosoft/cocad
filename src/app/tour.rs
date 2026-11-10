@@ -69,7 +69,7 @@ const STEPS: [Step; 9] = [
             "Check the size, volume, triangles and open edges.",
             "Back faces show in purple. Press W for the wireframe.",
             "Export binary STL, 3MF with the parameters, or STEP AP214.",
-            "A model with a cocad_part list also exports a multicolor 3MF.",
+            "A model with a cocad_part list shows each part in its color and exports a multicolor 3MF.",
         ],
         image: shot!("4-export"),
     },

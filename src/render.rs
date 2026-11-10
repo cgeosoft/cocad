@@ -12,22 +12,35 @@ struct Buffer {
     vao: glow::VertexArray,
     vbo: glow::Buffer,
     count: i32,
+    /// Floats per vertex.
+    stride: usize,
 }
 
 impl Buffer {
+    /// Two vec3 attributes per vertex: position + normal or color.
     unsafe fn new(gl: &glow::Context) -> Buffer {
+        unsafe { Buffer::with_attrs(gl, 2) }
+    }
+
+    /// `attrs` vec3 attributes per vertex, at locations 0, 1, ...
+    unsafe fn with_attrs(gl: &glow::Context, attrs: u32) -> Buffer {
         unsafe {
             let vao = gl.create_vertex_array().unwrap();
             let vbo = gl.create_buffer().unwrap();
             gl.bind_vertex_array(Some(vao));
             gl.bind_buffer(glow::ARRAY_BUFFER, Some(vbo));
-            // Two vec3 attributes per vertex: position + normal or color.
-            gl.enable_vertex_attrib_array(0);
-            gl.vertex_attrib_pointer_f32(0, 3, glow::FLOAT, false, 24, 0);
-            gl.enable_vertex_attrib_array(1);
-            gl.vertex_attrib_pointer_f32(1, 3, glow::FLOAT, false, 24, 12);
+            let stride = attrs as i32 * 12;
+            for a in 0..attrs {
+                gl.enable_vertex_attrib_array(a);
+                gl.vertex_attrib_pointer_f32(a, 3, glow::FLOAT, false, stride, a as i32 * 12);
+            }
             gl.bind_vertex_array(None);
-            Buffer { vao, vbo, count: 0 }
+            Buffer {
+                vao,
+                vbo,
+                count: 0,
+                stride: attrs as usize * 3,
+            }
         }
     }
 
@@ -41,7 +54,7 @@ impl Buffer {
             );
             gl.bind_buffer(glow::ARRAY_BUFFER, None);
         }
-        self.count = (data.len() / 6) as i32;
+        self.count = (data.len() / self.stride) as i32;
     }
 
     unsafe fn draw(&self, gl: &glow::Context, mode: u32, first: i32, count: i32) {
@@ -64,12 +77,15 @@ impl Buffer {
 const MESH_VS: &str = r#"
 layout(location = 0) in vec3 a_pos;
 layout(location = 1) in vec3 a_nrm;
+layout(location = 2) in vec3 a_col;
 uniform mat4 u_mvp;
 out vec3 v_nrm;
 out vec3 v_pos;
+out vec3 v_col;
 void main() {
     v_nrm = a_nrm;
     v_pos = a_pos;
+    v_col = a_col;
     gl_Position = u_mvp * vec4(a_pos, 1.0);
 }
 "#;
@@ -78,13 +94,13 @@ const MESH_FS: &str = r#"
 precision highp float;
 in vec3 v_nrm;
 in vec3 v_pos;
+in vec3 v_col;
 uniform vec3 u_eye;
-uniform vec3 u_color;
 uniform float u_alpha;
 out vec4 o_color;
 void main() {
     vec3 n = normalize(v_nrm);
-    vec3 base = u_color;
+    vec3 base = v_col;
     if (!gl_FrontFacing) {
         // Back faces show inside-out or open geometry.
         n = -n;
@@ -322,7 +338,7 @@ pub struct Renderer {
     paths: PathBuffer,
     /// Index count at the end of each layer in `paths`.
     layer_ends: Vec<i32>,
-    mesh_rev: u64,
+    mesh_rev: (u64, u64),
     slice_rev: u64,
     grid_key: (i32, i32, i32, i32, bool),
 }
@@ -370,12 +386,12 @@ impl Renderer {
                 mesh_prog: program(gl, version, MESH_VS, MESH_FS)?,
                 line_prog: program(gl, version, LINE_VS, LINE_FS)?,
                 path_prog: program(gl, version, PATH_VS, PATH_FS)?,
-                mesh: Buffer::new(gl),
+                mesh: Buffer::with_attrs(gl, 3),
                 edges: Buffer::new(gl),
                 grid: Buffer::new(gl),
                 paths: PathBuffer::new(gl),
                 layer_ends: Vec::new(),
-                mesh_rev: u64::MAX,
+                mesh_rev: (u64::MAX, u64::MAX),
                 slice_rev: u64::MAX,
                 grid_key: (0, 0, 0, -1, true),
             })
@@ -394,7 +410,15 @@ impl Renderer {
         }
     }
 
-    pub fn set_mesh(&mut self, gl: &glow::Context, mesh: Option<&Mesh>, rev: u64) {
+    /// `colors` holds one color for each triangle. Without it, or for a
+    /// `None` entry, the triangle is orange. `rev` is the mesh and color revision.
+    pub fn set_mesh(
+        &mut self,
+        gl: &glow::Context,
+        mesh: Option<&Mesh>,
+        colors: Option<&[Option<[u8; 3]>]>,
+        rev: (u64, u64),
+    ) {
         if rev == self.mesh_rev {
             return;
         }
@@ -402,11 +426,15 @@ impl Renderer {
         let mut tri = Vec::new();
         let mut edge = Vec::new();
         if let Some(m) = mesh {
-            tri.reserve(m.triangles.len() * 18);
+            tri.reserve(m.triangles.len() * 27);
             for i in 0..m.triangles.len() {
                 let n = m.normal(i);
+                let c = colors
+                    .and_then(|c| c.get(i).copied().flatten())
+                    .map(|c| c.map(|x| x as f32 / 255.0))
+                    .unwrap_or(ORANGE);
                 for v in m.tri(i) {
-                    tri.extend_from_slice(&[v.x, v.y, v.z, n.x, n.y, n.z]);
+                    tri.extend_from_slice(&[v.x, v.y, v.z, n.x, n.y, n.z, c[0], c[1], c[2]]);
                 }
             }
             let c = [0.08, 0.05, 0.02];
@@ -545,12 +573,6 @@ impl Renderer {
                     view.eye.x,
                     view.eye.y,
                     view.eye.z,
-                );
-                gl.uniform_3_f32(
-                    u(self.mesh_prog, "u_color").as_ref(),
-                    ORANGE[0],
-                    ORANGE[1],
-                    ORANGE[2],
                 );
                 gl.uniform_1_f32(u(self.mesh_prog, "u_alpha").as_ref(), view.mesh_alpha);
                 let ghost = view.mesh_alpha < 1.0;

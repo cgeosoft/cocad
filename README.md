@@ -17,7 +17,7 @@ OpenSCAD does the geometry. CoCAD runs the `openscad` CLI in the background, rea
 - **Export.** Binary STL, 3MF with the parameters in the metadata, and STEP AP214 with real planar faces.
 - **Slice preview.** Walls, infill and top and bottom skin as round strands, with a layer slider and a time, length and weight estimate.
 - **Photo render.** A path tracer makes a studio photo of the current view, in a plastic color and finish you choose.
-- **Multicolor 3MF.** A model can list parts with a `cocad_part` parameter. CoCAD renders each part and writes a 3MF for PrusaSlicer 2.9 or OrcaSlicer, with one filament for each part.
+- **Multicolor 3MF.** A model can list parts with a `cocad_part` parameter. The 3D view shows each part in its color. CoCAD renders each part and writes a 3MF for PrusaSlicer 2.9 or OrcaSlicer, with one filament for each part.
 - **Examples.** **File > Examples** opens a sample model. The app writes the models to `examples/` in its settings folder. Your edits to these copies stay.
 - **Mesh check.** Size, volume, triangles and open edges. Back faces show in purple.
 - **CLI.** Batch export, slice and photo without the window.
@@ -183,6 +183,7 @@ module part(name, col) {
 ```
 
 - CoCAD renders each part in a separate OpenSCAD run. A model with N parts takes N renders.
+- The 3D view shows each part in its color. When `cocad_part` is `all`, CoCAD renders the parts in the background after the main render. Until they are done, the model is orange. Shapes that are in no part, for example hardware previews, stay orange.
 - The list order sets the filament number. `echo(cocad_color = ...)` sets the color: a `#RRGGBB` value or a common color name.
 - `import()` ignores SVG fill colors. Use one SVG file for each color. See `examples/multicolor-badge.scad`.
 - Parts must not overlap. Cut a pocket in one part for the other part.

@@ -180,7 +180,20 @@ struct RenderJob {
     rx: Receiver<Result<openscad::RenderOutput, String>>,
     cancel: Arc<AtomicBool>,
     started: Instant,
+    /// The parameter values of this render.
+    params: Vec<Param>,
 }
+
+/// Background render of each part, to color the 3D view.
+struct PartsJob {
+    rx: Receiver<Result<Vec<crate::parts::Part>, String>>,
+    cancel: Arc<AtomicBool>,
+    /// The mesh revision that the parts color.
+    mesh_rev: u64,
+}
+
+/// Part color of each triangle of the shown mesh.
+type FaceColors = Arc<Vec<Option<[u8; 3]>>>;
 
 struct MeshInfo {
     bounds: Bounds,
@@ -202,6 +215,9 @@ pub struct App {
 
     mesh: Option<Arc<Mesh>>,
     mesh_rev: u64,
+    face_colors: Option<FaceColors>,
+    color_rev: u64,
+    parts_job: Option<PartsJob>,
     info: Option<MeshInfo>,
     fit_pending: bool,
 
@@ -336,6 +352,9 @@ impl App {
             last_time: None,
             mesh: None,
             mesh_rev: 0,
+            face_colors: None,
+            color_rev: 0,
+            parts_job: None,
             info: None,
             fit_pending: true,
             mode: start_mode,
@@ -431,6 +450,7 @@ impl App {
                 self.info = None;
                 self.sliced = None;
                 self.mesh_rev += 1;
+                self.clear_colors();
                 self.slice_rev += 1;
                 self.fit_pending = true;
                 self.error = None;
@@ -509,6 +529,9 @@ impl App {
         if let Some(j) = self.job.take() {
             j.cancel.store(true, Ordering::Relaxed);
         }
+        if let Some(j) = self.parts_job.take() {
+            j.cancel.store(true, Ordering::Relaxed);
+        }
         self.dirty_since = None;
         let defines = params::defines(&self.params);
         let cancel = Arc::new(AtomicBool::new(false));
@@ -529,6 +552,47 @@ impl App {
             rx,
             cancel,
             started: Instant::now(),
+            params: self.params.clone(),
+        });
+    }
+
+    fn clear_colors(&mut self) {
+        if let Some(j) = self.parts_job.take() {
+            j.cancel.store(true, Ordering::Relaxed);
+        }
+        self.face_colors = None;
+        self.color_rev += 1;
+    }
+
+    /// Colors the new mesh by part. One shown part takes its color at once.
+    /// With all parts shown, each part renders in the background first.
+    fn color_parts(&mut self, params: Vec<Param>, log: &str) {
+        self.clear_colors();
+        let Some(mesh) = &self.mesh else {
+            return;
+        };
+        if let Some(c) = crate::parts::shown_color(&params, log) {
+            self.face_colors = Some(Arc::new(vec![Some(c); mesh.triangles.len()]));
+            return;
+        }
+        let Some(file) = self
+            .file
+            .clone()
+            .filter(|_| crate::parts::needs_render(&params))
+        else {
+            return;
+        };
+        let cancel = Arc::new(AtomicBool::new(false));
+        let (tx, rx) = channel();
+        let (c, cfg) = (cancel.clone(), self.cfg.clone());
+        std::thread::spawn(move || {
+            let r = crate::parts::render(&cfg, &file, &params, &c).map_err(|e| e.to_string());
+            let _ = tx.send(r);
+        });
+        self.parts_job = Some(PartsJob {
+            rx,
+            cancel,
+            mesh_rev: self.mesh_rev,
         });
     }
 
@@ -553,7 +617,7 @@ impl App {
         if let Some(job) = &self.job
             && let Ok(r) = job.rx.try_recv()
         {
-            self.job = None;
+            let params = self.job.take().map(|j| j.params).unwrap_or_default();
             match r {
                 Ok(out) => {
                     let m = out.mesh;
@@ -564,6 +628,7 @@ impl App {
                     });
                     self.mesh = Some(Arc::new(m));
                     self.mesh_rev += 1;
+                    self.color_parts(params, &out.log);
                     self.log = out.log;
                     self.last_time = Some(out.elapsed);
                     self.error = None;
@@ -580,6 +645,20 @@ impl App {
                     self.log = e.clone();
                     self.error = Some(e.lines().next().unwrap_or("").to_string());
                 }
+            }
+        }
+        if let Some(job) = &self.parts_job
+            && let Ok(r) = job.rx.try_recv()
+        {
+            let rev = job.mesh_rev;
+            self.parts_job = None;
+            // A failed part render keeps the plain view. The export shows the error.
+            if let (Ok(parts), Some(mesh)) = (r, &self.mesh)
+                && rev == self.mesh_rev
+            {
+                self.face_colors = Some(Arc::new(crate::parts::face_colors(mesh, &parts)));
+                self.color_rev += 1;
+                ctx.request_repaint();
             }
         }
         if let Some(rx) = &self.slice_job
@@ -641,6 +720,7 @@ impl App {
         self.run_commands();
         if self.job.is_some()
             || self.slice_job.is_some()
+            || self.parts_job.is_some()
             || self.export_rx.is_some()
             || !self.pending.is_empty()
         {
@@ -2210,7 +2290,8 @@ impl App {
                 grid: self.grid,
                 layer: slicing.then_some(self.layer),
             };
-            let (mesh, mesh_rev) = (self.mesh.clone(), self.mesh_rev);
+            let (mesh, mesh_rev) = (self.mesh.clone(), (self.mesh_rev, self.color_rev));
+            let colors = self.face_colors.clone();
             let (sliced, slice_rev) = (self.sliced.clone(), self.slice_rev);
             let bounds = self.info.as_ref().map(|i| i.bounds);
             let dark = ui::is_dark();
@@ -2220,7 +2301,12 @@ impl App {
                 callback: Arc::new(eframe::egui_glow::CallbackFn::new(move |_info, painter| {
                     let gl = painter.gl();
                     let mut r = r.lock().unwrap();
-                    r.set_mesh(gl, mesh.as_deref(), mesh_rev);
+                    r.set_mesh(
+                        gl,
+                        mesh.as_deref(),
+                        colors.as_deref().map(|c| &c[..]),
+                        mesh_rev,
+                    );
                     r.set_slice(gl, sliced.as_deref(), slice_rev);
                     let b = bounds.unwrap_or(Bounds {
                         min: Vec3::splat(-50.0),
@@ -2948,6 +3034,9 @@ impl eframe::App for App {
 
     fn on_exit(&mut self, gl: Option<&eframe::glow::Context>) {
         if let Some(j) = &self.job {
+            j.cancel.store(true, Ordering::Relaxed);
+        }
+        if let Some(j) = &self.parts_job {
             j.cancel.store(true, Ordering::Relaxed);
         }
         if let (Some(gl), Some(r)) = (gl, &self.renderer) {
