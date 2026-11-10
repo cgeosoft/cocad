@@ -4,7 +4,7 @@
 use crate::mesh::Mesh;
 use glam::Vec3;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Studio {
@@ -103,7 +103,7 @@ impl Job {
         let cancel = Arc::new(AtomicBool::new(false));
         let (f, c) = (frame.clone(), cancel.clone());
         std::thread::spawn(move || {
-            let scene = Scene::new(&mesh, look);
+            let scene = Scene::cached(&mesh, look);
             let mut accum = vec![Vec3::ZERO; width * height];
             for pass in 0..max_samples {
                 if c.load(Ordering::Relaxed) {
@@ -213,12 +213,17 @@ struct Node {
     count: u32,
 }
 
-struct Scene {
+/// The part of a scene that depends only on the mesh. It is slow to build.
+struct Geometry {
     tris: Vec<Tri>,
     nodes: Vec<Node>,
     floor: f32,
     center: Vec3,
     radius: f32,
+}
+
+struct Scene {
+    geo: Arc<Geometry>,
     look: Look,
     key_dir: Vec3,
     key_cos: f32,
@@ -227,8 +232,40 @@ struct Scene {
 
 const EPS: f32 = 1e-4;
 
-impl Scene {
-    fn new(mesh: &Mesh, look: Look) -> Scene {
+impl std::ops::Deref for Scene {
+    type Target = Geometry;
+    fn deref(&self) -> &Geometry {
+        &self.geo
+    }
+}
+
+/// The geometry of the mesh that was traced last. A new render of the same
+/// mesh (camera or look change) uses it again.
+type Slot = Mutex<Option<(Weak<Mesh>, Arc<Geometry>)>>;
+static LAST: Slot = Mutex::new(None);
+
+impl Geometry {
+    /// The lock stays held during the build. A second render of the same mesh
+    /// then waits for the first build and does not start its own.
+    fn cached(mesh: &Arc<Mesh>) -> Arc<Geometry> {
+        Geometry::cached_in(&LAST, mesh)
+    }
+
+    fn cached_in(slot: &Slot, mesh: &Arc<Mesh>) -> Arc<Geometry> {
+        let mut last = slot.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((m, geo)) = last.as_ref()
+            && std::ptr::eq(m.as_ptr(), Arc::as_ptr(mesh))
+        {
+            return geo.clone();
+        }
+        // Release the old geometry before the build, to keep peak memory low.
+        *last = None;
+        let geo = Arc::new(Geometry::new(mesh));
+        *last = Some((Arc::downgrade(mesh), geo.clone()));
+        geo
+    }
+
+    fn new(mesh: &Mesh) -> Geometry {
         let b = mesh.bounds().expect("empty mesh");
         let face_n = robust_normals(mesh);
         let mut vert_faces: Vec<Vec<u32>> = vec![Vec::new(); mesh.vertices.len()];
@@ -282,7 +319,27 @@ impl Scene {
             count: 0,
         });
         build(&mut tris, &mut nodes, 0, 0, n);
+        Geometry {
+            tris,
+            nodes,
+            floor: b.min.z - 1e-3,
+            center: b.center(),
+            radius: (b.size().length() * 0.5).max(1.0),
+        }
+    }
+}
 
+impl Scene {
+    #[cfg(test)]
+    fn new(mesh: &Mesh, look: Look) -> Scene {
+        Scene::with(Arc::new(Geometry::new(mesh)), look)
+    }
+
+    fn cached(mesh: &Arc<Mesh>, look: Look) -> Scene {
+        Scene::with(Geometry::cached(mesh), look)
+    }
+
+    fn with(geo: Arc<Geometry>, look: Look) -> Scene {
         let key_dir = Vec3::new(0.45, -0.55, 0.85).normalize();
         let key_cos = 8f32.to_radians().cos();
         let solid_angle = 2.0 * std::f32::consts::PI * (1.0 - key_cos);
@@ -291,11 +348,7 @@ impl Scene {
             Studio::Light => 1.6,
         };
         Scene {
-            tris,
-            nodes,
-            floor: b.min.z - 1e-3,
-            center: b.center(),
-            radius: (b.size().length() * 0.5).max(1.0),
+            geo,
             look,
             key_dir,
             key_cos,
@@ -819,5 +872,17 @@ mod tests {
         // The centre pixel sees the orange cube: red > blue.
         let c = (24 * 64 + 32) * 4;
         assert!(f.rgba[c] > f.rgba[c + 2], "{:?}", &f.rgba[c..c + 4]);
+    }
+
+    #[test]
+    fn geometry_is_reused_for_the_same_mesh() {
+        let a = Arc::new(cube(10.0));
+        let b = Arc::new(cube(10.0));
+        let slot: Slot = Mutex::new(None);
+        let g1 = Geometry::cached_in(&slot, &a);
+        assert!(Arc::ptr_eq(&g1, &Geometry::cached_in(&slot, &a)));
+        let g3 = Geometry::cached_in(&slot, &b);
+        assert!(!Arc::ptr_eq(&g1, &g3));
+        assert!(!Arc::ptr_eq(&g1, &Geometry::cached_in(&slot, &a)));
     }
 }
