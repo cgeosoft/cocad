@@ -1,4 +1,5 @@
 //! Recently opened models: one path per line in `<config>/recent`, newest first.
+//! The last export folder: one path in `<config>/export_dir`.
 
 use std::path::{Path, PathBuf};
 
@@ -45,6 +46,28 @@ pub fn add(path: &Path) -> Vec<PathBuf> {
 
 pub fn clear() {
     save(&[]);
+}
+
+fn export_file() -> Option<PathBuf> {
+    Some(crate::openscad::config_dir()?.join("export_dir"))
+}
+
+/// The folder of the last export, when it still exists.
+pub fn export_dir() -> Option<PathBuf> {
+    let text = std::fs::read_to_string(export_file()?).ok()?;
+    let dir = PathBuf::from(text.trim_end_matches(['\r', '\n']));
+    dir.is_dir().then_some(dir)
+}
+
+/// Records the folder of `path`, the file that was exported.
+pub fn set_export_dir(path: &Path) {
+    let (Some(file), Some(dir)) = (export_file(), path.parent()) else {
+        return;
+    };
+    if let Some(parent) = file.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::write(file, dir.display().to_string() + "\n");
 }
 
 #[cfg(test)]

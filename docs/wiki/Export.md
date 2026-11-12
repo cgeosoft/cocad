@@ -8,7 +8,7 @@ Export writes the model to a file that other programs can read: a slicer for you
 
 1. Open the **Model** tab on the right.
 2. In the **Export** card, click **STL**, **3MF** or **STEP**.
-3. Select a place and a name for the file.
+3. Select a place and a name for the file. The proposed name is the model name. When a parameter set is active, the set name is added, for example `box-big.stl`. The dialog opens in the folder of your last export. Before your first export, it opens in the folder of the model.
 
 The **Model** menu has the same commands.
 

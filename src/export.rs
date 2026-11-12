@@ -690,14 +690,47 @@ GLOBAL_UNIT_ASSIGNED_CONTEXT((#10,#11,#12))REPRESENTATION_CONTEXT('',''));\n\
     s
 }
 
-pub fn suggested_name(stem: &str, fmt: Format) -> String {
-    format!("{stem}.{}", fmt.ext())
+/// File name for the save dialog: `stem.ext`, or `stem-set.ext` when a
+/// parameter set is active. Characters that file systems reject become `_`.
+pub fn suggested_name(stem: &str, set: Option<&str>, fmt: Format) -> String {
+    let set = set
+        .map(|s| {
+            s.trim()
+                .chars()
+                .map(|c| {
+                    if c.is_control() || r#"<>:"/\|?*"#.contains(c) {
+                        '_'
+                    } else {
+                        c
+                    }
+                })
+                .collect::<String>()
+        })
+        .filter(|s| !s.is_empty());
+    match set {
+        Some(set) => format!("{stem}-{set}.{}", fmt.ext()),
+        None => format!("{stem}.{}", fmt.ext()),
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::mesh::cube;
+
+    #[test]
+    fn suggested_name_adds_the_set() {
+        assert_eq!(suggested_name("box", None, Format::Stl), "box.stl");
+        assert_eq!(
+            suggested_name("box", Some("big"), Format::ThreeMf),
+            "box-big.3mf"
+        );
+        assert_eq!(
+            suggested_name("box", Some("a/b: c"), Format::Stl),
+            "box-a_b_ c.stl"
+        );
+        assert_eq!(suggested_name("box", Some("  "), Format::Stl), "box.stl");
+    }
 
     #[test]
     fn cube_step_has_six_faces() {

@@ -9,7 +9,7 @@ The **Photo** tab makes a picture of the part that looks like a studio photo, wi
 1. Click the **Photo** tab on the right, or press `P`.
 2. Turn and move the view until you like it. The view dims the area outside the image frame, so you see what the photo will show.
 3. Let the view rest. The render starts. The image gets cleaner with time.
-4. Click **Save PNG**.
+4. Click **Save PNG**. The dialog opens in the folder of your last export.
 
 When you move the view or change a setting, the render starts again.
 

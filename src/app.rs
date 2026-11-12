@@ -957,19 +957,30 @@ impl App {
             .unwrap_or_else(|| "model".into())
     }
 
+    /// Start folder of the export and photo dialogs: the folder of the last
+    /// export, else the folder of the model.
+    fn export_dir(&self) -> Option<PathBuf> {
+        recent::export_dir().or_else(|| self.file.as_ref()?.parent().map(PathBuf::from))
+    }
+
     fn export(&mut self, fmt: Format) {
         let Some(mesh) = self.mesh.clone() else {
             return;
         };
         let mut dialog = rfd::FileDialog::new()
-            .set_file_name(export::suggested_name(&self.stem(), fmt))
+            .set_file_name(export::suggested_name(
+                &self.stem(),
+                self.active_set.as_deref(),
+                fmt,
+            ))
             .add_filter(fmt.label(), &[fmt.ext()]);
-        if let Some(dir) = self.file.as_ref().and_then(|f| f.parent()) {
+        if let Some(dir) = self.export_dir() {
             dialog = dialog.set_directory(dir);
         }
         let Some(path) = dialog.save_file() else {
             return;
         };
+        recent::set_export_dir(&path);
         let meta = Meta {
             title: self.stem(),
             params: self
@@ -995,14 +1006,19 @@ impl App {
             return;
         };
         let mut dialog = rfd::FileDialog::new()
-            .set_file_name(export::suggested_name(&self.stem(), Format::ThreeMf))
+            .set_file_name(export::suggested_name(
+                &self.stem(),
+                self.active_set.as_deref(),
+                Format::ThreeMf,
+            ))
             .add_filter(slicer.label(), &["3mf"]);
-        if let Some(dir) = file.parent() {
+        if let Some(dir) = self.export_dir() {
             dialog = dialog.set_directory(dir);
         }
         let Some(path) = dialog.save_file() else {
             return;
         };
+        recent::set_export_dir(&path);
         let meta = Meta {
             title: self.stem(),
             params: self
@@ -2286,10 +2302,11 @@ impl App {
         let mut d = rfd::FileDialog::new()
             .add_filter("PNG image", &["png"])
             .set_file_name(format!("{}-photo.png", self.stem()));
-        if let Some(dir) = self.file.as_ref().and_then(|f| f.parent()) {
+        if let Some(dir) = self.export_dir() {
             d = d.set_directory(dir);
         }
         let Some(path) = d.save_file() else { return };
+        recent::set_export_dir(&path);
         let f = job.frame.lock().unwrap();
         let msg = match pathtrace::save_png(&path, &f) {
             Ok(()) => {
