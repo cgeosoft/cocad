@@ -1,14 +1,17 @@
 /**
  * Small WebGL2 model viewer. No library.
  * Reads the meshes that scripts/website-assets.py writes and draws them in
- * three modes: solid (flat shaded, like the app), wire and slice (layer
- * outlines, cut from the mesh in this browser).
+ * three modes: solid (smooth shaded, with sharp edges kept), wire and slice (layer
+ * bands in the shader, and the outline of the current layer, cut from the
+ * mesh in this browser).
  */
 (function () {
   "use strict";
 
   const LAYER_HEIGHT = 0.2;
   const ORANGE = [1, 0.576, 0];
+  // Cosine of the largest angle between two faces that shade as one surface.
+  const CREASE = Math.cos((60 * Math.PI) / 180);
   const VIEWS = {
     iso: [-0.9, 0.55],
     top: [-Math.PI / 2, 1.55],
@@ -45,7 +48,53 @@
       positions[i] = low[i % 3] + (packed[i] / 65535) * size[i % 3];
     }
     const index = new Uint16Array(buffer, 32 + vertexCount * 6, indexCount);
-    return { positions, index, low, size, edges: null, layers: null };
+    return { positions, index, low, size, edges: null, layers: null, shaded: null };
+  }
+
+  /**
+   * Makes one position and one normal for each triangle corner. A corner normal
+   * is the mean of the adjacent faces that are less than CREASE away from its
+   * face. Thus curved surfaces shade smooth and sharp edges stay sharp. Flat
+   * shading shows each long triangle of a twisted surface as a dark wedge.
+   */
+  function shadedCorners(mesh) {
+    if (mesh.shaded) return mesh.shaded;
+    const { positions: p, index } = mesh;
+    const faces = index.length / 3;
+    const fn = new Float32Array(faces * 3);
+    const count = new Uint32Array(p.length / 3 + 1);
+    for (let f = 0; f < faces; f++) {
+      const a = index[f * 3] * 3, b = index[f * 3 + 1] * 3, c = index[f * 3 + 2] * 3;
+      const ux = p[b] - p[a], uy = p[b + 1] - p[a + 1], uz = p[b + 2] - p[a + 2];
+      const vx = p[c] - p[a], vy = p[c + 1] - p[a + 1], vz = p[c + 2] - p[a + 2];
+      // The length is two times the area, so large faces count more.
+      fn[f * 3] = uy * vz - uz * vy;
+      fn[f * 3 + 1] = uz * vx - ux * vz;
+      fn[f * 3 + 2] = ux * vy - uy * vx;
+      count[index[f * 3] + 1]++; count[index[f * 3 + 1] + 1]++; count[index[f * 3 + 2] + 1]++;
+    }
+    for (let v = 1; v < count.length; v++) count[v] += count[v - 1];
+    const fill = count.slice(0, -1);
+    const around = new Uint32Array(index.length);
+    for (let i = 0; i < index.length; i++) around[fill[index[i]]++] = (i / 3) | 0;
+    const data = new Float32Array(index.length * 6);
+    for (let i = 0; i < index.length; i++) {
+      const v = index[i], f = ((i / 3) | 0) * 3;
+      const fx = fn[f], fy = fn[f + 1], fz = fn[f + 2];
+      const fl = Math.hypot(fx, fy, fz);
+      let nx = 0, ny = 0, nz = 0;
+      for (let k = count[v]; k < count[v + 1]; k++) {
+        const g = around[k] * 3;
+        const gl2 = Math.hypot(fn[g], fn[g + 1], fn[g + 2]);
+        if (fx * fn[g] + fy * fn[g + 1] + fz * fn[g + 2] >= CREASE * fl * gl2) {
+          nx += fn[g]; ny += fn[g + 1]; nz += fn[g + 2];
+        }
+      }
+      const l = Math.hypot(nx, ny, nz) || 1;
+      data.set([p[v * 3], p[v * 3 + 1], p[v * 3 + 2], nx / l, ny / l, nz / l], i * 6);
+    }
+    mesh.shaded = data;
+    return data;
   }
 
   function wireEdges(mesh) {
@@ -146,24 +195,34 @@
 
   const SOLID_VS = `#version 300 es
     uniform mat4 uVP;
-    in vec3 aPos;
-    out vec3 vPos;
-    void main() { vPos = aPos; gl_Position = uVP * vec4(aPos, 1.0); }`;
+    in vec3 aPos; in vec3 aNormal;
+    out vec3 vPos; out vec3 vNormal;
+    void main() { vPos = aPos; vNormal = aNormal; gl_Position = uVP * vec4(aPos, 1.0); }`;
 
   const SOLID_FS = `#version 300 es
     precision highp float;
     uniform vec3 uEye; uniform vec3 uColor; uniform float uClip;
-    in vec3 vPos;
+    uniform vec2 uLayer;
+    in vec3 vPos; in vec3 vNormal;
     out vec4 color;
     void main() {
       if (vPos.z > uClip) discard;
-      vec3 n = normalize(cross(dFdx(vPos), dFdy(vPos)));
+      vec3 n = normalize(vNormal);
       vec3 v = normalize(uEye - vPos);
       if (dot(n, v) < 0.0) n = -n;
       vec3 key = normalize(v + vec3(0.35, -0.2, 0.75));
       float d = max(dot(n, key), 0.0);
       float s = pow(max(dot(n, normalize(key + v)), 0.0), 40.0);
-      color = vec4(uColor * (0.28 + 0.72 * d) + vec3(0.14) * s, 1.0);
+      float band = 1.0;
+      if (uLayer.y > 0.0) {
+        // One bead for each layer. The bands fade to their mean value when a
+        // layer is smaller than a pixel, so the surface has no gaps or moire.
+        float t = (vPos.z - uLayer.x) / uLayer.y;
+        float bead = 0.5 - 0.5 * cos(6.2832 * t);
+        band = mix(0.66 + 0.34 * bead, 0.83, smoothstep(0.3, 0.8, fwidth(t)));
+        band = mix(band, 0.83, n.z * n.z);
+      }
+      color = vec4(uColor * (0.28 + 0.72 * d) * band + vec3(0.14) * s, 1.0);
     }`;
 
   const LINE_VS = `#version 300 es
@@ -318,7 +377,10 @@
       const ib = gl.createBuffer();
       gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ib);
       gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, mesh.index, gl.STATIC_DRAW);
-      this.buffers = { vb, ib, grid: this.makeGrid(mesh) };
+      const sb = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, sb);
+      gl.bufferData(gl.ARRAY_BUFFER, shadedCorners(mesh), gl.STATIC_DRAW);
+      this.buffers = { vb, ib, sb, grid: this.makeGrid(mesh) };
       this.centerGoal = [0, 1, 2].map((k) => mesh.low[k] + mesh.size[k] / 2);
       this.fit();
       if (snap) { this.dist = this.distGoal; this.center = this.centerGoal.slice(); }
@@ -494,18 +556,21 @@
       gl.useProgram(s.p);
       gl.uniformMatrix4fv(s.u.uVP, false, vp);
       gl.uniform3fv(s.u.uEye, eye);
-      const colors = { wire: [0.12, 0.13, 0.15], slice: [0.42, 0.25, 0.04], solid: ORANGE };
-      gl.uniform3fv(s.u.uColor, colors[this.mode]);
+      const slice = this.mode === "slice";
+      gl.uniform3fv(s.u.uColor, this.mode === "wire" ? [0.12, 0.13, 0.15] : ORANGE);
+      gl.uniform2f(s.u.uLayer, m.low[2], slice ? LAYER_HEIGHT : 0);
       const reveal = this.clip < 1 ? m.low[2] + m.size[2] * this.clip : m.low[2] + m.size[2] + 1;
-      gl.uniform1f(s.u.uClip, this.mode === "slice" ? this.ghost : reveal);
-      gl.bindBuffer(gl.ARRAY_BUFFER, this.buffers.vb);
+      gl.uniform1f(s.u.uClip, slice ? this.printed : reveal);
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.buffers.sb);
       gl.enableVertexAttribArray(s.aPos);
-      gl.vertexAttribPointer(s.aPos, 3, gl.FLOAT, false, 0, 0);
-      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.buffers.ib);
+      gl.vertexAttribPointer(s.aPos, 3, gl.FLOAT, false, 24, 0);
+      gl.enableVertexAttribArray(s.aNormal);
+      gl.vertexAttribPointer(s.aNormal, 3, gl.FLOAT, false, 24, 12);
       gl.enable(gl.POLYGON_OFFSET_FILL);
       gl.polygonOffset(1, 1);
-      gl.drawElements(gl.TRIANGLES, m.index.length, gl.UNSIGNED_SHORT, 0);
+      gl.drawArrays(gl.TRIANGLES, 0, m.index.length);
       gl.disable(gl.POLYGON_OFFSET_FILL);
+      gl.disableVertexAttribArray(s.aNormal);
     }
 
     drawWire(vp, eye) {
@@ -527,8 +592,9 @@
       const gl = this.gl, l = this.line;
       const { offsets, count } = this.layers;
       const top = Math.round(this.layer * (count - 1));
-      // The printed part up to this layer, dim, so flat faces do not look empty.
-      this.ghost = this.mesh.low[2] + (top + 1) * LAYER_HEIGHT;
+      // The printed part up to this layer. The shader draws the layer bands,
+      // because 1 px lines leave gaps when the layers are far apart on screen.
+      this.printed = this.mesh.low[2] + (top + 1) * LAYER_HEIGHT;
       this.drawSolid(vp, eye);
       gl.useProgram(l.p);
       gl.uniformMatrix4fv(l.u.uVP, false, vp);
@@ -538,9 +604,7 @@
       gl.vertexAttribPointer(l.aPos, 3, gl.FLOAT, false, 24, 0);
       gl.enableVertexAttribArray(l.aNormal);
       gl.vertexAttribPointer(l.aNormal, 3, gl.FLOAT, false, 24, 12);
-      gl.uniform4f(l.u.uColor, ORANGE[0], ORANGE[1], ORANGE[2], 1);
-      gl.drawArrays(gl.LINES, 0, offsets[top]);
-      // The current layer, drawn over the stack.
+      // The outline of the current layer, drawn over the printed part.
       gl.disable(gl.DEPTH_TEST);
       gl.uniform4f(l.u.uColor, 1.5, 1.5, 1.4, 1);
       gl.drawArrays(gl.LINES, offsets[top], offsets[top + 1] - offsets[top]);

@@ -14,7 +14,7 @@ The look follows the Portfolio website (`portfolio/extras/website`). The colors 
 | `public/analytics.js` | Consent box, consent record and PostHog. The key comes from `deploy.sh` |
 | `test/analytics.test.js` | Consent and allowlist tests |
 | `public/script.js` | OS detection, download links, scroll reveal, screenshot tabs, lightbox |
-| `public/viewer.js` | WebGL2 viewer: solid, wire and slice modes |
+| `public/viewer.js` | WebGL2 viewer: solid, wire and slice modes, with smooth shading |
 | `public/demo.js` | Hero loop and the agent demo |
 | `public/assets/mesh/` | Generated. Example meshes and `models.json` |
 | `public/assets/img/` | Generated. WebP copies of `images/` |
@@ -35,7 +35,7 @@ scripts/website-assets.py
 
 Change the prebuilt parameter values in `MODELS` in that script. The prompts of the agent demo are in `PROMPTS` in `public/demo.js`. Each prompt must name values that `MODELS` has.
 
-The chat text is scripted. The tool names and the numbers are real. The page draws layer outlines from the mesh. The app draws walls, infill and skin.
+The chat text is scripted. The tool names and the numbers are real. The page draws the layers on the model surface, and the outline of the current layer. The app draws walls, infill and skin.
 
 ## Behavior
 
