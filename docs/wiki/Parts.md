@@ -25,6 +25,8 @@ The [photo](Photo-render) also uses the part colors when **Part colors** is on.
 
 Click a part in the 3D view to select it. The part shows brighter, with an orange edge. The **Parts** card shows its name, size and volume.
 
+When a part is selected, the view buttons (**Iso**, **Top**, **Front**, **Right**) turn the view around the center of that part. The distance stays. It increases only when the part does not fit.
+
 To clear the selection, click the background or press Esc.
 
 ## Focus on a part

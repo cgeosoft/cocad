@@ -179,6 +179,14 @@ impl Camera {
         self.dist = r / (Self::FOV * 0.5).sin() * 1.1;
     }
 
+    /// Turns around the center of `b`. The distance stays when it is
+    /// sufficient to see all of `b`.
+    fn pivot_on(&mut self, b: &Bounds) {
+        let dist = self.dist;
+        self.fit(b);
+        self.dist = self.dist.max(dist);
+    }
+
     fn pan(&mut self, d: Vec2, height_px: f32) {
         let eye = self.eye();
         let fwd = (self.target - eye).normalize();
@@ -925,10 +933,20 @@ impl App {
         }
     }
 
+    /// Turns the camera to a standard view. While a part has the focus,
+    /// fits that part. Else, with a selected part, the camera turns around
+    /// the center of that part and the distance stays (it goes up only
+    /// when the part is too large for it). Else it fits the model.
     fn set_view(&mut self, yaw: f32, pitch: f32) {
         self.cam.yaw = yaw;
         self.cam.pitch = pitch;
-        self.fit();
+        if self.focus_bounds().is_some() {
+            self.fit();
+        } else if let Some(b) = self.pivot_bounds() {
+            self.cam.pivot_on(&b);
+        } else {
+            self.fit();
+        }
     }
 
     fn stem(&self) -> String {

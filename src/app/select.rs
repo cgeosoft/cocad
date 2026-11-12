@@ -176,8 +176,20 @@ impl App {
 
     /// The bounds of the part in focus, with its offset.
     pub(super) fn focus_bounds(&self) -> Option<Bounds> {
+        self.part_bounds(self.view3d.sel.focus.as_deref())
+    }
+
+    /// The bounds of the part that a view change turns around: the part in
+    /// focus, else the selected part. With its offset.
+    pub(super) fn pivot_bounds(&self) -> Option<Bounds> {
+        self.focus_bounds()
+            .or_else(|| self.part_bounds(self.view3d.sel.part.as_deref()))
+    }
+
+    /// The bounds of the part with this name, with its offset.
+    fn part_bounds(&self, name: Option<&str>) -> Option<Bounds> {
         let a = self.assembly.as_ref()?;
-        let i = find(&a.parts, self.view3d.sel.focus.as_deref())?;
+        let i = find(&a.parts, name)?;
         let offset = self.part_styles().get(i).map_or(Vec3::ZERO, |s| s.offset);
         let b = a.parts[i].bounds;
         Some(Bounds {
@@ -536,5 +548,30 @@ mod tests {
             max: b.max + Vec3::new(500.0, 0.0, 0.0),
         };
         assert!(!cam.sees(&side, aspect));
+    }
+
+    #[test]
+    fn pivot_on_turns_around_the_part() {
+        let mut cam = Camera {
+            yaw: 0.3,
+            pitch: 0.4,
+            dist: 300.0,
+            target: Vec3::ZERO,
+        };
+        let small = Bounds {
+            min: Vec3::new(40.0, 10.0, 0.0),
+            max: Vec3::new(50.0, 20.0, 10.0),
+        };
+        cam.pivot_on(&small);
+        assert_eq!(cam.target, small.center());
+        assert_eq!(cam.dist, 300.0);
+        // A part that is too large for the distance: the distance goes up.
+        let large = Bounds {
+            min: Vec3::splat(-500.0),
+            max: Vec3::splat(500.0),
+        };
+        cam.pivot_on(&large);
+        assert_eq!(cam.target, large.center());
+        assert!(cam.dist > 300.0);
     }
 }
