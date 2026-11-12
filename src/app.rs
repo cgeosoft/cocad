@@ -1615,9 +1615,16 @@ impl App {
                     None => "Model defaults".into(),
                 };
                 let mut pick: Option<Option<String>> = None;
+                // Show 4.5 rows. The half row tells the user that the list scrolls.
+                let sp = ui.spacing();
+                let row = (ui.text_style_height(&egui::TextStyle::Button)
+                    + 2.0 * sp.button_padding.y)
+                    .max(sp.interact_size.y);
+                let list_height = 4.0 * (row + sp.item_spacing.y) + 0.5 * row;
                 egui::ComboBox::from_id_salt("sets")
                     .selected_text(label)
                     .width(ui.available_width())
+                    .height(list_height)
                     .show_ui(ui, |ui| {
                         if ui
                             .selectable_label(self.active_set.is_none(), "Model defaults")
