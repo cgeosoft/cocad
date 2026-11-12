@@ -111,18 +111,6 @@ impl Mesh {
         }
         count.values().filter(|&&n| n != 2).count()
     }
-
-    /// Unique edges, for the wireframe overlay.
-    pub fn edges(&self) -> Vec<(u32, u32)> {
-        let mut seen = std::collections::HashSet::new();
-        for t in &self.triangles {
-            for k in 0..3 {
-                let (a, b) = (t[k], t[(k + 1) % 3]);
-                seen.insert((a.min(b), a.max(b)));
-            }
-        }
-        seen.into_iter().collect()
-    }
 }
 
 /// Reads binary or ASCII STL.

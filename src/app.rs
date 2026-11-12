@@ -1,5 +1,6 @@
 //! The egui application: parameter panel, 3D view, export and slice preview.
 
+use crate::assembly::Assembly;
 use crate::examples;
 use crate::export::{self, Format, Meta, Slicer};
 use crate::mesh::{Bounds, Mesh};
@@ -22,7 +23,10 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
 mod remote;
+mod section;
+mod select;
 mod tour;
+mod view3d;
 
 const DEBOUNCE: Duration = Duration::from_millis(350);
 
@@ -68,7 +72,7 @@ const VIEWS: [(&str, f32, f32); 4] = [
 
 const REPO: &str = "https://github.com/cgeosoft/cocad";
 
-const SHORTCUTS: [(&str, &str); 12] = [
+const SHORTCUTS: [(&str, &str); 16] = [
     ("Ctrl+O", "Open a file"),
     ("Ctrl+,", "Settings"),
     ("Ctrl+Q", "Quit"),
@@ -76,11 +80,15 @@ const SHORTCUTS: [(&str, &str); 12] = [
     ("F5", "Render now"),
     ("F, double click", "Fit the model"),
     ("W", "Wireframe"),
+    ("E", "Explode the parts"),
     ("S", "Model or Slice tab"),
     ("P", "Model or Photo tab"),
     ("Up, Down, PgUp, PgDn", "Change the slice layer"),
     ("Left drag", "Orbit"),
     ("Right drag, Shift + left drag", "Pan"),
+    ("Click", "Select a part"),
+    ("Right click", "Part menu: focus, color"),
+    ("Esc", "Clear the selection and the focus"),
 ];
 
 /// What a photo render depends on. A change restarts the render.
@@ -89,6 +97,8 @@ struct PhotoKey {
     cam: pathtrace::Camera,
     look: pathtrace::Look,
     mesh_rev: u64,
+    /// Part colors and part moves (`App::photo_model_key`).
+    model: u64,
     size: (usize, usize),
     samples: u32,
 }
@@ -176,29 +186,49 @@ impl Camera {
     }
 }
 
+/// The result of a render job.
+struct Rendered {
+    mesh: Arc<Mesh>,
+    info: Option<MeshInfo>,
+    /// The shells of the mesh.
+    assembly: Assembly,
+    log: String,
+    elapsed: Duration,
+}
+
 struct RenderJob {
-    rx: Receiver<Result<openscad::RenderOutput, String>>,
+    rx: Receiver<Result<Rendered, String>>,
     cancel: Arc<AtomicBool>,
     started: Instant,
     /// The parameter values of this render.
     params: Vec<Param>,
 }
 
-/// Background render of each part, to color the 3D view.
+/// Background render of each part, for the parts of the 3D view.
 struct PartsJob {
-    rx: Receiver<Result<Vec<crate::parts::Part>, String>>,
+    /// `None`: the model has no parts, and the shells of the mesh stay.
+    rx: Receiver<Result<Option<Assembly>, String>>,
     cancel: Arc<AtomicBool>,
-    /// The mesh revision that the parts color.
+    /// The mesh revision that the parts are for.
     mesh_rev: u64,
+    /// The Parts card shows this while the job runs.
+    note: &'static str,
 }
-
-/// Part color of each triangle of the shown mesh.
-type FaceColors = Arc<Vec<Option<[u8; 3]>>>;
 
 struct MeshInfo {
     bounds: Bounds,
     volume: f32,
     open_edges: usize,
+}
+
+impl MeshInfo {
+    fn of(m: &Mesh) -> Option<MeshInfo> {
+        m.bounds().map(|bounds| MeshInfo {
+            bounds,
+            volume: m.volume().abs(),
+            open_edges: m.open_edges(),
+        })
+    }
 }
 
 pub struct App {
@@ -215,9 +245,11 @@ pub struct App {
 
     mesh: Option<Arc<Mesh>>,
     mesh_rev: u64,
-    face_colors: Option<FaceColors>,
-    color_rev: u64,
+    /// The parts of the mesh for the 3D view and the photo.
+    assembly: Option<Arc<Assembly>>,
+    assembly_rev: u64,
     parts_job: Option<PartsJob>,
+    view3d: view3d::View3d,
     info: Option<MeshInfo>,
     fit_pending: bool,
 
@@ -354,9 +386,10 @@ impl App {
             last_time: None,
             mesh: None,
             mesh_rev: 0,
-            face_colors: None,
-            color_rev: 0,
+            assembly: None,
+            assembly_rev: 0,
             parts_job: None,
+            view3d: Default::default(),
             info: None,
             fit_pending: true,
             mode: start_mode,
@@ -453,7 +486,9 @@ impl App {
                 self.info = None;
                 self.sliced = None;
                 self.mesh_rev += 1;
-                self.clear_colors();
+                self.cancel_parts();
+                self.set_assembly(None);
+                self.view3d.new_model();
                 self.slice_rev += 1;
                 self.fit_pending = true;
                 self.error = None;
@@ -537,6 +572,7 @@ impl App {
         }
         self.dirty_since = None;
         let defines = params::defines(&self.params);
+        let params = self.params.clone();
         let cancel = Arc::new(AtomicBool::new(false));
         let (tx, rx) = channel();
         let c = cancel.clone();
@@ -549,6 +585,26 @@ impl App {
         };
         std::thread::spawn(move || {
             let r = openscad::render(&cfg, &file, &defines, &c).map_err(|e| e.to_string());
+            if c.load(Ordering::Relaxed) {
+                let _ = tx.send(Err("cancelled".into()));
+                return;
+            }
+            // The shells and the checks can take a moment for a large mesh.
+            let r = r.map(|out| {
+                let mesh = Arc::new(out.mesh);
+                let mut assembly = Assembly::shells(&mesh);
+                // One shown part of a multicolor model: all shells take its color.
+                if let Some(color) = crate::parts::shown_color(&params, &out.log) {
+                    assembly.paint_all(color);
+                }
+                Rendered {
+                    info: MeshInfo::of(&mesh),
+                    mesh,
+                    assembly,
+                    log: out.log,
+                    elapsed: out.elapsed,
+                }
+            });
             let _ = tx.send(r);
         });
         self.job = Some(RenderJob {
@@ -559,43 +615,75 @@ impl App {
         });
     }
 
-    fn clear_colors(&mut self) {
+    fn cancel_parts(&mut self) {
         if let Some(j) = self.parts_job.take() {
             j.cancel.store(true, Ordering::Relaxed);
         }
-        self.face_colors = None;
-        self.color_rev += 1;
     }
 
-    /// Colors the new mesh by part. One shown part takes its color at once.
-    /// With all parts shown, each part renders in the background first.
-    fn color_parts(&mut self, params: Vec<Param>, log: &str) {
-        self.clear_colors();
-        let Some(mesh) = &self.mesh else {
+    fn set_assembly(&mut self, assembly: Option<Assembly>) {
+        self.assembly = assembly.map(Arc::new);
+        self.assembly_rev += 1;
+        let parts = self.assembly.as_ref().and_then(|a| a.bounds(&[]));
+        self.view3d.section.set_bounds(parts);
+    }
+
+    /// Finds the parts of the new mesh in the background. The parts then
+    /// replace the shells of the mesh. With all parts of a multicolor model
+    /// shown, each part of the `cocad_part` list renders. A model without
+    /// that list divides at its module instances (see `csg_split.rs`). A
+    /// model that shows one part of its list keeps the shells.
+    fn color_parts(&mut self, params: Vec<Param>) {
+        self.cancel_parts();
+        let Some(file) = self.file.clone() else {
             return;
         };
-        if let Some(c) = crate::parts::shown_color(&params, log) {
-            self.face_colors = Some(Arc::new(vec![Some(c); mesh.triangles.len()]));
-            return;
+        let cfg = self.cfg.clone();
+        if crate::parts::needs_render(&params) {
+            self.start_parts_job(false, "Rendering the named parts…", move |cancel| {
+                crate::parts::render(&cfg, &file, &params, cancel).map(Some)
+            });
+        } else if crate::parts::names(&params).is_empty() {
+            // The same values as the main render.
+            let defines = params::defines(&params);
+            self.start_parts_job(true, "Finding the parts…", move |cancel| {
+                crate::csg_split::render(&cfg, &file, &defines, cancel)
+            });
         }
-        let Some(file) = self
-            .file
-            .clone()
-            .filter(|_| crate::parts::needs_render(&params))
-        else {
+    }
+
+    /// Starts a background job that renders the parts of the current mesh
+    /// one by one. When it is done, its parts replace the shells of the mesh
+    /// in the 3D view (see `Assembly::from_parts`). With `split_shells`, each
+    /// shell of a part is one part. When `render` gives `None`, the shells
+    /// stay. A new render or file cancels the job. The Parts card shows
+    /// `note` while the job runs.
+    fn start_parts_job(
+        &mut self,
+        split_shells: bool,
+        note: &'static str,
+        render: impl FnOnce(&Arc<AtomicBool>) -> anyhow::Result<Option<Vec<crate::parts::Part>>>
+        + Send
+        + 'static,
+    ) {
+        self.cancel_parts();
+        let Some(mesh) = self.mesh.clone() else {
             return;
         };
         let cancel = Arc::new(AtomicBool::new(false));
         let (tx, rx) = channel();
-        let (c, cfg) = (cancel.clone(), self.cfg.clone());
+        let c = cancel.clone();
         std::thread::spawn(move || {
-            let r = crate::parts::render(&cfg, &file, &params, &c).map_err(|e| e.to_string());
+            let r = render(&c)
+                .map(|parts| parts.map(|p| Assembly::from_parts(&mesh, &p, split_shells)))
+                .map_err(|e| format!("{e:#}"));
             let _ = tx.send(r);
         });
         self.parts_job = Some(PartsJob {
             rx,
             cancel,
             mesh_rev: self.mesh_rev,
+            note,
         });
     }
 
@@ -623,15 +711,11 @@ impl App {
             let params = self.job.take().map(|j| j.params).unwrap_or_default();
             match r {
                 Ok(out) => {
-                    let m = out.mesh;
-                    self.info = m.bounds().map(|bounds| MeshInfo {
-                        bounds,
-                        volume: m.volume().abs(),
-                        open_edges: m.open_edges(),
-                    });
-                    self.mesh = Some(Arc::new(m));
+                    self.info = out.info;
+                    self.mesh = Some(out.mesh);
                     self.mesh_rev += 1;
-                    self.color_parts(params, &out.log);
+                    self.set_assembly(Some(out.assembly));
+                    self.color_parts(params);
                     self.log = out.log;
                     self.last_time = Some(out.elapsed);
                     self.error = None;
@@ -655,13 +739,21 @@ impl App {
         {
             let rev = job.mesh_rev;
             self.parts_job = None;
-            // A failed part render keeps the plain view. The export shows the error.
-            if let (Ok(parts), Some(mesh)) = (r, &self.mesh)
-                && rev == self.mesh_rev
-            {
-                self.face_colors = Some(Arc::new(crate::parts::face_colors(mesh, &parts)));
-                self.color_rev += 1;
-                ctx.request_repaint();
+            match r {
+                Ok(Some(assembly)) if rev == self.mesh_rev => {
+                    self.set_assembly(Some(assembly));
+                    ctx.request_repaint();
+                }
+                // The main render worked, so a failed part render only goes
+                // to the log. The shells stay.
+                Err(e) if rev == self.mesh_rev && e != "cancelled" => {
+                    if !self.log.trim_end().is_empty() {
+                        self.log.push_str("\n\n");
+                    }
+                    self.log.push_str(&format!("The parts failed: {e}\n"));
+                }
+                // No parts, or an old mesh: the shells stay.
+                _ => {}
             }
         }
         if let Some(rx) = &self.slice_job
@@ -733,9 +825,11 @@ impl App {
         }
     }
 
+    /// Fits the model in the view. While a part has the focus, fits that
+    /// part.
     fn fit(&mut self) {
-        if let Some(i) = &self.info {
-            self.cam.fit(&i.bounds);
+        if let Some(b) = self.focus_bounds().or_else(|| self.view_bounds()) {
+            self.cam.fit(&b);
         }
     }
 
@@ -1027,6 +1121,11 @@ impl App {
         if ui::menu_item(ui, "Grid", "", true, self.grid).clicked() {
             self.grid = !self.grid;
         }
+        let parts = self.assembly.as_ref().map_or(0, |a| a.parts.len());
+        let explode = self.view3d.explode;
+        if ui::menu_item(ui, "Explode", "E", parts >= 2, explode).clicked() {
+            self.toggle_explode();
+        }
         if ui::menu_item(ui, "OpenSCAD console", "", true, self.show_log).clicked() {
             self.show_log = !self.show_log;
         }
@@ -1120,7 +1219,8 @@ impl App {
         let covered = self.consent.is_some()
             || self.tour.is_some()
             || self.cfg_edit.is_some()
-            || self.show_changes;
+            || self.show_changes
+            || self.view3d.colors_open;
         if covered || !self.cfg.update_check {
             return;
         }
@@ -1316,6 +1416,9 @@ impl App {
                         }
                     }
                 });
+                self.parts_card(ui);
+                self.explode_card(ui);
+                self.section_card(ui);
                 if let (Some(i), Some(mesh)) = (&self.info, &self.mesh) {
                     let size = i.bounds.size();
                     ui::card(ui, |ui| {
@@ -1813,9 +1916,9 @@ impl App {
 
     /// Runs the photo render for the current view and draws it over the viewport.
     fn photo_view(&mut self, ui: &mut egui::Ui, rect: egui::Rect) {
-        let Some(mesh) = self.mesh.clone() else {
+        if self.mesh.is_none() {
             return;
-        };
+        }
         let size = (self.photo.width, self.photo.height);
         let frame = photo_frame(rect, size);
         // Same framing as the view: scale the field of view to the frame height.
@@ -1828,6 +1931,7 @@ impl App {
             },
             look: self.photo_look(),
             mesh_rev: self.mesh_rev,
+            model: self.photo_model_key(),
             size,
             samples: self.photo.samples,
         };
@@ -1835,9 +1939,11 @@ impl App {
             // Wait until the camera and settings rest, then start again.
             match self.photo_want {
                 Some((k, at)) if k == key => {
-                    if at.elapsed() > Duration::from_millis(250) {
+                    if at.elapsed() > Duration::from_millis(250)
+                        && let Some(model) = self.photo_model()
+                    {
                         self.photo_job = Some(pathtrace::Job::start(
-                            mesh,
+                            model,
                             key.cam,
                             key.look,
                             size.0,
@@ -1994,6 +2100,7 @@ impl App {
                 });
                 ui.add_space(4.0);
 
+                let part_colors = self.view3d.part_colors;
                 let p = &mut self.photo;
                 ui::card(ui, |ui| {
                     ui::section(ui, "Material");
@@ -2023,6 +2130,9 @@ impl App {
                         }
                         ui.color_edit_button_srgb(&mut p.color);
                     });
+                    if part_colors {
+                        ui.label(ui::dim("Part colors are on. Each part has its own color."));
+                    }
                     ui.add_space(4.0);
                     ui.label("Finish");
                     let mut finish = p.finish;
@@ -2040,6 +2150,9 @@ impl App {
                     });
                 });
                 ui.add_space(4.0);
+                self.parts_card(ui);
+                self.explode_card(ui);
+                let p = &mut self.photo;
                 ui::card(ui, |ui| {
                     ui::section(ui, "Scene");
                     ui.label("Studio");
@@ -2277,9 +2390,11 @@ impl App {
                 self.cam.dist = (self.cam.dist * (-scroll * 0.0015).exp()).clamp(0.5, 20_000.0);
             }
         }
+        self.select_input(&resp, rect);
         if resp.double_clicked() {
             self.fit();
         }
+        self.update_selection();
 
         let layer_max = self.sliced.as_ref().map(|s| s.layers.len()).unwrap_or(0);
         let slicing = self.mode == Mode::Slice && layer_max > 0;
@@ -2289,14 +2404,15 @@ impl App {
                 eye: self.cam.eye(),
                 show_mesh: !slicing || self.ghost,
                 mesh_alpha: if slicing { 0.12 } else { 1.0 },
+                parts: self.part_styles(),
                 wireframe: self.wireframe,
                 grid: self.grid,
                 layer: slicing.then_some(self.layer),
+                section: self.section_view(),
             };
-            let (mesh, mesh_rev) = (self.mesh.clone(), (self.mesh_rev, self.color_rev));
-            let colors = self.face_colors.clone();
+            let (assembly, assembly_rev) = (self.assembly.clone(), self.assembly_rev);
             let (sliced, slice_rev) = (self.sliced.clone(), self.slice_rev);
-            let bounds = self.info.as_ref().map(|i| i.bounds);
+            let bounds = self.view_bounds();
             let dark = ui::is_dark();
             let r = r.clone();
             let cb = egui::PaintCallback {
@@ -2304,12 +2420,7 @@ impl App {
                 callback: Arc::new(eframe::egui_glow::CallbackFn::new(move |_info, painter| {
                     let gl = painter.gl();
                     let mut r = r.lock().unwrap();
-                    r.set_mesh(
-                        gl,
-                        mesh.as_deref(),
-                        colors.as_deref().map(|c| &c[..]),
-                        mesh_rev,
-                    );
+                    r.set_mesh(gl, assembly.as_deref(), assembly_rev);
                     r.set_slice(gl, sliced.as_deref(), slice_rev);
                     let b = bounds.unwrap_or(Bounds {
                         min: Vec3::splat(-50.0),
@@ -2470,6 +2581,7 @@ impl App {
             );
             ui.ctx().request_repaint_after(Duration::from_millis(200));
         }
+        self.part_menu(ui.ctx(), rect);
     }
 
     fn shortcuts(&mut self, ctx: &egui::Context) {
@@ -2506,6 +2618,7 @@ impl App {
         if ctx.wants_keyboard_input() {
             return;
         }
+        self.select_escape(ctx);
         let (f5, f, w, up, down, pgup, pgdn, tab) = ctx.input(|i| {
             (
                 i.key_pressed(egui::Key::F5),
@@ -2518,6 +2631,9 @@ impl App {
                 i.key_pressed(egui::Key::S),
             )
         });
+        if ctx.input(|i| i.key_pressed(egui::Key::E)) {
+            self.toggle_explode();
+        }
         if ctx.input(|i| i.key_pressed(egui::Key::P)) {
             self.set_mode(if self.mode == Mode::Photo {
                 Mode::Model
@@ -2963,6 +3079,8 @@ impl eframe::App for App {
             self.tour_window(ctx);
         }
         self.changes_window(ctx);
+        self.part_colors_window(ctx);
+        self.part_color_window(ctx);
         egui::TopBottomPanel::bottom("status")
             .exact_height(28.0)
             .frame(

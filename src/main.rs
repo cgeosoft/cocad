@@ -3,6 +3,8 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod app;
+mod assembly;
+mod csg_split;
 mod examples;
 mod export;
 mod mcp;
@@ -95,6 +97,8 @@ fn gui(file: Option<PathBuf>, mode: &str) -> Result<()> {
         // Window position and size, panel widths: ~/.local/share/cocad.
         persist_window: true,
         depth_buffer: 24,
+        // The cut faces of the section (render.rs).
+        stencil_buffer: 8,
         multisampling: 4,
         ..Default::default()
     };

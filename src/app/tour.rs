@@ -27,9 +27,9 @@ macro_rules! shot {
 }
 
 /// The step that also shows how to connect an MCP client.
-const CONNECT: usize = 7;
+const CONNECT: usize = 8;
 
-const STEPS: [Step; 9] = [
+const STEPS: [Step; 10] = [
     Step {
         title: "Welcome to CoCAD",
         intro: "View and change OpenSCAD models. OpenSCAD does the geometry in the background.",
@@ -74,6 +74,17 @@ const STEPS: [Step; 9] = [
         image: shot!("4-export"),
     },
     Step {
+        title: "See the parts",
+        intro: "The Model tab finds the parts of the model. You can color them, move them apart and cut them.",
+        points: &[
+            "Part colors gives each part a different color. Colors… sets your own colors.",
+            "Explode moves the parts apart. Press E.",
+            "Section cuts the view on the X, Y and Z axes. You select the side to keep.",
+            "Click a part to select it. Right click a part to focus on it or to change its color.",
+        ],
+        image: shot!("5-parts"),
+    },
+    Step {
         title: "Slice preview",
         intro: "The Slice tab shows the paths a printer would follow.",
         points: &[
@@ -82,7 +93,7 @@ const STEPS: [Step; 9] = [
             "The top card shows the print time, filament length and weight.",
             "The preview is for checks only. It writes no G-code.",
         ],
-        image: shot!("5-slice"),
+        image: shot!("6-slice"),
     },
     Step {
         title: "Photo render",
@@ -92,7 +103,7 @@ const STEPS: [Step; 9] = [
             "Choose the plastic color, finish, studio and image size.",
             "Save PNG writes the image at its full size.",
         ],
-        image: shot!("6-photo"),
+        image: shot!("7-photo"),
     },
     Step {
         title: "Let an agent change the model",
@@ -104,13 +115,13 @@ const STEPS: [Step; 9] = [
             "A message in the view names each change.",
             "It cannot delete a file or a parameter set.",
         ],
-        image: shot!("7-agent"),
+        image: shot!("8-agent"),
     },
     Step {
         title: "Connect an agent",
         intro: "Add CoCAD to your MCP client. The tool calls go to the open window.",
         points: &[],
-        image: shot!("8-connect"),
+        image: shot!("9-connect"),
     },
     Step {
         title: "Settings and shortcuts",
@@ -122,7 +133,7 @@ const STEPS: [Step; 9] = [
             "The CLI exports, slices and makes photos without the window. Run cocad --help.",
             "Help > Welcome tour shows this tour again.",
         ],
-        image: shot!("9-menu"),
+        image: shot!("10-menu"),
     },
 ];
 

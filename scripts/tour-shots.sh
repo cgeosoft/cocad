@@ -95,31 +95,38 @@ mcp set_view '{"wireframe":true,"view":"iso","fit":true}'
 shot 4-export
 quit
 
+# Parts: colors, explode and a section cut. The parts job runs after the render.
+start "$models/lid-box.scad"
+sleep 2
+mcp set_view '{"part_colors":true,"explode":24,"explode_axis":"z","section":{"y":{"keep":"+"}},"view":"iso","fit":true}'
+shot 5-parts 3
+quit
+
 # Slice preview.
 start --slice "$models/honeycomb-tray.scad"
 mcp set_view '{"view":"iso","fit":true,"layer":60}'
-shot 5-slice 2
+shot 6-slice 2
 
 # Photo render.
 quit
 start --photo "$models/gear.scad"
-shot 6-photo 60
+shot 7-photo 60
 quit
 
 # Agent control: the message in the view names the change.
 start "$models/vase.scad"
 mcp set_params '{"values":{"sides":5,"twist":240,"taper":0.8}}'
 mcp set_view '{"view":"iso","fit":true}'
-shot 7-agent
+shot 8-agent
 
 # Settings on the MCP server page.
 xdotool key ctrl+comma
 sleep 1
 xdotool mousemove 320 254 click 1
-shot 8-connect
+shot 9-connect
 xdotool key Escape
 sleep 0.5
 
 # Help menu with the tour item.
 xdotool key alt+h
-shot 9-menu
+shot 10-menu

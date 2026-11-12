@@ -114,7 +114,7 @@ impl App {
         }
         for p in std::mem::take(&mut self.pending) {
             let busy = self.busy_for(&p.req.tool);
-            if busy && Instant::now() < p.deadline {
+            if (busy || self.parts_wait(&p.req.tool)) && Instant::now() < p.deadline {
                 self.pending.push(p);
                 continue;
             }
@@ -148,6 +148,15 @@ impl App {
             }
             _ => false,
         }
+    }
+
+    /// Images show the part colors and the explode of the window. While the
+    /// parts of the mesh are not ready, they wait. After `WAIT`, they use
+    /// the parts that the view shows.
+    fn parts_wait(&self, tool: &str) -> bool {
+        matches!(tool, "view_model" | "save_photo")
+            && self.parts_job.is_some()
+            && self.view3d.shows_parts()
     }
 
     fn later(&mut self, tool: &str, reply: &Reply) {
@@ -286,6 +295,19 @@ impl App {
         };
         let lines: Vec<&str> = self.log.lines().collect();
         let log = lines[lines.len().saturating_sub(LOG_LINES)..].join("\n");
+        let parts = self.assembly.as_ref().map_or(&[][..], |a| &a.parts[..]);
+        let v = &self.view3d;
+        let explode = if parts.is_empty() {
+            json!({ "on": v.explode, "axis": v.explode_axis.name() })
+        } else {
+            let (distance, range) = v.explode_distance(parts);
+            json!({
+                "on": v.explode,
+                "distance_mm": distance,
+                "max_mm": range.max,
+                "axis": v.explode_axis.name(),
+            })
+        };
         json!({
             "file": self.file,
             "status": status,
@@ -304,6 +326,10 @@ impl App {
             "mode": mode,
             "wireframe": self.wireframe,
             "grid": self.grid,
+            "parts": parts.len(),
+            "part_colors": v.part_colors,
+            "explode": explode,
+            "section": v.section.to_json(),
             "log": log,
         })
     }
@@ -472,28 +498,36 @@ impl App {
         Ok(None)
     }
 
+    /// The model for images: the current mesh with the part colors and the
+    /// explode of the window, as in the Photo tab.
+    fn current_model(&mut self) -> Result<pathtrace::Model, String> {
+        let mesh = self.current_mesh()?;
+        Ok(self.photo_model().unwrap_or_else(|| mesh.into()))
+    }
+
     /// Starts a photo job that frames the whole model.
     fn photo_job_for(
         &self,
-        mesh: Arc<Mesh>,
+        model: pathtrace::Model,
         view: Option<(f32, f32)>,
         size: (usize, usize),
         samples: u32,
     ) -> pathtrace::Job {
         let (yaw, pitch) = view.unwrap_or((self.cam.yaw, self.cam.pitch));
         let aspect = size.0 as f32 / size.1 as f32;
-        let cam = pathtrace::fit_camera(&mesh, yaw, pitch, aspect);
-        pathtrace::Job::start(mesh, cam, self.photo_look(), size.0, size.1, samples)
+        let cam = pathtrace::fit_camera(&model.mesh, yaw, pitch, aspect);
+        pathtrace::Job::start(model, cam, self.photo_look(), size.0, size.1, samples)
     }
 
     fn view_image(&mut self, args: &Json, reply: &Reply) -> Outcome {
-        let mesh = self.current_mesh()?;
         let size = (
             side(args, "width", 640, MAX_VIEW_SIDE)?,
             side(args, "height", 480, MAX_VIEW_SIDE)?,
         );
         let samples = side(args, "samples", 24, MAX_SAMPLES)? as u32;
-        let job = self.photo_job_for(mesh, view_angles(args)?, size, samples);
+        let view = view_angles(args)?;
+        let model = self.current_model()?;
+        let job = self.photo_job_for(model, view, size, samples);
         let reply = reply.clone();
         std::thread::spawn(move || {
             let r = finish_photo(&job, samples).and_then(|n| {
@@ -510,7 +544,7 @@ impl App {
     }
 
     fn save_photo_to(&mut self, args: &Json, reply: &Reply) -> Outcome {
-        let mesh = self.current_mesh()?;
+        self.current_mesh()?;
         let path = output(args)?;
         if !has_ext(&path, "png") {
             return Err("The path must end in .png.".into());
@@ -552,7 +586,8 @@ impl App {
         p.layer_lines = flag(args, "layer_lines", p.layer_lines);
 
         self.note(format!("rendering {}", path.display()));
-        let job = self.photo_job_for(mesh, view, (width, height), samples);
+        let model = self.current_model()?;
+        let job = self.photo_job_for(model, view, (width, height), samples);
         let reply = reply.clone();
         std::thread::spawn(move || {
             let r = finish_photo(&job, samples).and_then(|n| {
@@ -622,8 +657,40 @@ impl App {
             Some(m) => return Err(format!("Unknown mode {m}. Use model, slice or photo.")),
         };
         let view = view_angles(args)?;
+        let explode = match &args["explode"] {
+            Json::Null => None,
+            v => match v.as_f64() {
+                Some(mm) if mm.is_finite() && mm >= 0.0 => Some(mm as f32),
+                _ => {
+                    return Err(format!(
+                        "explode must be a distance in mm, 0 or more, got {v}"
+                    ));
+                }
+            },
+        };
+        let axis = match args["explode_axis"].as_str() {
+            None => None,
+            Some(name) => Some(
+                view3d::Axis::from_name(name)
+                    .ok_or_else(|| format!("Unknown explode_axis {name}. Use all, x, y or z."))?,
+            ),
+        };
+        // The section object replaces all cuts.
+        let mut section = self.view3d.section.clone();
+        if !args["section"].is_null() {
+            section.set_json(&args["section"])?;
+        }
         if let Some(m) = mode {
             self.set_mode(m);
+        }
+        self.view3d.section = section;
+        // As in the Explode card, a direction turns the explode on.
+        if let Some(a) = axis {
+            self.view3d.explode_axis = a;
+            self.view3d.explode = true;
+        }
+        if let Some(mm) = explode {
+            self.view3d.set_explode(mm);
         }
         if let Some((yaw, pitch)) = view {
             self.set_view(yaw, pitch);
@@ -633,6 +700,7 @@ impl App {
         }
         self.wireframe = flag(args, "wireframe", self.wireframe);
         self.grid = flag(args, "grid", self.grid);
+        self.view3d.part_colors = flag(args, "part_colors", self.view3d.part_colors);
         if let Some(l) = args["layer"].as_u64() {
             let top = self.sliced.as_ref().map_or(0, |s| s.layers.len());
             self.layer = (l as usize).clamp(1, top.max(1)) - 1;

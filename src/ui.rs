@@ -367,6 +367,9 @@ pub fn segmented<T: PartialEq + Copy>(
         .inner_margin(Margin::same(3))
         .show(ui, |ui| {
             ui.spacing_mut().item_spacing.x = 2.0;
+            // Narrower options when the row does not fit.
+            let n = options.len().max(1) as f32;
+            let w = ((ui.available_width() - 2.0 * (n - 1.0)) / n).min(76.0);
             ui.horizontal(|ui| {
                 for (v, label) in options {
                     let sel = *value == *v;
@@ -375,7 +378,7 @@ pub fn segmented<T: PartialEq + Copy>(
                     let b = egui::Button::new(text)
                         .fill(if sel { ACCENT } else { Color32::TRANSPARENT })
                         .corner_radius(8)
-                        .min_size(vec2(76.0, 28.0));
+                        .min_size(vec2(w, 28.0));
                     if ui.add(b).clicked() && !sel {
                         *value = *v;
                         changed = true;
@@ -524,6 +527,15 @@ pub fn menu_trigger(ui: &mut egui::Ui, text: &str, open: bool) -> egui::Response
 
 /// Dropdown surface of the menu bar.
 pub fn menu_frame<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    menu_frame_width(ui, 320.0, add)
+}
+
+/// Menu surface with this width, for example a context menu.
+pub fn menu_frame_width<R>(
+    ui: &mut egui::Ui,
+    width: f32,
+    add: impl FnOnce(&mut egui::Ui) -> R,
+) -> R {
     egui::Frame::NONE
         .fill(c().panel)
         .stroke(Stroke::new(1.0_f32, c().input_hover))
@@ -532,7 +544,7 @@ pub fn menu_frame<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) ->
         .shadow(ui.visuals().popup_shadow)
         .show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
-            ui.set_width(320.0);
+            ui.set_width(width);
             add(ui)
         })
         .inner

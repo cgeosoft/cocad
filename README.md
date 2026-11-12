@@ -17,6 +17,7 @@ OpenSCAD does the geometry. CoCAD runs the `openscad` CLI in the background, rea
 - **Export.** Binary STL, 3MF with the parameters in the metadata, and STEP AP214 with real planar faces.
 - **Slice preview.** Walls, infill and top and bottom skin as round strands, with a layer slider and a time, length and weight estimate.
 - **Photo render.** A path tracer makes a studio photo of the current view, in a plastic color and finish you choose.
+- **Parts.** The 3D view finds the separate solids of the model. **Part colors** shows each part in its own color, in the view and in the photo.
 - **Multicolor 3MF.** A model can list parts with a `cocad_part` parameter. The 3D view shows each part in its color. CoCAD renders each part and writes a 3MF for PrusaSlicer 2.9 or OrcaSlicer, with one filament for each part.
 - **Examples.** **File > Examples** opens a sample model. The app writes the models to `examples/` in its settings folder. Your edits to these copies stay.
 - **Mesh check.** Size, volume, triangles and open edges. Back faces show in purple.
@@ -54,9 +55,13 @@ You can also open a file with Ctrl+O or drop it on the window. **File** lists th
 | Left drag | Orbit |
 | Right or middle drag, Shift + left drag | Pan |
 | Wheel | Zoom |
-| Double click, `F` | Fit the model |
+| Click | Select a part. On the background: clear the selection |
+| Right click on a part | Part menu: **Focus**, **Change color…** |
+| Esc | Clear the selection and leave the focus |
+| Double click, `F` | Fit the model, or the part in focus |
 | `F5` | Render now |
 | `W` | Wireframe |
+| `E` | Explode the parts |
 | `S` | Model or slice view |
 | `P` | Photo view |
 | Up / Down, PgUp / PgDn | Change the slice layer |
@@ -67,7 +72,7 @@ You can also open a file with Ctrl+O or drop it on the window. **File** lists th
 
 ![The File menu with the recent models](images/screen-menu.jpg)
 
-The menu bar holds all commands: **File**, **Model**, **View** and **Help**. The right sidebar has the **Model**, **Slice** and **Photo** tabs. The **Model** tab has Auto render, Render, the export buttons and the mesh data.
+The menu bar holds all commands: **File**, **Model**, **View** and **Help**. The right sidebar has the **Model**, **Slice** and **Photo** tabs. The **Model** tab has Auto render, Render, the export buttons, the parts, the explode, the section and the mesh data.
 
 At the first start, a welcome tour shows the main features one step at a time, with the MCP setup. To see it again, use **Help > Welcome tour**. Keys: Left and Right change the step, Enter goes on, Esc closes.
 
@@ -96,7 +101,7 @@ The client starts `cocad mcp`. This process has no window. It sends each tool ca
 
 | Tool | Action |
 |---|---|
-| `get_state` | Loaded file, render status, last error, mesh data, changed parameters, parameter sets, end of the OpenSCAD log |
+| `get_state` | Loaded file, render status, last error, mesh data, changed parameters, parameter sets, parts, part colors, explode, section cut, end of the OpenSCAD log |
 | `get_params` | All Customizer parameters with type, value, default, limits and options |
 | `get_source` | Source of the `.scad` file |
 | `view_model` | Render an image and return it to the client |
@@ -107,7 +112,7 @@ The client starts `cocad mcp`. This process has no window. It sends each tool ca
 | `export_model` | Write STL, 3MF or STEP. With `slicer`, write a multicolor 3MF |
 | `save_photo` | Write a path traced PNG |
 | `slice` | Slice and return layers, filament, weight and a rough print time |
-| `set_view` | Change the tab, camera direction, wireframe, grid and slice layer |
+| `set_view` | Change the tab, camera direction, wireframe, grid, part colors, explode, section cut and slice layer |
 | `list_windows`, `select_window` | Choose a window when more than one is open |
 
 Behavior:
@@ -116,6 +121,9 @@ Behavior:
 - Calls wait for the render, for at most 45 seconds. Then they return the state with status `rendering`, or an error.
 - `export_model` and `save_photo` do not replace a file without `overwrite`. They and `view_model` fail when the last render failed, so that they do not use an old mesh.
 - `view_model` and `save_photo` put the whole model in the frame. They use the camera direction of the window, or the given `view`.
+- `view_model` and `save_photo` show the part colors, the explode and the section cut of the window, as the **Photo** tab does. When the part colors or the explode are on and CoCAD still finds the parts, they wait for the parts, for at most 45 seconds.
+- `set_view`: `explode` sets the explode distance in mm, and 0 turns the explode off. A distance above the end of the slider uses the end of the slider. `explode_axis` sets the direction (`all`, `x`, `y` or `z`) and turns the explode on.
+- `set_view`: `section` sets the section cut, for example `{"x": {"at": 12.5, "keep": "+"}}`. The object replaces all cuts. An axis that is missing or `null` has no cut, and `{}` turns all cuts off. `at` is the position in mm. The default is the center of the model. A position out of the slider range uses the end of the range. `keep` is `+` (keep the side above the position) or `-` (keep the side below). The default is `+`. `get_state` shows the cuts in the same form.
 - `save_photo` stops after 40 seconds and saves the samples it has.
 - `open_model` opens only `.scad` files. `save_photo` writes only `.png` files. `export_model` and `save_photo` do not write through a symbolic link.
 - The tools cannot delete a parameter set or a file.
@@ -134,6 +142,61 @@ The **Parameter set** card at the top of the panel holds named sets of values.
 - **Save** writes the values to the selected set. With no set selected, it asks for a name.
 - **Save as** saves the values as a new set. **Delete** removes the selected set (click two times).
 - The file uses the OpenSCAD Customizer format. OpenSCAD reads it too: `openscad -p sets.json -P big`.
+
+## Parts in the 3D view
+
+The 3D view divides the model into parts. The **Parts** card in the **Model** and **Photo** tabs shows the number of parts. CoCAD finds the parts in this order:
+
+1. A model with a `cocad_part` list that shows all parts: CoCAD renders each part in the background (see [Multicolor 3MF](#multicolor-3mf)). When the parts are done, they replace the solids, so parts that touch stay separate. Shapes that are in no part become "Other" parts.
+2. A model without a `cocad_part` list: the module split. After each render, CoCAD runs OpenSCAD one more time to write the CSG tree of the model. This run makes no geometry. In the tree, each module call is a group. CoCAD finds the highest level with two or more module calls, and one more level below it, for example `assembly() { board(); pieces(); }`. Then it renders each module call on its own, in parallel. Each solid of each module is one part, so parts that touch stay separate. The Parts card shows "Finding the parts…" while this runs.
+3. All other models, or a module split that finds no parts: the solids of the mesh.
+
+- A solid is a set of triangles that connect at their edges. A cavity stays with the solid around it. A sliver with almost no volume goes to the nearest part. The solids of one mesh are in volume order, the largest first. The parts are "Part 1", "Part 2" and so on.
+- Limits of the module split: a part made of two or more module calls divides into these modules. An explicit `union()` stays one part. A level with more than 64 module calls gives no split. A model with a `cocad_part` list that shows one part keeps the solids of the mesh. Fonts from `use <font.ttf>` in the model file work, but not fonts that only a library loads. When the module split fails, the error goes to the OpenSCAD output and the solids stay.
+- **Part colors** shows each part in a different color. A part of the `cocad_part` list keeps its color. The other parts get colors from a palette of 12 colors.
+- **Colors…** opens the list of all parts with their volumes. Click a color to change it. **Reset** sets the default color again. A color change turns on **Part colors**. The colors stay when the model renders again. When you open a different model, CoCAD clears them.
+- With **Part colors** on, the photo uses the part colors in place of the material color. The finish and the layer lines stay.
+- The part colors are for the view and the photo only. The export does not change.
+
+### Select and focus
+
+Click a part in the 3D view to select it. The part shows brighter, with an orange edge. The **Parts** card shows its name, size and volume. A click on the background or Esc clears the selection. A drag turns or moves the view and does not change the selection.
+
+A right click on a part selects it and opens the part menu. A right drag still moves the view. Esc first closes the part menu or the color window.
+
+- **Focus**: the view turns around the center of the part, and the other parts become transparent. When the part is not fully in the view, the camera moves back until the part fits. Then `F`, double click and the view buttons fit this part. A click goes through the transparent parts to the part in focus. A click on a transparent part selects it when the part in focus is not under the mouse.
+- **Leave focus** (or Esc) makes all parts opaque again. The center of rotation goes back to the center of the model. The camera direction and distance stay. While a part has the focus, a right click on the background opens a menu with only **Leave focus**.
+- **Change color…** opens a color window for the part at the top right of the 3D view. The 3D view shows each change at once. **Reset** sets the default color again. A color change turns on **Part colors**, as in **Colors…**.
+- The selection and the focus use the part name. When the model renders again and has a part with that name, they stay. When you open a different model, CoCAD clears them.
+- With **Explode** on, a click finds the part at its moved position, and the focus moves with the part.
+- The selection and the focus are for the 3D view of the **Model** and **Photo** tabs only. The **Slice** tab and the photo do not show them.
+
+### Explode
+
+The **Explode** card in the **Model** and **Photo** tabs moves the parts away from each other. It needs two or more parts. `E` or **View > Explode** turns it on and off.
+
+- **Distance** sets the movement in mm. The part that is farthest from the center of the model moves this distance. The other parts move less, by the same ratio as their distance from the center. A part at the center does not move.
+- **Direction**: **All** moves each part along the line from the center of the model to the center of the part. **X**, **Y** and **Z** move the parts along that axis only.
+- When all parts have the same center (for example, concentric parts), the parts make a stack. The largest part does not move. The other parts move up, or along the selected axis, in volume order. The smallest part moves the full distance.
+- The slider goes to approximately 2 times the largest size of the model. The default distance is approximately half of the largest size. A new render keeps your distance. When you open a different model, the distance goes back to the default.
+- A change of the distance or the direction turns on the explode.
+- The camera does not move. Press `F` to fit the exploded model in the view. The grid moves down below the lowest part.
+- The explode is for the 3D view and the photo only. The **Slice** tab shows the parts at their real positions, so that the mesh agrees with the tool paths. The export does not change.
+
+### Section
+
+The **Section** card in the **Model** tab cuts the model to show the inside. You can cut across the X, Y and Z axes.
+
+- **Cut X**, **Cut Y** and **Cut Z** turn on a cut across that axis.
+- **Position** sets the position of the cut in mm. The slider goes across the model, with a small margin. The default position is the center of the model. When you move the slider or put the pointer on it, a blue rectangle shows the plane of the cut.
+- **Keep +X** keeps the side above the position. **Keep −X** keeps the side below the position. Y and Z work the same.
+- When two or three cuts are on, only the space that all cuts keep stays. For example, cuts on X and Y keep one quarter of the model.
+- The cut faces show in the color of the part, a little darker. A transparent part shows no cut face. A part that is not closed can show no cut face or a wrong cut face. While a cut is on, the inside faces of the parts show in a dark part color, not in purple.
+- The cut is in the coordinates of the model. With the explode on, each part moves with its cut.
+- **Reset** turns off all cuts and moves them to the center.
+- A new render keeps the cuts and their positions. When you open a different model, the positions go back to the center.
+- The photo and the MCP images show the cut. The **Slice** tab, the grid, fit and the export do not use it.
+- The cut faces need a stencil buffer in the OpenGL driver. Without it, the inside of each part shows in a dark part color.
 
 ## Slice preview
 
@@ -155,6 +218,7 @@ The **Photo** view path-traces the current camera view on all CPU cores. The ima
 
 - **Material**: 8 color swatches or a color picker. Finish: matte, satin or gloss plastic.
 - **Print layer lines**: ripples the sides at the slice layer height, so the part looks printed.
+- **Parts**: with **Part colors** on, each part has its own color. With **Explode** on, the parts move apart. See [Parts in the 3D view](#parts-in-the-3d-view).
 - **Studio**: dark or light backdrop with a soft key light and floor shadows. Exposure adjusts the brightness.
 - **Quality**: samples per pixel (16 to 2048) and the image size. Presets: 720p, 1080p, 1440p, 4K, site preview 4:3 (1600 × 1200), square, portrait 4:5 and story 9:16. You can also type the width and height. **Swap** turns landscape into portrait.
 - The view dims everything outside the image frame, so you see what the render will show.
@@ -184,7 +248,7 @@ module part(name, col) {
 ```
 
 - CoCAD renders each part in a separate OpenSCAD run. A model with N parts takes N renders.
-- The 3D view shows each part in its color. When `cocad_part` is `all`, CoCAD renders the parts in the background after the main render. Until they are done, the model is orange. Shapes that are in no part, for example hardware previews, stay orange.
+- The 3D view shows each part in its color. When `cocad_part` is `all`, CoCAD renders the parts in the background after the main render. Until they are done, the view shows the solids of the model in orange. Shapes that are in no part, for example hardware previews, are orange. With **Part colors** on, these shapes get palette colors.
 - The list order sets the filament number. `echo(cocad_color = ...)` sets the color: a `#RRGGBB` value or a common color name.
 - `import()` ignores SVG fill colors. Use one SVG file for each color. See `examples/multicolor-badge.scad`.
 - Parts must not overlap. Cut a pocket in one part for the other part.
@@ -323,9 +387,14 @@ A tag `v*` (for example `v0.2.0`) also makes a GitHub release with all files att
 | `src/main.rs` | CLI and window start |
 | `src/app.rs` | egui application: panels, camera, jobs |
 | `src/app/remote.rs` | MCP tools inside the window |
+| `src/app/select.rs` | Select a part in the 3D view, part menu, focus, color window of one part |
 | `src/app/tour.rs` | Welcome tour |
 | `src/mcp.rs` | MCP server, tool list, window listener |
-| `src/render.rs` | OpenGL shaders and buffers |
+| `src/app/view3d.rs` | 3D view options for the parts: part colors, explode, Parts and Explode cards, part colors window |
+| `src/app/section.rs` | Section cut: planes on X, Y and Z, Section card, MCP section state |
+| `src/render.rs` | OpenGL shaders and buffers. Draws each part with its own color, offset and transparency, and the section cut with stencil cut faces |
+| `src/assembly.rs` | Parts of the 3D view: shells, named parts, part palette, moved mesh for the photo |
+| `src/csg_split.rs` | Module split: finds the module calls in the CSG tree and renders each one |
 | `src/ui.rs` | Dark and light palettes and widgets |
 | `src/params.rs` | Customizer parameter parser |
 | `src/presets.rs` | Parameter sets (OpenSCAD `.json` format) |
@@ -341,7 +410,7 @@ A tag `v*` (for example `v0.2.0`) also makes a GitHub release with all files att
 | `src/parts.rs` | Finds the parts of a multicolor model and renders each one |
 | `src/export.rs` | STL, 3MF, multicolor 3MF and STEP writers |
 | `src/slicer.rs` | Preview slicer |
-| `src/pathtrace.rs` | Path tracer for photo renders (BVH, plastic material, studio light) |
+| `src/pathtrace.rs` | Path tracer for photo renders (BVH, plastic material, studio light, section cut) |
 | `examples/` | Test models. The binary embeds the models that render. |
 | `scripts/` | Build and packaging scripts |
 | `packaging/` | Desktop entry, icon, MIME type for the `.deb` |
@@ -351,7 +420,7 @@ Stack: Rust 2024, `eframe`/`egui` 0.31 with the `glow` (OpenGL 3.3) backend and 
 
 ## Tests
 
-- `cargo test`: parser, mesh, STL round trip, STEP faces, 3MF zip, parameter sets, slicer skin, path tracer BVH.
+- `cargo test`: parser, mesh, STL round trip, STEP faces, 3MF zip, parameter sets, slicer skin, path tracer BVH, parts of the 3D view.
 - `scripts/test-models.sh`: renders every model in `examples/`, exports STL, 3MF and STEP, and slices it. Use `--release` for speed, or give model files to test only those.
 - The STEP export of `examples/demo-box.scad` loads in OpenCASCADE as one valid solid. Its volume is the same as the STL volume.
 
