@@ -1,0 +1,43 @@
+# Multicolor prints
+
+Some printers can print one object with more than one filament. For such a print, the slicer must know which part of the object uses which filament. CoCAD can write a 3MF file with this data, for PrusaSlicer or for OrcaSlicer.
+
+## What you need
+
+The model must name its parts. The author of the model does this with a `cocad_part` parameter. See [Write models for CoCAD](Write-models-for-CoCAD#parts-for-a-multicolor-print).
+
+To try it, open **File > Examples > Multicolor badge**.
+
+## What you see
+
+- The 3D view shows each part in its color.
+- After the first render, CoCAD renders each part in the background. Until this is done, the view shows the model in orange.
+- Shapes that are in no part stay orange. With **Part colors** on, they get other colors.
+
+## How to export
+
+When the model has named parts, the **Model** tab and the **Model** menu show one more export for each slicer:
+
+- **Export multicolor 3MF for PrusaSlicer 2.9**
+- **Export multicolor 3MF for OrcaSlicer**
+
+Select the slicer that you use. The two slicers read different data, so one file does not work in both.
+
+## In the slicer
+
+| Slicer | What you get |
+|---|---|
+| **PrusaSlicer 2.9** | Each part has its own extruder. The file contains no colors. Use a printer profile with more than one filament. With a one-filament profile, all parts show in one color. |
+| **OrcaSlicer** | Each part has its own filament, and the file contains the colors. The printer and process settings stay as they are. |
+
+The order of the parts in the `cocad_part` list sets the filament number.
+
+## Limits
+
+- **PrusaSlicer 3.0 alpha** is not supported. It loads the file as one object.
+- The tests used PrusaSlicer 2.9.7 and OrcaSlicer 2.4.2.
+- CoCAD renders each part in a separate OpenSCAD run. A model with 5 parts takes 5 renders.
+
+---
+
+**For technical readers.** On the command line, use `cocad export badge.scad -o badge.3mf --for prusa` or `--for orca`. See [Command line](Command-line).

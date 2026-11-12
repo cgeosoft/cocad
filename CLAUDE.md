@@ -10,7 +10,7 @@ CoCAD (cgeosoft) is a Rust desktop app for OpenSCAD models. It edits Customizer 
 
 ## Modules
 
-- `src/`: the app. See the "Source layout" table in `README.md`.
+- `src/`: the app. See the "Source layout" table in `docs/wiki/Build-from-source.md`.
 - `examples/`: test models. `// expect: error` on the first line marks a model that must fail.
 - `scripts/`: build, package, test and asset scripts. Packages go to `dist/`.
 - `packaging/`: desktop entry, icon and MIME type for the `.deb`.
@@ -22,7 +22,9 @@ CoCAD (cgeosoft) is a Rust desktop app for OpenSCAD models. It edits Customizer 
 
 ## Docs and skills
 
-- `README.md` and `extras/website/README.md`: features, CLI, MCP tools, build, CI, tests and deploy.
+- `README.md`: short overview with links to the wiki.
+- `docs/wiki/`: source of the GitHub wiki. Features, CLI, MCP tools, build, CI and tests. The user pages are for non-technical readers. `scripts/check-wiki.sh` checks the links. `scripts/publish-wiki.sh` pushes the pages to the wiki.
+- `extras/website/README.md`: website and deploy.
 - `gui-test` skill: screenshots, click tests and MCP tests on a private display.
 
 ## Commands
@@ -42,7 +44,7 @@ cargo check --target aarch64-apple-darwin
 2. Run clippy before you tag a release. Keep it clean.
 3. Linux (Debian) comes first. Check Windows and macOS with the `cargo check` commands.
 4. Do not send mouse or key input to the user's desktop. Use the `gui-test` skill.
-5. When a major feature or its UI changes, update the steps in `src/app/tour.rs`.
+5. When a major feature or its UI changes, update the steps in `src/app/tour.rs` and the pages in `docs/wiki/`.
 6. Then run `scripts/tour-shots.sh`. Build again after it.
 7. Keep `Depends` in `scripts/package-deb.sh` in sync with new runtime libraries.
 8. The repo is public (MIT). Do not commit secrets, personal paths or host names.
@@ -51,5 +53,5 @@ cargo check --target aarch64-apple-darwin
 11. Warn before you delete files. Push only when the owner asks.
 12. `origin` is the private main repo. `github` is the public mirror. The branch is `main`.
 13. A release bumps the minor version by default. Bump the patch only when the owner says so.
-14. When `src/telemetry.rs` sends new data, follow `docs/telemetry-consent.md`. Raise `NOTICE_VERSION` and update the consent text in `src/app.rs`, `README.md` and the website Privacy Notice.
+14. When `src/telemetry.rs` sends new data, follow `docs/telemetry-consent.md`. Raise `NOTICE_VERSION` and update the consent text in `src/app.rs`, `README.md`, `docs/wiki/Privacy.md` and the website Privacy Notice.
 15. Write all repo text in ASD-STE100. Do not use em-dashes, emojis or hype. State only verified facts.
