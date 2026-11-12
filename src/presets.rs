@@ -5,6 +5,11 @@
 //! { "fileFormatVersion": "1",
 //!   "parameterSets": { "big": { "width": "80", "shape": "round", "offset": "[0, 5]" } } }
 //! ```
+//!
+//! Metadata is optional. String fields at the root (for example `title`,
+//! `description`, `author`) describe the file. In a set, keys that start
+//! with `$` (for example `$title`, `$description`) describe the set. The
+//! Customizer has no parameters with a `$` name, thus OpenSCAD ignores them.
 
 use crate::params::{Param, Value};
 use anyhow::{Context, Result};
@@ -117,6 +122,86 @@ fn write(path: &Path, mut root: Map<String, Json>) -> Result<()> {
     Ok(())
 }
 
+/// Descriptive text of a sets file or of one set.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Meta {
+    pub title: Option<String>,
+    pub description: Option<String>,
+    /// Other fields as (key, value), in file order.
+    pub other: Vec<(String, String)>,
+}
+
+impl Meta {
+    pub fn is_empty(&self) -> bool {
+        self.title.is_none() && self.description.is_none() && self.other.is_empty()
+    }
+
+    /// Reads the fields of `obj` for which `key` gives a name. Empty values
+    /// are not used. Numbers and booleans become text.
+    fn from_fields(obj: &Map<String, Json>, key: impl Fn(&str) -> Option<&str>) -> Meta {
+        let mut m = Meta::default();
+        for (k, v) in obj {
+            let Some(name) = key(k) else { continue };
+            let text = match v {
+                Json::String(s) => s.trim().to_string(),
+                Json::Number(n) => n.to_string(),
+                Json::Bool(b) => b.to_string(),
+                _ => continue,
+            };
+            if text.is_empty() {
+                continue;
+            }
+            match name {
+                "title" => m.title = Some(text),
+                "description" => m.description = Some(text),
+                _ => m.other.push((name.to_string(), text)),
+            }
+        }
+        m
+    }
+}
+
+/// Metadata of the file and of each set.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Info {
+    pub file: Meta,
+    pub sets: Vec<(String, Meta)>,
+}
+
+impl Info {
+    pub fn set(&self, name: &str) -> Option<&Meta> {
+        self.sets.iter().find(|(n, _)| n == name).map(|(_, m)| m)
+    }
+}
+
+/// A set key that holds metadata, not a parameter value.
+fn is_meta_key(key: &str) -> bool {
+    key.starts_with('$')
+}
+
+/// Reads the metadata of the file. A file that cannot be read has none.
+pub fn info(path: &Path) -> Info {
+    let Ok(root) = read(path) else {
+        return Info::default();
+    };
+    let file = Meta::from_fields(&root, |k| {
+        (k != "fileFormatVersion" && k != "parameterSets").then_some(k)
+    });
+    let sets = root
+        .get("parameterSets")
+        .and_then(|s| s.as_object())
+        .map(|sets| {
+            sets.iter()
+                .filter_map(|(n, s)| {
+                    let m = Meta::from_fields(s.as_object()?, |k| k.strip_prefix('$'));
+                    (!m.is_empty()).then(|| (n.clone(), m))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    Info { file, sets }
+}
+
 /// Names of the sets in the file, in file order.
 pub fn names(path: &Path) -> Vec<String> {
     try_names(path).unwrap_or_default()
@@ -133,24 +218,38 @@ pub fn try_names(path: &Path) -> Result<Vec<String>> {
 }
 
 /// The value as the Customizer writes it: strings bare, the rest as source.
-fn to_text(v: &Value) -> String {
+pub(crate) fn to_text(v: &Value) -> String {
     match v {
         Value::Str(s) => s.clone(),
         v => v.to_scad(),
     }
 }
 
-/// Saves all parameter values as set `name`. Other sets stay.
+/// Saves all parameter values as set `name`. Other sets and the metadata
+/// of the set stay.
 pub fn save(path: &Path, name: &str, params: &[Param]) -> Result<()> {
     let mut root = read(path)?;
-    let sets = root.entry("parameterSets").or_insert_with(|| json!({}));
-    let set: Map<String, Json> = params
-        .iter()
-        .map(|p| (p.name.clone(), json!(to_text(&p.value))))
-        .collect();
-    sets.as_object_mut()
-        .context("parameterSets is not an object")?
-        .insert(name.to_string(), Json::Object(set));
+    let sets = root
+        .entry("parameterSets")
+        .or_insert_with(|| json!({}))
+        .as_object_mut()
+        .context("parameterSets is not an object")?;
+    let mut set: Map<String, Json> = sets
+        .get(name)
+        .and_then(|s| s.as_object())
+        .map(|s| {
+            s.iter()
+                .filter(|(k, _)| is_meta_key(k))
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect()
+        })
+        .unwrap_or_default();
+    set.extend(
+        params
+            .iter()
+            .map(|p| (p.name.clone(), json!(to_text(&p.value)))),
+    );
+    sets.insert(name.to_string(), Json::Object(set));
     write(path, root)
 }
 
@@ -178,7 +277,7 @@ pub fn apply(path: &Path, name: &str, params: &mut [Param]) -> Result<Vec<String
     for p in params.iter_mut() {
         p.value = p.default.clone();
     }
-    for (key, raw) in set {
+    for (key, raw) in set.iter().filter(|(k, _)| !is_meta_key(k)) {
         let text = match raw {
             Json::String(s) => s.clone(),
             other => other.to_string(),
@@ -209,6 +308,48 @@ mod tests {
         assert!(try_names(&path).is_err());
         std::fs::write(&path, "{ \"parameterSets\": { \"b\": {}, \"a\": {} } }").unwrap();
         assert_eq!(try_names(&path).unwrap(), ["b", "a"]);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn metadata() {
+        let dir = std::env::temp_dir().join(format!("cocad-meta-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("m.json");
+        std::fs::write(
+            &path,
+            r#"{ "fileFormatVersion": "1", "title": "Case", "description": "A box",
+                 "author": "me", "version": 2, "tags": ["x"],
+                 "parameterSets": {
+                   "big": { "$title": "Big", "$description": "For B", "$note": "n", "w": "42" },
+                   "plain": { "w": "1" } } }"#,
+        )
+        .unwrap();
+        let i = info(&path);
+        assert_eq!(i.file.title.as_deref(), Some("Case"));
+        assert_eq!(i.file.description.as_deref(), Some("A box"));
+        assert_eq!(
+            i.file.other,
+            [
+                ("author".into(), "me".into()),
+                ("version".into(), "2".into())
+            ]
+        );
+        let big = i.set("big").unwrap();
+        assert_eq!(big.title.as_deref(), Some("Big"));
+        assert_eq!(big.description.as_deref(), Some("For B"));
+        assert_eq!(big.other, [("note".into(), "n".into())]);
+        assert!(i.set("plain").is_none());
+
+        // Apply skips the metadata keys. Save keeps them.
+        let src = "w = 10;\n";
+        let mut p = crate::params::parse(src);
+        assert!(apply(&path, "big", &mut p).unwrap().is_empty());
+        assert_eq!(p[0].value, Value::Num(42.0));
+        crate::params::apply_define(&mut p, "w=7").unwrap();
+        save(&path, "big", &p).unwrap();
+        let i2 = info(&path);
+        assert_eq!(i2, i);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

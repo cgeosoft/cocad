@@ -46,15 +46,16 @@ fn absolute(args: &Json) -> Result<PathBuf, String> {
 }
 
 fn has_ext(p: &std::path::Path, ext: &str) -> bool {
-    p.extension()
-        .is_some_and(|e| e.eq_ignore_ascii_case(ext))
+    p.extension().is_some_and(|e| e.eq_ignore_ascii_case(ext))
 }
 
 /// An absolute output path that may be written. A symbolic link is refused,
 /// because it can point at a file that the caller did not name.
 fn output(args: &Json) -> Result<PathBuf, String> {
     let p = absolute(args)?;
-    if p.symlink_metadata().is_ok_and(|m| m.file_type().is_symlink()) {
+    if p.symlink_metadata()
+        .is_ok_and(|m| m.file_type().is_symlink())
+    {
         return Err(format!("{} is a symbolic link", p.display()));
     }
     if p.exists() && !flag(args, "overwrite", false) {
@@ -322,6 +323,12 @@ impl App {
                 "names": self.sets,
                 "active": self.active_set,
                 "edited": self.set_edited,
+                "title": self.sets_info.file.title,
+                "description": self.sets_info.file.description,
+                "active_title": self.active_set.as_deref()
+                    .and_then(|n| self.sets_info.set(n)).and_then(|m| m.title.clone()),
+                "active_description": self.active_set.as_deref()
+                    .and_then(|n| self.sets_info.set(n)).and_then(|m| m.description.clone()),
             },
             "mode": mode,
             "wireframe": self.wireframe,

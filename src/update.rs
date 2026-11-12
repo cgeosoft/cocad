@@ -18,7 +18,7 @@ const TEST_URL: Option<&str> = option_env!("COCAD_RELEASES_URL");
 pub const DOWNLOAD_URL: &str = "https://cocad.cgeosoft.com/#downloads";
 const TIMEOUT: Duration = Duration::from_secs(10);
 /// A window that stays open checks again after this time.
-const INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
+const INTERVAL: Duration = Duration::from_secs(60 * 60);
 
 /// A release number. The order of the fields gives the order of the versions.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -164,10 +164,19 @@ impl Checker {
             self.job = None;
             if let Some(list) = result {
                 self.releases = to_show(list, Version::current());
+                // Another window can have dismissed a version since the start.
+                self.dismissed = self.dismissed.max(load_dismissed());
             }
         }
-        let due = self.checked.is_none_or(|t| t.elapsed() > INTERVAL);
-        let Some(url) = self.url.filter(|_| enabled && due && self.job.is_none()) else {
+        if !enabled || self.url.is_none() {
+            return;
+        }
+        // egui paints only on input, so an idle window must wake itself.
+        if let Some(t) = self.checked {
+            ctx.request_repaint_after(INTERVAL.saturating_sub(t.elapsed()));
+        }
+        let due = self.checked.is_none_or(|t| t.elapsed() >= INTERVAL);
+        let Some(url) = self.url.filter(|_| due && self.job.is_none()) else {
             return;
         };
         self.checked = Some(Instant::now());

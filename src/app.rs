@@ -25,6 +25,7 @@ use std::time::{Duration, Instant, SystemTime};
 mod remote;
 mod section;
 mod select;
+mod state;
 mod tour;
 mod view3d;
 
@@ -293,6 +294,9 @@ pub struct App {
     sets: Vec<String>,
     sets_file: PathBuf,
     sets_mtime: Option<SystemTime>,
+    /// Metadata of the sets file, and the (file, mtime) it was read for.
+    sets_info: presets::Info,
+    sets_info_key: Option<(PathBuf, Option<SystemTime>)>,
     active_set: Option<String>,
     set_edited: bool,
     /// Name being typed for a new set.
@@ -445,6 +449,8 @@ impl App {
             title: String::new(),
             sets: Vec::new(),
             sets_file: PathBuf::new(),
+            sets_info: presets::Info::default(),
+            sets_info_key: None,
             sets_mtime: None,
             active_set: None,
             set_edited: false,
@@ -490,8 +496,10 @@ impl App {
 
     fn open(&mut self, path: PathBuf) {
         self.flush_autosave();
+        self.save_state();
         match std::fs::read_to_string(&path) {
             Ok(src) => {
+                let saved = state::load(&path);
                 self.params = params::parse(&src);
                 self.mtime = mtime(&path);
                 self.sets_file = presets::file_for(&path);
@@ -511,6 +519,17 @@ impl App {
                 self.cancel_parts();
                 self.set_assembly(None);
                 self.view3d.new_model();
+                if let Some(st) = &saved {
+                    self.restore_panels(st);
+                    if self.restore_params(st) {
+                        self.set_edited = self.active_set.is_some();
+                        let text = match &self.active_set {
+                            Some(n) => format!("Restored your last values of set {n}"),
+                            None => "Restored your last values".to_string(),
+                        };
+                        self.toast = Some((text, Instant::now()));
+                    }
+                }
                 self.slice_rev += 1;
                 self.fit_pending = true;
                 self.error = None;
@@ -1700,6 +1719,12 @@ impl App {
             .or(file.parent())
             .map(|d| d.to_path_buf());
         let mut gear_rect = egui::Rect::NOTHING;
+        let key = (path.clone(), mtime(&path));
+        if self.sets_info_key.as_ref() != Some(&key) {
+            self.sets_info = presets::info(&path);
+            self.sets_info_key = Some(key);
+        }
+        let file_meta = self.sets_info.file.clone();
         ui::card(ui, |ui| {
             ui.horizontal(|ui| {
                 let name = path
@@ -1740,6 +1765,7 @@ impl App {
                     });
                 });
             });
+            meta_text(ui, &file_meta);
         });
         ui.add_space(4.0);
 
@@ -1802,6 +1828,21 @@ impl App {
                 }
             }
         });
+        if let Some(meta) = self
+            .active_set
+            .as_deref()
+            .and_then(|n| self.sets_info.set(n))
+        {
+            ui.add_space(4.0);
+            egui::Frame::NONE
+                .fill(ui::c().input)
+                .corner_radius(8)
+                .inner_margin(egui::Margin::symmetric(10, 8))
+                .show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    meta_text(ui, meta);
+                });
+        }
 
         // The gear menu, under the gear button, right aligned.
         let mut new_file = false;
@@ -3150,8 +3191,8 @@ fn update_settings(ui: &mut egui::Ui, edit: &mut openscad::Config) {
     toggle_row(
         ui,
         "Check for new versions",
-        "Asks GitHub for the list of releases when the window opens and once a day. GitHub sees \
-         your IP address and the app version. CoCAD does not install anything.",
+        "Asks GitHub for the list of releases when the window opens and each hour after that. \
+         GitHub sees your IP address and the app version. CoCAD does not install anything.",
         &mut edit.update_check,
     );
 }
@@ -3443,6 +3484,7 @@ impl eframe::App for App {
 
     fn on_exit(&mut self, gl: Option<&eframe::glow::Context>) {
         self.flush_autosave();
+        self.save_state();
         if let Some(j) = &self.job {
             j.cancel.store(true, Ordering::Relaxed);
         }
@@ -3487,6 +3529,32 @@ fn setting<N: egui::emath::Numeric>(
         .changed();
     ui.add_space(4.0);
     changed
+}
+
+/// Title, description and other fields of a sets file or a set. An empty
+/// `meta` shows nothing. A web address shows as a link.
+fn meta_text(ui: &mut egui::Ui, meta: &presets::Meta) {
+    if meta.is_empty() {
+        return;
+    }
+    ui.spacing_mut().item_spacing.y = 3.0;
+    if let Some(t) = &meta.title {
+        ui.add(egui::Label::new(RichText::new(t).size(14.0).strong()).wrap());
+    }
+    if let Some(d) = &meta.description {
+        ui.add(egui::Label::new(RichText::new(d).size(12.5).color(ui::c().dim)).wrap());
+    }
+    for (k, v) in &meta.other {
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            ui.label(ui::dim(format!("{}:", humanize(k))));
+            if v.starts_with("https://") || v.starts_with("http://") {
+                ui.hyperlink_to(RichText::new(v).size(12.5), v);
+            } else {
+                ui.label(RichText::new(v).size(12.5));
+            }
+        });
+    }
 }
 
 /// Dim label on the left, value on the right.

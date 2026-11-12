@@ -25,7 +25,7 @@ pub(super) struct View3d {
     /// Colors that the user selected, by part name. A new render keeps the
     /// names ("Part 2", or a name from the `cocad_part` list), so the colors
     /// stay. Opening another model clears them.
-    custom: HashMap<String, [u8; 3]>,
+    pub custom: HashMap<String, [u8; 3]>,
     /// The part colors window is open.
     pub colors_open: bool,
     /// The last moved mesh for the photo, with its key.
@@ -34,7 +34,7 @@ pub(super) struct View3d {
     pub explode: bool,
     /// The explode distance in mm that the user selected. `None` uses the
     /// default distance of the model. Opening another model clears it.
-    explode_mm: Option<f32>,
+    pub explode_mm: Option<f32>,
     pub explode_axis: Axis,
     /// The selected part and the part in focus (see `select.rs`).
     pub sel: super::select::Selection,

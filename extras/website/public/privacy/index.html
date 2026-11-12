@@ -72,7 +72,7 @@
         <thead><tr><th>Connection</th><th>When</th><th>What it carries</th></tr></thead>
         <tbody>
           <tr><td>PostHog (<span class="mono">eu.i.posthog.com</span>)</td><td>Only for an option that you turned on</td><td>The data above. Your system also looks up this host name</td></tr>
-          <tr><td>GitHub API (<span class="mono">api.github.com</span>)</td><td>When the app window opens and once a day after that, unless you turn off File &gt; Settings &gt; Updates &gt; Check for new versions</td><td>A request for the list of releases. GitHub sees your IP address and the app version. This is not part of the two options above and holds no analytics. Your system also looks up this host name</td></tr>
+          <tr><td>GitHub API (<span class="mono">api.github.com</span>)</td><td>When the app window opens and each hour after that, unless you turn off File &gt; Settings &gt; Updates &gt; Check for new versions</td><td>A request for the list of releases. GitHub sees your IP address and the app version. This is not part of the two options above and holds no analytics. Your system also looks up this host name</td></tr>
           <tr><td>Your web browser</td><td>Only when you click a link, such as the GitHub page, the download button or this Notice</td><td>A normal browser request</td></tr>
           <tr><td>127.0.0.1 (MCP server)</td><td>When the MCP option is on, which is the default</td><td>Tool calls on your computer only. Nothing leaves the computer through this port</td></tr>
         </tbody>

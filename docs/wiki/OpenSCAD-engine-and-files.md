@@ -36,13 +36,14 @@ The [command line](Command-line) uses the same settings.
 | `recent` | The list of recent models |
 | `sets-files` | The sets file of each model |
 | `last-sets` | The set that you used last for each model |
+| `models.json` | For each model: the settings of the right panel and your last parameter values (last 100 models) |
 | `mcp/` | The addresses of the open windows, for the [MCP server](MCP-reference) |
 | `examples/` | The copies of the example models |
 | `tour_seen` | The marker of the welcome tour. Delete it to show the tour at the next start. |
 
 ## Updates
 
-When the window opens and once a day after that, CoCAD asks GitHub for the list of releases.
+When the window opens and each hour after that, CoCAD asks GitHub for the list of releases.
 
 - For a latest version of 0.4.5, the list of changes shows 0.4.0 to 0.4.5, plus all versions between your version and 0.4.0.
 - The release workflow writes the notes from the commit subjects since the last tag. It leaves out `Version` and `Website:` commits. Each `*` line in the notes is one bullet in the app.

@@ -32,7 +32,7 @@ The page also shows the state of the server: **Running** or **Off**.
 
 ## Updates
 
-**Check for new versions**: when the window opens and once a day after that, CoCAD asks GitHub for the list of releases.
+**Check for new versions**: when the window opens and each hour after that, CoCAD asks GitHub for the list of releases.
 
 - If a newer version exists, a small notice shows at the bottom right of the window.
 - Click the notice to see the changes. The button in that window opens the download section of the website.

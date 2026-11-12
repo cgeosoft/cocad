@@ -79,6 +79,7 @@ Models with `// expect: error` on the first line must fail.
 | `src/app/tour.rs` | Welcome tour |
 | `src/mcp.rs` | MCP server, tool list, window listener |
 | `src/app/view3d.rs` | 3D view options for the parts: part colors, explode, Parts and Explode cards, part colors window |
+| `src/app/state.rs` | State of each model: right panel settings and last parameter values, in `models.json` |
 | `src/app/section.rs` | Section cut: planes on X, Y and Z, Section card, MCP section state |
 | `src/render.rs` | OpenGL shaders and buffers. Draws each part with its own color, offset and transparency, and the section cut with stencil cut faces |
 | `src/assembly.rs` | Parts of the 3D view: shells, named parts, part palette, moved mesh for the photo |
