@@ -334,7 +334,15 @@ At the first start, CoCAD asks about two optional kinds of data. Both boxes star
 
 An error report holds no install ID and no error message. CoCAD does not send model contents, file names, parameter values or OpenSCAD output.
 
-PostHog receives this data. It sees your IP address and does not store it. The app window sends the data. The `params`, `export`, `slice` and `photo` commands and the `cocad mcp` process send nothing. If you connect an MCP client, the window sends the same data as when you use it yourself.
+PostHog receives this data. It sees your IP address and does not store it. The app window sends the data. The `params`, `export`, `slice` and `photo` commands and the `cocad mcp` process send nothing.
+
+If you connect an MCP client and usage analytics are on, the window sends only these events for the actions of that client:
+
+- App start, when `open_model` starts the window.
+- Model open, for each `open_model` call.
+- View change, when `set_view` changes the `mode`.
+
+The other MCP tools, such as `export_model` and `save_photo`, send no event. If error reports are on, the window reports a failure during an MCP action in the same way as other failures.
 
 The update check is separate from these two choices. It sends no analytics. GitHub sees your IP address and the app version. See [Updates](#updates).
 

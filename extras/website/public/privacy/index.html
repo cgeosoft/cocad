@@ -26,7 +26,7 @@
   <main class="section container legal">
     <p class="label"><span class="dot"></span>Privacy</p>
     <h1 class="big-title">Privacy Notice</h1>
-    <p class="legal-date mono">Notice version 2. Last updated: November 8, 2026</p>
+    <p class="legal-date mono">Notice version 2. Last updated: November 12, 2026</p>
 
     <section>
       <h2>Summary</h2>
@@ -56,7 +56,14 @@
       <p>The legal basis for each option is your consent (GDPR Art. 6(1)(a)). You can withdraw it at any time in File &gt; Settings.</p>
       <p>An error report holds no install ID and no error message. Each report has a new random ID, so a report does not link to your analytics or to another report.</p>
       <p>The app does not send model contents, file names, parameter values or OpenSCAD output. PostHog sees your IP address during the connection and does not store it. The app tells PostHog not to look up your location.</p>
-      <p>Only the app window sends data. The <code>params</code>, <code>export</code>, <code>slice</code> and <code>photo</code> commands send nothing, and the <code>cocad mcp</code> process sends nothing. If you connect an MCP client, the window sends the same data as when you use it yourself, if you turned the options on.</p>
+      <p>Only the app window sends data. The <code>params</code>, <code>export</code>, <code>slice</code> and <code>photo</code> commands send nothing, and the <code>cocad mcp</code> process sends nothing.</p>
+      <p>If you connect an MCP client and you turned on usage analytics, the window sends only these events for the actions of that client:</p>
+      <ul>
+        <li>app started, when the client starts the app window</li>
+        <li>model opened, when the client opens a model</li>
+        <li>view changed, when the client changes between the model, slice and photo views</li>
+      </ul>
+      <p>Exports, saved photos and the other actions of the client send no event. If you turned on error reports, the window reports a failure during an action of the client in the same way as other failures.</p>
     </section>
 
     <section id="connections">

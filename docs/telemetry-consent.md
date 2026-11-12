@@ -453,7 +453,7 @@ These are manual runs on a private display on Linux, with private settings. The 
 | Turn analytics off | No request after that, and the ID stays. Only that option changes in the record. Turning it on again sends events with the same ID |
 | Update prompt from 0.3.1 settings | Analytics selected, error reports clear, explanation shown. 0 requests, also with an MCP action while the prompt was open. The record then shows `update-prompt` |
 | Old `config` keys | The next `Config::save` removes them. Consent does not change |
-| MCP action after consent | The window sends `view_changed`, as the Notice says |
+| MCP action after consent | The window sends `view_changed`. See [MCP events](#mcp-events-2026-11-12) for each tool |
 | Second window | With analytics turned off in window B, an MCP action in window A sends nothing. A shows the new value in Settings. A save from A does not change the record |
 | Panic, error reports on | One `$exception` with only the listed fields. The panic text is only in the local stderr. The process exits with code 101 |
 | Panic, stripped binary as in the `.deb` | One report with `[external]` and the location frame only |
@@ -461,3 +461,29 @@ These are manual runs on a private display on Linux, with private settings. The 
 | Panic with a stalled network | The process ended 2.5 seconds after the trigger: the poll delay of the test, then the 2 second wait |
 
 The panic was added to a throwaway copy of the source. A real report still needs a check against PostHog. See [Release gate](#release-gate). I did not run these tests on Windows or macOS.
+
+A second run, on the `telemetry-consent` branch after the merge of multicolor 3MF and File > Examples, passed all the tests above again. It added these results:
+
+| Test | Result |
+|---|---|
+| File > Examples | One `model_opened` with the parameter count and no file name |
+| Multicolor 3MF export through MCP | The tool writes the file. 0 requests |
+
+### MCP events, 2026-11-12
+
+This run checks the MCP text in `README.md` and the Privacy Notice. It used a release build of version 0.6.0 (commit `b2c9f3e`) with a fake key, a local stub in place of PostHog and a private display on Linux. The private settings had analytics on and error reports off. Each step counts the requests 3 seconds after the tool call. No tool call returned an error.
+
+| MCP tool | Requests |
+|---|---|
+| `open_model` with no window | `app_started`, then `model_opened`. `cocad mcp` starts the window |
+| `open_model` in an open window | One `model_opened` |
+| `set_view` with a different `mode` | One `view_changed` |
+| `set_view` with the same `mode` | 0 |
+| `set_view` with `yaw`, `pitch`, `fit`, `wireframe` and `explode` | 0 |
+| `save_photo`, in the model view and in the photo view | 0. The tool writes the PNG |
+| `export_model` to STL, and to a multicolor 3MF with `slicer` | 0. The tool writes the file |
+| `get_state`, `get_params`, `get_source`, `list_windows`, `set_params`, `reset_params`, `render`, `save_parameter_set`, `load_parameter_set`, `view_model`, `slice` | 0 |
+
+I did not test `select_window`. It runs in the `cocad mcp` process, and in the window it calls only `get_state`.
+
+The code agrees. In `src/app/remote.rs`, `open_model` calls `App::open` and `set_view` calls `App::set_mode`. These send `model_opened` and `view_changed`. The export and photo tools run on their own threads and have no telemetry call. The panic hook covers all threads of the window process except the `telemetry` threads. Thus a panic during an MCP action makes a normal error report when error reports are on. I did not test this with a panic.
