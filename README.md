@@ -6,7 +6,7 @@
 
 A fast desktop viewer for OpenSCAD models. Open a `.scad` file, change its Customizer parameters with sliders, and see the model update. Export STL, 3MF or STEP, check the print layers, and render a photo of the part.
 
-![CoCAD](preview.jpg)
+![CoCAD](assets/preview.png)
 
 OpenSCAD does the geometry. CoCAD runs the `openscad` CLI in the background, reads the mesh and does the rest. With an OpenSCAD development build (Manifold backend), most models render in less than a second.
 
