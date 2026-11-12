@@ -6,7 +6,7 @@
 
 A fast desktop viewer for OpenSCAD models. Open a `.scad` file, change its Customizer parameters with sliders, and see the model update. Export STL, 3MF or STEP, check the print layers, and render a photo of the part.
 
-![CoCAD: slice preview of the honeycomb tray example](images/screen-slice.jpg)
+![CoCAD](preview.jpg)
 
 OpenSCAD does the geometry. CoCAD runs the `openscad` CLI in the background, reads the mesh and does the rest. With an OpenSCAD development build (Manifold backend), most models render in less than a second.
 
@@ -69,8 +69,6 @@ You can also open a file with Ctrl+O or drop it on the window. **File** lists th
 | Ctrl+, | Settings |
 | Ctrl+Q | Quit |
 | Alt+F, Alt+M, Alt+V, Alt+H | Open the File, Model, View or Help menu |
-
-![The File menu with the recent models](images/screen-menu.jpg)
 
 The menu bar holds all commands: **File**, **Model**, **View** and **Help**. The right sidebar has the **Model**, **Slice** and **Photo** tabs. The **Model** tab has Auto render, Render, the export buttons, the parts, the explode, the section and the mesh data.
 
@@ -208,13 +206,7 @@ The slicer is for preview only. It has no travel moves, supports or bridges, and
 
 ## Photo render
 
-![Photo view: path-traced render of the gear example](images/screen-photo.jpg)
-
 The **Photo** view path-traces the current camera view on all CPU cores. The image gets cleaner with each sample. When you move the view or change a setting, the render waits until the view rests, then starts again.
-
-| | | | |
-|---|---|---|---|
-| ![Gear](images/render-gear.jpg) | ![Honeycomb tray](images/render-honeycomb.jpg) | ![Knob, light studio](images/render-knob.jpg) | ![Twisted vase](images/render-vase.jpg) |
 
 - **Material**: 8 color swatches or a color picker. Finish: matte, satin or gloss plastic.
 - **Print layer lines**: ripples the sides at the slice layer height, so the part looks printed.
@@ -422,7 +414,7 @@ A tag `v*` (for example `v0.2.0`) also makes a GitHub release with all files att
 | `examples/` | Test models. The binary embeds the models that render. |
 | `scripts/` | Build and packaging scripts |
 | `packaging/` | Desktop entry, icon, MIME type for the `.deb` |
-| `images/` | README images |
+| `assets/tour/` | Tour screenshots, embedded in the binary |
 
 Stack: Rust 2024, `eframe`/`egui` 0.31 with the `glow` (OpenGL 3.3) backend and an own renderer in an egui paint callback. `glam` for math, `zip` for 3MF, `rfd` for file dialogs.
 

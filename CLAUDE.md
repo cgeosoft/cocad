@@ -14,7 +14,9 @@ CoCAD (cgeosoft) is a Rust desktop app for OpenSCAD models. It edits Customizer 
 - `examples/`: test models. `// expect: error` on the first line marks a model that must fail.
 - `scripts/`: build, package, test and asset scripts. Packages go to `dist/`.
 - `packaging/`: desktop entry, icon and MIME type for the `.deb`.
-- `images/`: README images. The binary embeds the tour screenshots in `images/tour/`.
+- `preview.jpg`: the only README image.
+- `assets/tour/`: the tour screenshots. The binary embeds them.
+- `extras/website/images/`: full-size screenshots and renders for the website.
 - `.github/workflows/build.yml`: builds Linux, Windows and macOS on a `v*` tag or a manual start. A tag also makes the release.
 - `extras/website/`: static site for cocad.cgeosoft.com.
 
@@ -45,7 +47,7 @@ cargo check --target aarch64-apple-darwin
 7. Keep `Depends` in `scripts/package-deb.sh` in sync with new runtime libraries.
 8. The repo is public (MIT). Do not commit secrets, personal paths or host names.
 9. Git LFS stores JPG, PNG, MP4, STL and 3MF files. Keep them small.
-10. `images/`, `/preview.jpg` and website PNG files are plain git.
+10. `/preview.jpg`, `assets/tour/`, `extras/website/images/` and website PNG files are plain git.
 11. Warn before you delete files. Push only when the owner asks.
 12. `origin` is the private main repo. `github` is the public mirror. The branch is `main`.
 13. A release bumps the minor version by default. Bump the patch only when the owner says so.

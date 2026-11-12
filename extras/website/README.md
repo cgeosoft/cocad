@@ -17,7 +17,8 @@ The look follows the Portfolio website (`portfolio/extras/website`). The colors 
 | `public/viewer.js` | WebGL2 viewer: solid, wire and slice modes, with smooth shading |
 | `public/demo.js` | Hero loop and the agent demo |
 | `public/assets/mesh/` | Generated. Example meshes and `models.json` |
-| `public/assets/img/` | Generated. WebP copies of `images/` |
+| `images/` | Full-size screenshots and renders. Source of `public/assets/img/`. Not deployed |
+| `public/assets/img/` | Generated. WebP copies of `images/` and of some tour screenshots in `../../assets/tour/` |
 | `public/privacy/index.html` | Privacy Notice for the app and the site |
 | `public/llms.txt`, `robots.txt`, `sitemap.xml` | Files for crawlers and LLMs |
 | `public/assets/fonts/` | Self-hosted fonts (Latin subset) with their OFL licenses |

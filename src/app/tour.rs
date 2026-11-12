@@ -1,6 +1,6 @@
 //! Welcome tour: a modal wizard that shows the main features, one step at a
 //! time. It opens by itself at the first start. Help > Welcome tour opens it
-//! again. The screenshots are in `images/tour/` (see `scripts/tour-shots.sh`).
+//! again. The screenshots are in `assets/tour/` (see `scripts/tour-shots.sh`).
 
 use super::{App, card_header};
 use crate::ui;
@@ -22,7 +22,7 @@ struct Step {
 
 macro_rules! shot {
     ($name:literal) => {
-        include_bytes!(concat!("../../images/tour/", $name, ".jpg"))
+        include_bytes!(concat!("../../assets/tour/", $name, ".jpg"))
     };
 }
 

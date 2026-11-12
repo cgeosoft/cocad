@@ -4,8 +4,10 @@
 *.[mM][pP]4 filter=lfs diff=lfs merge=lfs -text
 *.[sS][tT][lL] filter=lfs diff=lfs merge=lfs -text
 *.3[mM][fF] filter=lfs diff=lfs merge=lfs -text
-# README images: plain git, so GitHub shows them without LFS
-images/** -filter -diff -merge -text
+# README image and tour screenshots: plain git, so GitHub shows them and the build needs no LFS
 /preview.jpg -filter -diff -merge -text
+assets/tour/** -filter -diff -merge -text
+# Website image sources: plain git
+extras/website/images/** -filter -diff -merge -text
 # Website images: plain git, so that Cloudflare Pages can build from the repo
 extras/website/public/**/*.png -filter -diff -merge -text

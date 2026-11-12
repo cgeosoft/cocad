@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Makes the screenshots of the welcome tour in images/tour/.
+# Makes the screenshots of the welcome tour in assets/tour/.
 # Runs the app on a private display with private settings, and drives it through
 # MCP and xdotool. The window of the user is not touched.
 # Needs Xephyr, xdotool, ImageMagick and OpenSCAD.
@@ -10,7 +10,7 @@ cd "$(dirname "$0")/.."
 
 cargo build --quiet
 bin=$PWD/target/debug/cocad
-out=$PWD/images/tour
+out=$PWD/assets/tour
 disp=:9
 width=1120
 height=700

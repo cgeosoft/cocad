@@ -4,7 +4,7 @@
 - mesh/<model>/<variant>.bin and mesh/models.json: real meshes of the example
   models. The app CLI renders them, so the sizes, times and estimates on the
   site are measured values.
-- img/: site images from images/, as WebP.
+- img/: site images from extras/website/images/ and assets/tour/, as WebP.
 
 Needs a release build, OpenSCAD and ImageMagick.
 Usage: scripts/website-assets.py [--meshes-only | --images-only]
@@ -67,17 +67,17 @@ MODELS = {
 }
 
 IMAGES = {
-    "images/screen-model.jpg": ("screen-model", 1600),
-    "images/screen-slice.jpg": ("screen-slice", 1600),
-    "images/screen-photo.jpg": ("screen-photo", 1600),
-    "images/screen-menu.jpg": ("screen-menu", 1600),
-    "images/tour/3-sets.jpg": ("screen-sets", 1120),
-    "images/tour/4-export.jpg": ("screen-export", 1120),
-    "images/tour/7-agent.jpg": ("screen-agent", 1120),
-    "images/render-gear.jpg": ("render-gear", 1000),
-    "images/render-honeycomb.jpg": ("render-honeycomb", 1000),
-    "images/render-knob.jpg": ("render-knob", 1000),
-    "images/render-vase.jpg": ("render-vase", 1000),
+    "extras/website/images/screen-model.jpg": ("screen-model", 1600),
+    "extras/website/images/screen-slice.jpg": ("screen-slice", 1600),
+    "extras/website/images/screen-photo.jpg": ("screen-photo", 1600),
+    "extras/website/images/screen-menu.jpg": ("screen-menu", 1600),
+    "assets/tour/3-sets.jpg": ("screen-sets", 1120),
+    "assets/tour/4-export.jpg": ("screen-export", 1120),
+    "assets/tour/7-agent.jpg": ("screen-agent", 1120),
+    "extras/website/images/render-gear.jpg": ("render-gear", 1000),
+    "extras/website/images/render-honeycomb.jpg": ("render-honeycomb", 1000),
+    "extras/website/images/render-knob.jpg": ("render-knob", 1000),
+    "extras/website/images/render-vase.jpg": ("render-vase", 1000),
 }
 
 
