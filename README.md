@@ -12,8 +12,8 @@ OpenSCAD does the geometry. CoCAD runs the `openscad` CLI in the background, rea
 
 ## Highlights
 
-- **Customizer panel.** Sliders, dropdowns, switches, text and vectors, in collapsible groups. The model renders again when you change a value.
-- **Parameter sets.** Save and load named sets in any `.json` file. OpenSCAD reads the same format.
+- **Customizer panel.** Sliders, dropdowns, switches, text and vectors, in collapsible groups. The model renders again when you change a value. A parameter with a description comment shows the description as its label.
+- **Parameter sets.** Save and load named sets in any `.json` file. OpenSCAD reads the same format. When you open a model, the set that you used last loads. Auto save is optional.
 - **Export.** Binary STL, 3MF with the parameters in the metadata, and STEP AP214 with real planar faces.
 - **Slice preview.** Walls, infill and top and bottom skin as round strands, with a layer slider and a time, length and weight estimate.
 - **Photo render.** A path tracer makes a studio photo of the current view, in a plastic color and finish you choose.
@@ -131,14 +131,16 @@ Security: each window listens on a free port of `127.0.0.1` and accepts only cal
 
 ## Parameter sets
 
-The **Parameter set** card at the top of the panel holds named sets of values.
+The card at the top of the **Parameters** panel shows the name of the sets file. The list of sets is below the card, directly above the parameter groups.
 
-- The first line shows the sets file. **Open file** loads sets from any `.json` file. **New file** picks a place and name for a new sets file. It is written on the first save.
+- **Open** loads sets from any `.json` file.
+- The gear button opens a menu. **New set…** saves the values as a new set. A window asks for the name. **New file…** picks a place and name for a new sets file. The app writes the file at the first save. **Delete** removes the selected set. A window asks you to confirm.
 - The app remembers the sets file for each model. Without one, it uses `<model>.json` next to `<model>.scad`.
+- When you open a model, the app loads the set that you used last for that model. With no record, it loads the first set of the sets file. If **Model defaults** was selected last, the values stay at the `.scad` defaults.
 - When the sets file changes on disk, the list of sets updates. The active set takes the new values, unless it has edits.
 - Select a set to load it. **Model defaults** sets all values back to the `.scad` defaults.
-- **Save** writes the values to the selected set. With no set selected, it asks for a name.
-- **Save as** saves the values as a new set. **Delete** removes the selected set (click two times).
+- The disk button writes the values to the selected set. With no set selected, it asks for a name. The button is orange while the set has edits that are not saved.
+- **Auto save** in **File > Settings > Parameter sets** writes the values to the selected set 0.6 s after your last change. It is off by default. With **Model defaults** selected, it saves nothing.
 - The file uses the OpenSCAD Customizer format. OpenSCAD reads it too: `openscad -p sets.json -P big`.
 
 ## Parts in the 3D view
@@ -278,7 +280,7 @@ OpenSCAD 2021.01 (the Debian package) uses the CGAL backend. CGAL is slow on lar
 
 The settings are saved in the settings folder. The CLI commands use them too.
 
-The settings folder also holds `recent`, the list of recent models, `mcp/`, the addresses of the open windows, and `tour_seen`, the marker of the welcome tour. Delete `tour_seen` to show the tour at the next start.
+The settings folder also holds `recent`, the list of recent models, `sets-files` and `last-sets`, the sets file and the last set of each model, `mcp/`, the addresses of the open windows, and `tour_seen`, the marker of the welcome tour. Delete `tour_seen` to show the tour at the next start.
 
 | System | Settings folder |
 |---|---|

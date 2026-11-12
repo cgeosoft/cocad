@@ -360,7 +360,7 @@ impl App {
         for (i, value) in fresh {
             self.params[i].value = value;
         }
-        self.set_edited = self.active_set.is_some();
+        self.mark_set_edited();
         let names: Vec<&str> = values.keys().map(String::as_str).collect();
         self.note(format!("changed {}", names.join(", ")));
         if flag(args, "render", true) {
@@ -396,7 +396,7 @@ impl App {
                 }
             }
         }
-        self.set_edited = self.active_set.is_some();
+        self.mark_set_edited();
         self.note("reset parameters".into());
         self.start_render();
         self.state_after(args, reply)
@@ -404,6 +404,7 @@ impl App {
 
     fn load_set(&mut self, args: &Json, reply: &Reply) -> Outcome {
         self.need_model()?;
+        self.flush_autosave();
         let name = args["name"].as_str().map(String::from);
         let mut skipped = Vec::new();
         match &name {
@@ -421,9 +422,7 @@ impl App {
                     .map_err(|e| e.to_string())?;
             }
         }
-        self.active_set = name;
-        self.set_edited = false;
-        self.confirm_delete = false;
+        self.set_active(name);
         if !skipped.is_empty() {
             self.note(format!("skipped {}", skipped.join(", ")));
         }
@@ -440,10 +439,10 @@ impl App {
         if self.sets.contains(&name) && !flag(args, "overwrite", false) {
             return Err(format!("Set {name} exists. Set overwrite to replace it."));
         }
+        self.flush_autosave();
         presets::save(&self.sets_file, &name, &self.params).map_err(|e| e.to_string())?;
         self.sets = presets::names(&self.sets_file);
-        self.active_set = Some(name.clone());
-        self.set_edited = false;
+        self.set_active(Some(name.clone()));
         self.note(format!("saved set {name}"));
         Ok(Some(json!({ "saved": name, "file": self.sets_file })))
     }

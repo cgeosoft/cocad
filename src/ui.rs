@@ -461,6 +461,153 @@ pub fn ghost(text: &str, active: bool) -> egui::Button<'static> {
         .corner_radius(8)
 }
 
+/// Line icons for `icon_button` and `icon_text_button`.
+#[derive(Clone, Copy)]
+pub enum Icon {
+    /// A folder.
+    Open,
+    /// A floppy disk.
+    Save,
+    /// A gear: more actions.
+    Gear,
+    /// An arrow that turns back.
+    Reset,
+    /// Two chevrons that point to each other.
+    Collapse,
+    /// Two chevrons that point away from each other.
+    Expand,
+}
+
+/// Draws `icon` on a 16 × 16 grid around `center`.
+fn paint_icon(p: &egui::Painter, icon: Icon, center: Pos2, color: Color32) {
+    let o = center - vec2(8.0, 8.0);
+    let pts = |xy: &[(f32, f32)]| xy.iter().map(|&(x, y)| o + vec2(x, y)).collect::<Vec<_>>();
+    let s = Stroke::new(1.5_f32, color);
+    let line = |xy: &[(f32, f32)]| {
+        p.add(egui::Shape::line(pts(xy), s));
+    };
+    let closed = |xy: &[(f32, f32)]| {
+        p.add(egui::Shape::closed_line(pts(xy), s));
+    };
+    match icon {
+        Icon::Open => {
+            closed(&[
+                (1.5, 3.5),
+                (6.0, 3.5),
+                (7.5, 5.25),
+                (14.5, 5.25),
+                (14.5, 12.75),
+                (1.5, 12.75),
+            ]);
+            line(&[(1.5, 7.25), (14.5, 7.25)]);
+        }
+        Icon::Save => {
+            closed(&[
+                (2.25, 2.25),
+                (11.0, 2.25),
+                (13.75, 5.0),
+                (13.75, 13.75),
+                (2.25, 13.75),
+            ]);
+            line(&[(5.0, 2.25), (5.0, 5.75), (10.0, 5.75), (10.0, 2.25)]);
+            line(&[(4.75, 13.75), (4.75, 9.5), (11.25, 9.5), (11.25, 13.75)]);
+        }
+        Icon::Gear => {
+            // Six teeth: each tooth has two points on the outer circle and
+            // two on the inner circle.
+            let mut outline = Vec::new();
+            for i in 0..6 {
+                let a = i as f32 * std::f32::consts::FRAC_PI_3;
+                for (r, da) in [(5.0, -0.36), (7.0, -0.2), (7.0, 0.2), (5.0, 0.36)] {
+                    let t: f32 = a + da;
+                    outline.push(center + vec2(t.cos(), t.sin()) * r);
+                }
+            }
+            p.add(egui::Shape::closed_line(outline, s));
+            p.circle_stroke(center, 2.2, s);
+        }
+        Icon::Reset => {
+            // Three quarters of a circle from the top, clockwise, and an
+            // arrow head at the top that points back.
+            let c = center + vec2(0.0, 0.5);
+            let arc: Vec<Pos2> = (0..=18)
+                .map(|i| {
+                    let t =
+                        -std::f32::consts::FRAC_PI_2 + i as f32 / 18.0 * 1.5 * std::f32::consts::PI;
+                    c + vec2(t.cos(), t.sin()) * 5.25
+                })
+                .collect();
+            p.add(egui::Shape::line(arc, s));
+            line(&[(9.75, 1.0), (7.25, 3.25), (9.75, 5.5)]);
+        }
+        Icon::Collapse => {
+            line(&[(4.0, 2.5), (8.0, 6.0), (12.0, 2.5)]);
+            line(&[(4.0, 13.5), (8.0, 10.0), (12.0, 13.5)]);
+        }
+        Icon::Expand => {
+            line(&[(4.0, 6.0), (8.0, 2.5), (12.0, 6.0)]);
+            line(&[(4.0, 10.0), (8.0, 13.5), (12.0, 10.0)]);
+        }
+    }
+}
+
+/// Background and foreground of a filled button in its current state.
+fn button_colors(ui: &egui::Ui, resp: &egui::Response, active: bool) -> (Color32, Color32) {
+    let enabled = ui.is_enabled();
+    let fill = if active {
+        accent_tint()
+    } else if enabled && resp.hovered() {
+        c().input_hover
+    } else {
+        c().input
+    };
+    let fg = if !enabled {
+        c().dim.gamma_multiply(0.6)
+    } else if active {
+        ACCENT
+    } else {
+        c().text
+    };
+    (fill, fg)
+}
+
+/// Filled square button with a line icon. `active` shows it in the accent
+/// color.
+pub fn icon_button(ui: &mut egui::Ui, icon: Icon, size: f32, active: bool) -> egui::Response {
+    let (rect, resp) = ui.allocate_exact_size(vec2(size, size), Sense::click());
+    if ui.is_rect_visible(rect) {
+        let (fill, fg) = button_colors(ui, &resp, active);
+        let p = ui.painter();
+        p.rect_filled(rect, 8.0, fill);
+        paint_icon(p, icon, rect.center(), fg);
+    }
+    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+/// Filled button with a line icon and a label.
+pub fn icon_text_button(ui: &mut egui::Ui, icon: Icon, text: &str, height: f32) -> egui::Response {
+    let font = FontId::proportional(13.5);
+    let width = ui.fonts(|f| {
+        f.layout_no_wrap(text.to_owned(), font.clone(), c().text)
+            .size()
+            .x
+    });
+    let (pad, icon_w, gap) = (10.0, 16.0, 6.0);
+    let size = vec2(pad + icon_w + gap + width + pad + 2.0, height);
+    let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
+    if ui.is_rect_visible(rect) {
+        let (fill, fg) = button_colors(ui, &resp, false);
+        let p = ui.painter();
+        p.rect_filled(rect, 8.0, fill);
+        let y = rect.center().y;
+        paint_icon(p, icon, egui::pos2(rect.left() + pad + icon_w / 2.0, y), fg);
+        let galley = p.layout_no_wrap(text.to_owned(), font, fg);
+        let at = egui::pos2(rect.left() + pad + icon_w + gap, y - galley.size().y / 2.0);
+        p.galley(at, galley, fg);
+    }
+    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
 fn one_line(ui: &egui::Ui, text: &str, font: FontId, max: f32) -> Arc<egui::Galley> {
     let mut job =
         egui::text::LayoutJob::simple_singleline(text.to_owned(), font, Color32::PLACEHOLDER);

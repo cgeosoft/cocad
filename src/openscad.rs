@@ -31,6 +31,8 @@ pub struct Config {
     pub mcp: bool,
     /// Ask GitHub for new versions.
     pub update_check: bool,
+    /// Save the values to the active parameter set when they change.
+    pub autosave_sets: bool,
 }
 
 impl Default for Config {
@@ -42,6 +44,7 @@ impl Default for Config {
             theme: "system".into(),
             mcp: true,
             update_check: true,
+            autosave_sets: false,
         }
     }
 }
@@ -80,6 +83,7 @@ impl Config {
                         "theme" => c.theme = v,
                         "mcp" => c.mcp = v != "false",
                         "update_check" => c.update_check = v != "false",
+                        "autosave_sets" => c.autosave_sets = v == "true",
                         _ => {}
                     }
                 }
@@ -99,8 +103,15 @@ impl Config {
     /// consent keys of older versions.
     pub(crate) fn text(&self) -> String {
         format!(
-            "openscad = {}\nopenscad_args = {}\nmanifold = {}\ntheme = {}\nmcp = {}\nupdate_check = {}\n",
-            self.binary, self.args, self.manifold, self.theme, self.mcp, self.update_check
+            "openscad = {}\nopenscad_args = {}\nmanifold = {}\ntheme = {}\nmcp = {}\nupdate_check = {}\n\
+             autosave_sets = {}\n",
+            self.binary,
+            self.args,
+            self.manifold,
+            self.theme,
+            self.mcp,
+            self.update_check,
+            self.autosave_sets
         )
     }
 

@@ -16,7 +16,7 @@ use crate::ui;
 use crate::update;
 use eframe::egui::{self, Color32, RichText, Vec2};
 use glam::{Mat4, Vec3};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, channel};
 use std::sync::{Arc, Mutex};
@@ -29,6 +29,8 @@ mod tour;
 mod view3d;
 
 const DEBOUNCE: Duration = Duration::from_millis(350);
+/// Auto save writes the set when the values do not change for this time.
+const AUTOSAVE: Duration = Duration::from_millis(600);
 
 #[derive(PartialEq, Clone, Copy)]
 enum Mode {
@@ -107,6 +109,7 @@ struct PhotoKey {
 #[derive(Clone, Copy, PartialEq)]
 enum SettingsPage {
     Appearance,
+    Sets,
     OpenScad,
     Mcp,
     Updates,
@@ -284,9 +287,13 @@ pub struct App {
     sets_mtime: Option<SystemTime>,
     active_set: Option<String>,
     set_edited: bool,
-    /// Name being typed for "Save as".
+    /// Name being typed for a new set.
     new_set: Option<String>,
     confirm_delete: bool,
+    /// Time of the last edit that auto save has not written yet.
+    autosave_at: Option<Instant>,
+    /// The menu of the gear button in the sets card, while it is open.
+    sets_menu: bool,
     collapsed: std::collections::HashSet<String>,
     cfg: openscad::Config,
     cfg_edit: Option<openscad::Config>,
@@ -435,6 +442,8 @@ impl App {
             set_edited: false,
             new_set: None,
             confirm_delete: false,
+            autosave_at: None,
+            sets_menu: false,
             collapsed: Default::default(),
             consent: consent
                 .prompt
@@ -472,6 +481,7 @@ impl App {
     }
 
     fn open(&mut self, path: PathBuf) {
+        self.flush_autosave();
         match std::fs::read_to_string(&path) {
             Ok(src) => {
                 self.params = params::parse(&src);
@@ -480,7 +490,11 @@ impl App {
                 self.sets = presets::names(&self.sets_file);
                 self.sets_mtime = mtime(&self.sets_file);
                 self.active_set = None;
+                self.set_edited = false;
+                self.confirm_delete = false;
                 self.new_set = None;
+                self.autosave_at = None;
+                self.autoload_set(&path);
                 self.file = Some(path);
                 self.mesh = None;
                 self.info = None;
@@ -557,6 +571,79 @@ impl App {
                 self.toast = Some((text, Instant::now()));
                 self.dirty_since = Some(Instant::now());
             }
+        }
+    }
+
+    /// Loads a set of the sets file when a model opens: the set that was
+    /// active last, else the first set. See `presets::autoload`.
+    fn autoload_set(&mut self, scad: &Path) {
+        let Some(name) = presets::autoload(scad, &self.sets) else {
+            return;
+        };
+        let file = self
+            .sets_file
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy();
+        let text = match presets::apply(&self.sets_file, &name, &mut self.params) {
+            Ok(skipped) if !skipped.is_empty() => {
+                format!("Loaded set {name}. Skipped: {}", skipped.join(", "))
+            }
+            Ok(_) => format!("Loaded set {name} from {file}"),
+            Err(e) => {
+                self.toast = Some((e.to_string(), Instant::now()));
+                return;
+            }
+        };
+        self.toast = Some((text, Instant::now()));
+        self.active_set = Some(name);
+    }
+
+    /// Makes `name` the active set with no edits, and records it for the
+    /// model. `None` is Model defaults.
+    fn set_active(&mut self, name: Option<String>) {
+        if let Some(f) = &self.file {
+            // The record only selects the set at the next start.
+            let _ = presets::set_last(f, name.as_deref());
+        }
+        self.active_set = name;
+        self.set_edited = false;
+        self.confirm_delete = false;
+        self.autosave_at = None;
+    }
+
+    /// Call after a value change. The active set then has edits, and auto
+    /// save writes them when the values stop changing.
+    fn mark_set_edited(&mut self) {
+        self.set_edited = self.active_set.is_some();
+        self.autosave_at = self.set_edited.then(Instant::now);
+    }
+
+    /// Writes the edits to the active set when auto save is on.
+    fn autosave(&mut self) {
+        self.autosave_at = None;
+        if !self.cfg.autosave_sets || !self.set_edited {
+            return;
+        }
+        let Some(name) = self.active_set.clone() else {
+            return;
+        };
+        match presets::save(&self.sets_file, &name, &self.params) {
+            Ok(()) => {
+                self.set_edited = false;
+                self.sets_mtime = mtime(&self.sets_file);
+            }
+            Err(e) => {
+                self.toast = Some((format!("Cannot save set {name}: {e}"), Instant::now()));
+            }
+        }
+    }
+
+    /// Writes the waiting auto save now, before the active set or the model
+    /// changes.
+    fn flush_autosave(&mut self) {
+        if self.autosave_at.is_some() {
+            self.autosave();
         }
     }
 
@@ -806,6 +893,9 @@ impl App {
         if self.auto_render && self.dirty_since.is_some_and(|t| t.elapsed() > DEBOUNCE) {
             self.start_render();
         }
+        if self.autosave_at.is_some_and(|t| t.elapsed() > AUTOSAVE) {
+            self.autosave();
+        }
         if self
             .slice_dirty_since
             .is_some_and(|t| t.elapsed() > DEBOUNCE)
@@ -820,6 +910,8 @@ impl App {
             || !self.pending.is_empty()
         {
             ctx.request_repaint_after(Duration::from_millis(50));
+        } else if self.autosave_at.is_some() {
+            ctx.request_repaint_after(AUTOSAVE);
         } else {
             ctx.request_repaint_after(Duration::from_millis(500));
         }
@@ -1452,18 +1544,21 @@ impl App {
         ui.horizontal(|ui| {
             ui.heading("Parameters");
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.spacing_mut().button_padding = Vec2::new(8.0, 5.0);
+                ui.spacing_mut().item_spacing.x = 6.0;
                 let all_closed = !self.params.is_empty()
                     && self
                         .params
                         .iter()
                         .all(|p| self.collapsed.contains(&p.group));
-                let label = if all_closed {
-                    "Expand all"
+                let (icon, label, hover) = if all_closed {
+                    (ui::Icon::Expand, "Expand", "Open all groups")
                 } else {
-                    "Collapse all"
+                    (ui::Icon::Collapse, "Collapse", "Close all groups")
                 };
-                if ui.add(ui::ghost(label, false)).clicked() {
+                if ui::icon_text_button(ui, icon, label, 28.0)
+                    .on_hover_text(hover)
+                    .clicked()
+                {
                     if all_closed {
                         self.collapsed.clear();
                     } else {
@@ -1471,11 +1566,18 @@ impl App {
                     }
                 }
                 let any = self.params.iter().any(|p| p.changed());
-                if ui.add_enabled(any, ui::ghost("Reset all", false)).clicked() {
+                let reset = ui
+                    .add_enabled_ui(any, |ui| {
+                        ui::icon_text_button(ui, ui::Icon::Reset, "Reset all", 28.0)
+                            .on_hover_text("Set all values back to the model defaults")
+                    })
+                    .inner;
+                if reset.clicked() {
                     for p in &mut self.params {
                         p.value = p.default.clone();
                     }
                     self.dirty_since = Some(Instant::now());
+                    self.mark_set_edited();
                 }
             });
         });
@@ -1544,55 +1646,48 @@ impl App {
             });
         if changed {
             self.dirty_since = Some(Instant::now());
-            self.set_edited = true;
+            self.mark_set_edited();
         }
     }
 
+    /// The sets file card (name, Open and the gear menu) and below it the
+    /// set list with Save. The set list sits directly above the parameter
+    /// groups, because the set gives their values.
     fn sets_bar(&mut self, ui: &mut egui::Ui) {
         let Some(file) = self.file.clone() else {
             return;
         };
-        let mut path = self.sets_file.clone();
+        let path = self.sets_file.clone();
         let mut msg: Option<String> = None;
         let mut switch_to: Option<PathBuf> = None;
+        let dir = path
+            .parent()
+            .filter(|d| d.is_dir())
+            .or(file.parent())
+            .map(|d| d.to_path_buf());
+        let mut gear_rect = egui::Rect::NOTHING;
         ui::card(ui, |ui| {
-            ui::section(ui, "Parameter set");
             ui.horizontal(|ui| {
                 let name = path
                     .file_name()
                     .unwrap_or_default()
                     .to_string_lossy()
                     .into_owned();
-                let exists = path.exists();
-                let text = if exists {
+                let text = if path.exists() {
                     name
                 } else {
                     format!("{name} (new)")
                 };
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.spacing_mut().button_padding = Vec2::new(8.0, 4.0);
-                    ui.spacing_mut().item_spacing.x = 2.0;
-                    let dir = path
-                        .parent()
-                        .filter(|d| d.is_dir())
-                        .or(file.parent())
-                        .map(|d| d.to_path_buf());
-                    if ui
-                        .add(ui::ghost("New file", false))
-                        .on_hover_text("Choose where to save a new sets file")
-                        .clicked()
-                    {
-                        let mut d = rfd::FileDialog::new()
-                            .add_filter("Parameter sets", &["json"])
-                            .set_file_name(path.file_name().unwrap_or_default().to_string_lossy());
-                        if let Some(dir) = &dir {
-                            d = d.set_directory(dir);
-                        }
-                        switch_to = d.save_file();
+                    ui.spacing_mut().item_spacing.x = 6.0;
+                    let gear = ui::icon_button(ui, ui::Icon::Gear, 28.0, self.sets_menu)
+                        .on_hover_text("New set, new file, delete");
+                    if gear.clicked() {
+                        self.sets_menu = !self.sets_menu;
                     }
-                    if ui
-                        .add(ui::ghost("Open file", false))
-                        .on_hover_text("Load sets from a .json file")
+                    gear_rect = gear.rect;
+                    if ui::icon_text_button(ui, ui::Icon::Open, "Open", 28.0)
+                        .on_hover_text("Open a sets file (.json)")
                         .clicked()
                     {
                         let mut d = rfd::FileDialog::new().add_filter("Parameter sets", &["json"]);
@@ -1603,180 +1698,303 @@ impl App {
                     }
                     // The name gets the space the buttons leave, cut short when needed.
                     ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                        ui.add(egui::Label::new(ui::dim(text)).truncate())
-                            .on_hover_text(path.display().to_string());
+                        ui.add(
+                            egui::Label::new(RichText::new(text).size(13.0).color(ui::c().dim))
+                                .truncate(),
+                        )
+                        .on_hover_text(path.display().to_string());
                     });
                 });
             });
-            {
-                let label = match &self.active_set {
-                    Some(n) if self.set_edited => format!("{n} (edited)"),
-                    Some(n) => n.clone(),
-                    None => "Model defaults".into(),
-                };
-                let mut pick: Option<Option<String>> = None;
-                // Show 4.5 rows. The half row tells the user that the list scrolls.
-                let sp = ui.spacing();
-                let row = (ui.text_style_height(&egui::TextStyle::Button)
-                    + 2.0 * sp.button_padding.y)
-                    .max(sp.interact_size.y);
-                let list_height = 4.0 * (row + sp.item_spacing.y) + 0.5 * row;
-                egui::ComboBox::from_id_salt("sets")
-                    .selected_text(label)
-                    .width(ui.available_width())
-                    .height(list_height)
-                    .show_ui(ui, |ui| {
-                        if ui
-                            .selectable_label(self.active_set.is_none(), "Model defaults")
-                            .clicked()
-                        {
-                            pick = Some(None);
-                        }
-                        for n in &self.sets {
-                            if ui
-                                .selectable_label(self.active_set.as_ref() == Some(n), n)
-                                .clicked()
-                            {
-                                pick = Some(Some(n.clone()));
-                            }
-                        }
-                    });
-                if let Some(choice) = pick {
-                    match &choice {
-                        None => {
-                            for p in &mut self.params {
-                                p.value = p.default.clone();
-                            }
-                        }
-                        Some(n) => match presets::apply(&path, n, &mut self.params) {
-                            Ok(skipped) if !skipped.is_empty() => {
-                                msg = Some(format!("Skipped: {}", skipped.join(", ")));
-                            }
-                            Ok(_) => {}
-                            Err(e) => msg = Some(e.to_string()),
-                        },
-                    }
-                    self.active_set = choice;
-                    self.set_edited = false;
-                    self.confirm_delete = false;
-                    self.dirty_since = Some(Instant::now());
-                }
-            }
-            ui.horizontal(|ui| {
-                ui.spacing_mut().button_padding = Vec2::new(10.0, 5.0);
-                ui.spacing_mut().item_spacing.x = 4.0;
-                let save = ui
-                    .add(ui::ghost("Save", false))
-                    .on_hover_text(match &self.active_set {
-                        Some(n) => format!("Save the values to '{n}'"),
-                        None => "Save the values as a new set".into(),
-                    });
-                if save.clicked() {
-                    match self.active_set.clone() {
-                        Some(n) => match presets::save(&path, &n, &self.params) {
-                            Ok(()) => {
-                                self.set_edited = false;
-                                msg = Some(format!("Saved '{n}'"));
-                            }
-                            Err(e) => msg = Some(e.to_string()),
-                        },
-                        None => self.new_set = Some(String::new()),
-                    }
-                }
-                if ui
-                    .add(ui::ghost("Save as", false))
-                    .on_hover_text("Save the values as a new set")
-                    .clicked()
-                {
-                    self.new_set = Some(String::new());
-                }
-                if let Some(n) = self.active_set.clone() {
-                    let text = if self.confirm_delete {
-                        "Sure?"
-                    } else {
-                        "Delete"
-                    };
-                    let b = egui::Button::new(RichText::new(text).color(ui::c().danger))
-                        .fill(Color32::TRANSPARENT)
-                        .corner_radius(8);
+        });
+        ui.add_space(4.0);
+
+        let mut pick: Option<Option<String>> = None;
+        let mut new_set = false;
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 6.0;
+            let label = match &self.active_set {
+                Some(n) if self.set_edited => format!("{n} (edited)"),
+                Some(n) => n.clone(),
+                None => "Model defaults".into(),
+            };
+            // Height of a button row. The Save button is a square of this size.
+            let sp = ui.spacing();
+            let row = (ui.text_style_height(&egui::TextStyle::Button) + 2.0 * sp.button_padding.y)
+                .max(sp.interact_size.y);
+            // Show 4.5 rows. The half row tells the user that the list scrolls.
+            let list_height = 4.0 * (row + sp.item_spacing.y) + 0.5 * row;
+            let width = ui.available_width() - row - sp.item_spacing.x;
+            // egui keeps the popup size of the first open. A new id for each
+            // number of sets lets the popup take the new size.
+            egui::ComboBox::from_id_salt(("sets", self.sets.len()))
+                .selected_text(label)
+                .width(width)
+                .height(list_height)
+                .show_ui(ui, |ui| {
                     if ui
-                        .add(b)
-                        .on_hover_text(format!("Delete '{n}' from {}", path.display()))
+                        .selectable_label(self.active_set.is_none(), "Model defaults")
                         .clicked()
                     {
-                        if self.confirm_delete {
-                            match presets::delete(&path, &n) {
-                                Ok(()) => {
-                                    msg = Some(format!("Deleted '{n}'"));
-                                    self.active_set = None;
-                                }
-                                Err(e) => msg = Some(e.to_string()),
-                            }
-                            self.confirm_delete = false;
-                        } else {
-                            self.confirm_delete = true;
+                        pick = Some(None);
+                    }
+                    for n in &self.sets {
+                        if ui
+                            .selectable_label(self.active_set.as_ref() == Some(n), n)
+                            .clicked()
+                        {
+                            pick = Some(Some(n.clone()));
                         }
                     }
-                }
-            });
-
-            if let Some(name) = &mut self.new_set {
-                ui.add_space(4.0);
-                let mut submit = false;
-                let mut cancel = false;
-                ui.horizontal(|ui| {
-                    let r = ui.add(
-                        egui::TextEdit::singleline(name)
-                            .hint_text("Name of the new set")
-                            .desired_width(ui.available_width() - 150.0)
-                            .margin(Vec2::new(10.0, 6.0)),
-                    );
-                    r.request_focus();
-                    submit = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                    cancel = ui.input(|i| i.key_pressed(egui::Key::Escape));
-                    ui.spacing_mut().button_padding = Vec2::new(10.0, 5.0);
-                    submit |= ui
-                        .add_enabled(!name.trim().is_empty(), ui::primary("Save"))
-                        .clicked();
-                    cancel |= ui.add(ui::ghost("Cancel", false)).clicked();
                 });
-                let name = name.trim().to_string();
-                if submit && !name.is_empty() {
-                    match presets::save(&path, &name, &self.params) {
+            let edited = self.set_edited && self.active_set.is_some();
+            let save = ui::icon_button(ui, ui::Icon::Save, row, edited).on_hover_text(match &self
+                .active_set
+            {
+                Some(n) => format!("Save the values to {n}"),
+                None => "Save the values as a new set".into(),
+            });
+            if save.clicked() {
+                match self.active_set.clone() {
+                    Some(n) => match presets::save(&path, &n, &self.params) {
                         Ok(()) => {
-                            msg = Some(format!("Saved '{name}'"));
-                            self.active_set = Some(name);
                             self.set_edited = false;
+                            self.autosave_at = None;
+                            msg = Some(format!("Saved {n}"));
                         }
                         Err(e) => msg = Some(e.to_string()),
-                    }
-                    self.new_set = None;
-                } else if cancel {
-                    self.new_set = None;
+                    },
+                    None => new_set = true,
                 }
             }
         });
+
+        // The gear menu, under the gear button, right aligned.
+        let mut new_file = false;
+        let mut delete = false;
+        if self.sets_menu {
+            let ctx = ui.ctx().clone();
+            let area = egui::Area::new(egui::Id::new("sets_menu"))
+                .order(egui::Order::Foreground)
+                .pivot(egui::Align2::RIGHT_TOP)
+                .fixed_pos(gear_rect.right_bottom() + Vec2::new(0.0, 4.0))
+                .show(&ctx, |ui| {
+                    ui::menu_frame_width(ui, 200.0, |ui| {
+                        new_set |= ui::menu_item(ui, "New set…", "", true, false)
+                            .on_hover_text("Save the values as a new set")
+                            .clicked();
+                        new_file = ui::menu_item(ui, "New file…", "", true, false)
+                            .on_hover_text("Choose where to save a new sets file")
+                            .clicked();
+                        ui::menu_separator(ui);
+                        let (text, on) = match &self.active_set {
+                            Some(n) => (format!("Delete {n}…"), true),
+                            None => ("Delete set…".to_string(), false),
+                        };
+                        delete = ui::menu_item(ui, &text, "", on, false)
+                            .on_disabled_hover_text("Select a set first")
+                            .clicked();
+                    })
+                });
+            let outside = ctx.input(|i| {
+                i.pointer.any_pressed()
+                    && i.pointer
+                        .interact_pos()
+                        .is_some_and(|p| !area.response.rect.contains(p) && !gear_rect.contains(p))
+            });
+            let escape = ctx.input(|i| i.key_pressed(egui::Key::Escape));
+            if new_set || new_file || delete || outside || escape {
+                self.sets_menu = false;
+            }
+        }
+
+        if let Some(choice) = pick {
+            self.flush_autosave();
+            match &choice {
+                None => {
+                    for p in &mut self.params {
+                        p.value = p.default.clone();
+                    }
+                }
+                Some(n) => match presets::apply(&path, n, &mut self.params) {
+                    Ok(skipped) if !skipped.is_empty() => {
+                        msg = Some(format!("Skipped: {}", skipped.join(", ")));
+                    }
+                    Ok(_) => {}
+                    Err(e) => msg = Some(e.to_string()),
+                },
+            }
+            self.set_active(choice);
+            self.dirty_since = Some(Instant::now());
+        }
+        if new_set {
+            self.flush_autosave();
+            self.new_set = Some(String::new());
+            self.confirm_delete = false;
+        }
+        if new_file {
+            let mut d = rfd::FileDialog::new()
+                .add_filter("Parameter sets", &["json"])
+                .set_file_name(path.file_name().unwrap_or_default().to_string_lossy());
+            if let Some(dir) = &dir {
+                d = d.set_directory(dir);
+            }
+            switch_to = d.save_file();
+        }
+        if delete {
+            self.confirm_delete = true;
+            self.new_set = None;
+        }
         if let Some(p) = switch_to {
+            self.flush_autosave();
             if let Err(e) = presets::remember(&file, &p) {
                 msg = Some(format!("Cannot remember the sets file: {e}"));
             }
-            path = p;
-            self.sets_file = path.clone();
-            self.sets_mtime = mtime(&path);
+            self.sets_file = p.clone();
+            self.sets_mtime = mtime(&p);
             self.active_set = None;
             self.set_edited = false;
             self.confirm_delete = false;
-            let n = presets::names(&path).len();
+            self.new_set = None;
+            let n = presets::names(&p).len();
             msg = msg.or(Some(format!(
                 "{n} sets in {}",
-                path.file_name().unwrap_or_default().to_string_lossy()
+                p.file_name().unwrap_or_default().to_string_lossy()
             )));
         }
         if msg.is_some() {
-            self.sets = presets::names(&path);
+            self.sets = presets::names(&self.sets_file);
         }
         if let Some(m) = msg {
             self.toast = Some((m, Instant::now()));
+        }
+    }
+
+    /// The frame of a small modal window.
+    fn dialog_frame() -> egui::Frame {
+        egui::Frame::NONE
+            .fill(ui::c().panel)
+            .corner_radius(14)
+            .inner_margin(egui::Margin::same(18))
+            .stroke(egui::Stroke::new(1.0_f32, ui::c().line))
+    }
+
+    /// The window that asks for the name of a new set.
+    fn new_set_dialog(&mut self, ctx: &egui::Context) {
+        let Some(mut name) = self.new_set.take() else {
+            return;
+        };
+        let file = self
+            .sets_file
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned();
+        let mut submit = false;
+        let mut cancel = false;
+        let modal = egui::Modal::new(egui::Id::new("new_set"))
+            .frame(Self::dialog_frame())
+            .show(ctx, |ui| {
+                ui.set_width(360.0);
+                ui.heading("New parameter set");
+                ui.add_space(4.0);
+                ui.label(ui::dim(format!("Saves the current values in {file}.")));
+                ui.add_space(10.0);
+                let r = ui.add(
+                    egui::TextEdit::singleline(&mut name)
+                        .hint_text("Name of the set")
+                        .desired_width(f32::INFINITY)
+                        .margin(Vec2::new(10.0, 7.0)),
+                );
+                // Enter takes the focus away. Read that before the focus
+                // request, which gives the focus back.
+                submit = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                if !submit && ui.memory(|m| m.focused().is_none()) {
+                    r.request_focus();
+                }
+                let trimmed = name.trim();
+                if self.sets.iter().any(|s| s == trimmed) {
+                    ui.add_space(4.0);
+                    ui.label(
+                        RichText::new(format!("A set {trimmed} exists. Save replaces it."))
+                            .color(ui::ACCENT)
+                            .size(12.5),
+                    );
+                }
+                ui.add_space(12.0);
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.spacing_mut().button_padding = Vec2::new(16.0, 7.0);
+                    submit |= ui
+                        .add_enabled(!trimmed.is_empty(), ui::primary("Save"))
+                        .clicked();
+                    cancel |= ui.add(ui::ghost("Cancel", false)).clicked();
+                });
+            });
+        cancel |= modal.should_close();
+        let name = name.trim().to_string();
+        if submit && !name.is_empty() {
+            match presets::save(&self.sets_file, &name, &self.params) {
+                Ok(()) => {
+                    self.toast = Some((format!("Saved {name}"), Instant::now()));
+                    self.sets = presets::names(&self.sets_file);
+                    self.set_active(Some(name));
+                }
+                Err(e) => self.toast = Some((e.to_string(), Instant::now())),
+            }
+        } else if !cancel {
+            self.new_set = Some(name);
+        }
+    }
+
+    /// The window that confirms the delete of the active set.
+    fn delete_set_dialog(&mut self, ctx: &egui::Context) {
+        if !self.confirm_delete {
+            return;
+        }
+        let Some(n) = self.active_set.clone() else {
+            self.confirm_delete = false;
+            return;
+        };
+        let file = self
+            .sets_file
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned();
+        let mut delete = false;
+        let mut cancel = false;
+        let modal = egui::Modal::new(egui::Id::new("delete_set"))
+            .frame(Self::dialog_frame())
+            .show(ctx, |ui| {
+                ui.set_width(360.0);
+                ui.heading("Delete parameter set");
+                ui.add_space(4.0);
+                ui.label(format!("Delete {n} from {file}? You cannot undo this."));
+                ui.add_space(12.0);
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.spacing_mut().button_padding = Vec2::new(16.0, 7.0);
+                    let b = egui::Button::new(RichText::new("Delete").color(Color32::BLACK))
+                        .fill(ui::c().danger)
+                        .corner_radius(8);
+                    delete = ui.add(b).clicked();
+                    cancel = ui.add(ui::ghost("Cancel", false)).clicked();
+                });
+            });
+        cancel |= modal.should_close();
+        if delete {
+            match presets::delete(&self.sets_file, &n) {
+                Ok(()) => {
+                    self.toast = Some((format!("Deleted {n}"), Instant::now()));
+                    self.sets = presets::names(&self.sets_file);
+                    self.set_active(None);
+                }
+                Err(e) => {
+                    self.toast = Some((e.to_string(), Instant::now()));
+                    self.confirm_delete = false;
+                }
+            }
+        } else if cancel {
+            self.confirm_delete = false;
         }
     }
 
@@ -2710,6 +2928,7 @@ impl App {
         let mut page = self.settings_page;
         let mut pages = vec![
             (SettingsPage::Appearance, "Appearance", None),
+            (SettingsPage::Sets, "Parameter sets", None),
             (
                 SettingsPage::OpenScad,
                 "OpenSCAD",
@@ -2761,6 +2980,9 @@ impl App {
                             .show(ui, |ui| match page {
                                 SettingsPage::Appearance => {
                                     ui::card(ui, |ui| theme_row(ui, &mut edit));
+                                }
+                                SettingsPage::Sets => {
+                                    ui::card(ui, |ui| sets_settings(ui, &mut edit));
                                 }
                                 SettingsPage::OpenScad => {
                                     ui::card(ui, |ui| openscad_settings(ui, &mut edit, &probe));
@@ -2846,6 +3068,25 @@ fn theme_row(ui: &mut egui::Ui, edit: &mut openscad::Config) {
         let ltr = egui::Layout::left_to_right(egui::Align::Center);
         ui.with_layout(ltr, |ui| ui.label("Theme"));
     });
+}
+
+/// The Parameter sets page of the Settings window.
+fn sets_settings(ui: &mut egui::Ui, edit: &mut openscad::Config) {
+    ui::section(ui, "Parameter sets");
+    ui.add_space(4.0);
+    toggle_row(
+        ui,
+        "Auto save",
+        "Saves the values to the selected set when you change them. With Model defaults \
+         selected, nothing is saved.",
+        &mut edit.autosave_sets,
+    );
+    ui.add_space(8.0);
+    ui.label(ui::dim(
+        "When you open a model, CoCAD loads the set that you used last, else the first set \
+         of the sets file. The sets file is <model>.json next to the model, or the file that \
+         you opened for the model.",
+    ));
 }
 
 /// The MCP server page of the Settings window.
@@ -3079,6 +3320,8 @@ impl eframe::App for App {
             )
             .show(ctx, |ui| ui::dark_scope(ui, |ui| self.menu_bar(ui)));
         self.settings_window(ctx);
+        self.new_set_dialog(ctx);
+        self.delete_set_dialog(ctx);
         self.about_window(ctx);
         if self.consent.is_some() {
             self.consent_window(ctx);
@@ -3164,6 +3407,7 @@ impl eframe::App for App {
     }
 
     fn on_exit(&mut self, gl: Option<&eframe::glow::Context>) {
+        self.flush_autosave();
         if let Some(j) = &self.job {
             j.cancel.store(true, Ordering::Relaxed);
         }
@@ -3241,7 +3485,13 @@ fn stat(ui: &mut egui::Ui, value: &str, label: &str) {
 /// One parameter row. Returns true when the value changed.
 fn param_row(ui: &mut egui::Ui, p: &mut Param) -> bool {
     let before = p.value.clone();
-    let label = humanize(&p.name);
+    // The description is the label when the file has one. Line 1 holds the
+    // label and the inline value, line 2 the slider, list or text field.
+    let label = if p.description.is_empty() {
+        humanize(&p.name)
+    } else {
+        p.description.clone()
+    };
     let changed = p.changed();
     let step = p.step();
     let decimals = decimals(step);
@@ -3252,14 +3502,6 @@ fn param_row(ui: &mut egui::Ui, p: &mut Param) -> bool {
             let (r, _) = ui.allocate_exact_size(Vec2::new(6.0, 6.0), egui::Sense::hover());
             ui.painter().circle_filled(r.center(), 3.0, ui::ACCENT);
         }
-        let hover = if p.description.is_empty() {
-            p.name.clone()
-        } else {
-            format!("{}\n\n{}", p.description, p.name)
-        };
-        ui.label(RichText::new(&label).size(14.0))
-            .on_hover_text(hover);
-
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             // Inline value widgets for sliders, numbers and switches.
             match (&mut p.value, &p.widget) {
@@ -3288,12 +3530,14 @@ fn param_row(ui: &mut egui::Ui, p: &mut Param) -> bool {
             {
                 p.value = p.default.clone();
             }
+            // The label gets the space the values leave. A long description
+            // is cut short and shows in full on hover.
+            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                ui.add(egui::Label::new(RichText::new(&label).size(14.0)).truncate())
+                    .on_hover_text(&p.name);
+            });
         });
     });
-    if !p.description.is_empty() {
-        ui.add_space(-6.0);
-        ui.label(ui::dim(&p.description));
-    }
 
     let full = ui.available_width();
     match (&mut p.value, &p.widget) {

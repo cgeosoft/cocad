@@ -15,21 +15,22 @@ pub fn path_for(scad: &Path) -> PathBuf {
     scad.with_extension("json")
 }
 
-/// The sets file last used for `scad`, from `<config>/sets-files`.
-pub fn remembered(scad: &Path) -> Option<PathBuf> {
+/// The value for `scad` in the file `name` of the settings folder. Each line
+/// of the file is `<model path>\t<value>`.
+fn lookup(name: &str, scad: &Path) -> Option<String> {
     let key = scad.canonicalize().ok()?;
-    let text = std::fs::read_to_string(crate::openscad::config_dir()?.join("sets-files")).ok()?;
+    let text = std::fs::read_to_string(crate::openscad::config_dir()?.join(name)).ok()?;
     text.lines()
         .filter_map(|l| l.split_once('\t'))
         .find(|(k, _)| Path::new(k) == key)
-        .map(|(_, v)| PathBuf::from(v))
+        .map(|(_, v)| v.to_string())
 }
 
-/// Records `json` as the sets file for `scad`.
-pub fn remember(scad: &Path, json: &Path) -> Result<()> {
+/// Sets the value for `scad` in the file `name`. `None` removes the line.
+fn store(name: &str, scad: &Path, value: Option<&str>) -> Result<()> {
     let dir = crate::openscad::config_dir().context("no config folder")?;
     std::fs::create_dir_all(&dir)?;
-    let file = dir.join("sets-files");
+    let file = dir.join(name);
     let key = scad.canonicalize()?;
     let mut lines: Vec<String> = std::fs::read_to_string(&file)
         .unwrap_or_default()
@@ -37,11 +38,54 @@ pub fn remember(scad: &Path, json: &Path) -> Result<()> {
         .filter(|l| l.split_once('\t').is_some_and(|(k, _)| Path::new(k) != key))
         .map(String::from)
         .collect();
-    if json != path_for(&key) {
-        lines.push(format!("{}\t{}", key.display(), json.display()));
+    if let Some(v) = value {
+        lines.push(format!("{}\t{v}", key.display()));
     }
     std::fs::write(file, lines.join("\n") + "\n")?;
     Ok(())
+}
+
+/// The sets file last used for `scad`, from `<config>/sets-files`.
+pub fn remembered(scad: &Path) -> Option<PathBuf> {
+    lookup("sets-files", scad).map(PathBuf::from)
+}
+
+/// Records `json` as the sets file for `scad`.
+pub fn remember(scad: &Path, json: &Path) -> Result<()> {
+    let key = scad.canonicalize()?;
+    let value = (json != path_for(&key)).then(|| json.display().to_string());
+    store("sets-files", scad, value.as_deref())
+}
+
+/// The set that was active last for `scad`, from `<config>/last-sets`.
+/// `Some(None)` is Model defaults. `None` means that there is no record.
+pub fn last_set(scad: &Path) -> Option<Option<String>> {
+    lookup("last-sets", scad).map(|v| (!v.is_empty()).then_some(v))
+}
+
+/// Records `name` as the active set for `scad`. `None` is Model defaults.
+/// A name with a line break is not recorded.
+pub fn set_last(scad: &Path, name: Option<&str>) -> Result<()> {
+    match name {
+        Some(n) if n.contains(['\n', '\r']) => store("last-sets", scad, None),
+        Some(n) => store("last-sets", scad, Some(n)),
+        None => store("last-sets", scad, Some("")),
+    }
+}
+
+/// The set to load when `scad` opens: the set that was active last, else
+/// the first set of the file. `None` is Model defaults.
+pub fn autoload(scad: &Path, sets: &[String]) -> Option<String> {
+    choose(last_set(scad), sets)
+}
+
+/// `autoload` without the record file. `last` is the value of `last_set`.
+fn choose(last: Option<Option<String>>, sets: &[String]) -> Option<String> {
+    match last {
+        Some(None) => None,
+        Some(Some(n)) if sets.contains(&n) => Some(n),
+        _ => sets.first().cloned(),
+    }
 }
 
 /// The sets file to use for `scad`: the remembered one when it still
@@ -166,6 +210,20 @@ mod tests {
         std::fs::write(&path, "{ \"parameterSets\": { \"b\": {}, \"a\": {} } }").unwrap();
         assert_eq!(try_names(&path).unwrap(), ["b", "a"]);
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn autoload_choice() {
+        let sets = ["big".to_string(), "small".to_string()];
+        let s = |n: &str| Some(n.to_string());
+        // No record: the first set.
+        assert_eq!(choose(None, &sets), s("big"));
+        // The last active set, when it is still in the file.
+        assert_eq!(choose(Some(s("small")), &sets), s("small"));
+        assert_eq!(choose(Some(s("gone")), &sets), s("big"));
+        // Model defaults was active last.
+        assert_eq!(choose(Some(None), &sets), None);
+        assert_eq!(choose(None, &[]), None);
     }
 
     #[test]

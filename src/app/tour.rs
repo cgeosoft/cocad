@@ -47,6 +47,7 @@ const STEPS: [Step; 10] = [
         intro: "The left panel shows the Customizer parameters of the model.",
         points: &[
             "Sliders, dropdowns, switches, text and vectors are in collapsible groups.",
+            "A parameter with a description comment shows the description as its label.",
             "The model renders again when you change a value.",
             "A dot marks a changed value. The arrow sets it back.",
         ],
@@ -57,7 +58,8 @@ const STEPS: [Step; 10] = [
         intro: "Keep named sets of values for one model.",
         points: &[
             "Select a set to load it. Model defaults resets all values.",
-            "Save writes to the selected set. Save as makes a new set.",
+            "The disk button saves to the selected set. The gear menu makes a new set.",
+            "The set that you used last loads when you open the model.",
             "The sets are in a .json file. OpenSCAD reads the same format.",
         ],
         image: shot!("3-sets"),
@@ -127,7 +129,8 @@ const STEPS: [Step; 10] = [
         title: "Settings and shortcuts",
         intro: "You are ready to start.",
         points: &[
-            "File > Settings sets the theme, the OpenSCAD binary and your privacy choices.",
+            "File > Settings sets the theme, auto save of sets, the OpenSCAD binary and your \
+             privacy choices.",
             "An OpenSCAD development build with Manifold is much faster.",
             "Help > About and shortcuts lists all keys.",
             "The CLI exports, slices and makes photos without the window. Run cocad --help.",

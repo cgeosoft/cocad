@@ -122,7 +122,7 @@ shot 8-agent
 # Settings on the MCP server page.
 xdotool key ctrl+comma
 sleep 1
-xdotool mousemove 320 254 click 1
+xdotool mousemove 320 289 click 1
 shot 9-connect
 xdotool key Escape
 sleep 0.5
