@@ -402,6 +402,8 @@ impl App {
             "mode": mode,
             "wireframe": self.wireframe,
             "grid": self.grid,
+            "projection": if self.ortho { "iso" } else { "persp" },
+            "layers": self.opt.view == optimize_tab::PlateView::Layers,
             "parts": parts.iter().filter(|p| !p.reference).count(),
             "reference_parts": parts.iter().filter(|p| p.reference).count(),
             "part_colors": v.part_colors,
@@ -867,7 +869,20 @@ impl App {
         }
         self.wireframe = flag(args, "wireframe", self.wireframe);
         self.grid = flag(args, "grid", self.grid);
+        match args["projection"].as_str() {
+            Some("iso") => self.ortho = true,
+            Some("persp") => self.ortho = false,
+            Some(p) => return Err(format!("unknown projection {p}: use iso or persp")),
+            None => {}
+        }
         self.view3d.part_colors = flag(args, "part_colors", self.view3d.part_colors);
+        if let Some(on) = args["layers"].as_bool() {
+            self.opt.view = if on {
+                optimize_tab::PlateView::Layers
+            } else {
+                optimize_tab::PlateView::Plate
+            };
+        }
         if let Some(l) = args["layer"].as_u64() {
             let top = self.sliced.as_ref().map_or(0, |s| s.layers.len());
             self.layer = (l as usize).clamp(1, top.max(1)) - 1;

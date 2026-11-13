@@ -6,11 +6,13 @@ A parameter set is a named group of values for one model. For example, a box mod
 
 ## Where to find them
 
-The top of the **Parameters** panel has one row for the sets:
+The top of the **Parameters** panel has one box for the sets:
 
 - A **list** of the sets.
 - The **disk button** that saves the values.
-- The **gear button** with **New set…** and **Delete**.
+- The **reset button** that sets all values back to the model defaults, and the button that closes or opens all parameter groups.
+- The **gear button** at the end, with **New set…** and **Delete**.
+- Below them, the description of the selected set, when the set has one.
 
 The sets of a model are in its definition file: `box.yml` next to `box.scad`. The file also holds the title, the description and the part names of the model. See [Model definition](Model-definition).
 

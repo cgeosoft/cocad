@@ -91,15 +91,16 @@ sleep 4
 mcp set_view '{"view":"top","fit":true}' >/dev/null
 # Open the export menu: the arrow
 # is the narrow button at the right of Export 3MF. Then move the pointer off
-# the buttons, so that no tooltip shows. The next click closes the menu.
+# the buttons, so that no tooltip shows. Escape closes the menu.
 xdotool mousemove $((width - 39)) $((height - 60)) sleep 0.5 click 1
 xdotool mousemove 700 17
 shot app-7-small-bed 2
+xdotool key Escape
 mcp set_optimize '{"area":[250,220,270]}' >/dev/null
 mcp set_view '{"view":"iso","fit":true}' >/dev/null
 sleep 3
-# The Layers switch of the view.
-xdotool mousemove 471 74 click 1
-sleep 2
+# The Layers view. The slice is ready some time after the switch.
+mcp set_view '{"layers":true}' >/dev/null
+sleep 4
 mcp set_view '{"layer":120}' >/dev/null
 shot app-8-layers 4

@@ -58,7 +58,7 @@ const STEPS: [Step; 10] = [
         intro: "Keep named sets of values for one model.",
         points: &[
             "Select a set to load it. Model defaults resets all values.",
-            "The disk button saves to the selected set. The gear menu makes a new set.",
+            "The disk button saves to the selected set. The gear menu at the end makes a new set.",
             "The set that you used last loads when you open the model.",
             "The sets are in <model>.yml next to the model, with the title and the part names.",
         ],
@@ -66,7 +66,7 @@ const STEPS: [Step; 10] = [
     },
     Step {
         title: "Check and export",
-        intro: "The status bar and the Mesh card of the Model tab show the mesh data. Export 3MF is at the bottom of the Optimize tab.",
+        intro: "The bar at the bottom of the Model tab shows the mesh data. Export 3MF is at the bottom of the Optimize tab.",
         points: &[
             "Check the size, volume, triangles and open edges.",
             "Back faces show in purple. Press W for the wireframe.",
@@ -82,7 +82,7 @@ const STEPS: [Step; 10] = [
         points: &[
             "Part colors gives each part a different color. Colors… sets your own colors.",
             "Explode moves the parts apart. Press E.",
-            "Section, at the top right of the 3D view, cuts the view on the X, Y and Z axes. The cut stays in all tabs.",
+            "Section, at the bottom right of the 3D view, cuts the view on the X, Y and Z axes. The cut stays in all tabs.",
             "Click a part to select it. Right click a part to focus on it or to change its color.",
         ],
         image: shot!("5-parts"),
@@ -94,8 +94,8 @@ const STEPS: [Step; 10] = [
             "All parts go on one plate. Same parts show as one row with a count. Your slicer arranges the parts on its plates.",
             "CoCAD puts each part on its best face. You can also click the face that goes on the bed.",
             "Turn on print fixes: teardrop holes, hole size, bridges, bed chamfer, brims and mouse ears.",
-            "Split a part that is too large. The Check card lists the problems.",
-            "Layers shows the slice of the plate. Export 3MF at the bottom writes the plate.",
+            "A part that is too large has a split button. Change the split later and click Apply. The Check card lists the problems.",
+            "Layers, in the Layers card, shows the slice of the plate. Export 3MF at the bottom writes the plate.",
         ],
         image: shot!("6-slice"),
     },

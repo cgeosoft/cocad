@@ -40,12 +40,12 @@ For a print in more than one color, see [Multicolor prints](Multicolor-prints).
 
 ## Check the model before you export
 
-The **Mesh** card of the **Model** tab and the status bar show data about the model:
+The bar at the bottom of the **Model** tab shows data about the model:
 
 - **Size** in mm: width × depth × height.
 - **Volume** in cm³.
 - **Triangles**: the number of triangles of the surface.
-- **Open edges**: the status bar shows them only when the model has a problem. A model with open edges is not a closed solid, and a slicer can give wrong results for it.
+- **Open edges**: the bar and the status bar show them only when the model has a problem. A model with open edges is not a closed solid, and a slicer can give wrong results for it.
 
 Two more checks in the 3D view:
 

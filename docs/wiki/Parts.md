@@ -68,7 +68,7 @@ Details:
 
 Section cuts the model open, so that you can see the inside. You can cut across the X, Y and Z axes.
 
-1. Find the **Section** bar at the top right of the 3D view.
+1. Click **Section** at the bottom right of the 3D view. The Section menu opens above the button.
 2. Click **X**, **Y** or **Z** to turn on a cut. A row for the cut shows below.
 3. Move the slider of the row, or type the position in mm. A blue rectangle shows where the cut is.
 4. Click the side button at the end of the row, for example **+X**, to keep the other side (**−X**).
@@ -78,6 +78,7 @@ Details:
 - With two or three cuts on, you see only the space that all cuts keep. For example, cuts on X and Y keep one quarter of the model.
 - The cut faces show in the color of the part, a little darker.
 - **Reset** turns off all cuts and moves them to the center. It shows when a cut is on.
+- Click **Section** again, or press Esc, to close the menu. The cuts stay on. The **Section** button is orange while a cut is on.
 - The cuts stay when you change the tab. The **Model** and **Render** tabs cut the model. The photo shows the cut.
 - The **Optimize** tab cuts the plate, across the axes of the bed. The cuts and the sides to keep are the same as in the other tabs. The plate has its own positions. At first, they are at the center of the plate. The **Layers** view shows the cut too.
 - No export uses the cut. **Export 3MF** writes the full parts.

@@ -216,6 +216,9 @@ struct Camera {
     pitch: f32,
     dist: f32,
     target: Vec3,
+    /// Parallel projection (Iso) instead of perspective. The visible size
+    /// at the target is the same in both.
+    ortho: bool,
 }
 
 impl Camera {
@@ -229,7 +232,13 @@ impl Camera {
 
     fn matrix(&self, aspect: f32) -> Mat4 {
         let eye = self.eye();
-        let proj = Mat4::perspective_rh_gl(Self::FOV, aspect, self.dist * 0.01, self.dist * 50.0);
+        let proj = if self.ortho {
+            let h = self.dist * (Self::FOV * 0.5).tan();
+            let far = self.dist * 50.0;
+            Mat4::orthographic_rh_gl(-h * aspect, h * aspect, -h, h, -far, far)
+        } else {
+            Mat4::perspective_rh_gl(Self::FOV, aspect, self.dist * 0.01, self.dist * 50.0)
+        };
         proj * Mat4::look_at_rh(eye, self.target, Vec3::Z)
     }
 
@@ -347,6 +356,9 @@ pub struct App {
     cam: Camera,
     wireframe: bool,
     grid: bool,
+    /// The parallel projection (Iso) of the 3D view. The Render tab uses
+    /// perspective, as the photo does.
+    ortho: bool,
     show_log: bool,
     photo: PhotoSettings,
     photo_job: Option<pathtrace::Job>,
@@ -516,9 +528,11 @@ impl App {
                 pitch: 0.55,
                 dist: 150.0,
                 target: Vec3::ZERO,
+                ortho: false,
             },
             wireframe: false,
             grid: true,
+            ortho: false,
             show_log: false,
             photo: PhotoSettings {
                 color: [0xff, 0x93, 0x00],
@@ -1900,25 +1914,6 @@ impl App {
             ui.add_space(4.0);
             self.parts_card(ui);
             self.explode_card(ui);
-            if let (Some(i), Some(mesh)) = (&self.info, &self.mesh) {
-                let size = i.bounds.size();
-                let tris = mesh.triangles.len();
-                let (volume, open_edges) = (i.volume, i.open_edges);
-                let note = format!("{:.1} × {:.1} × {:.1} mm", size.x, size.y, size.z);
-                ui::card(ui, |ui| {
-                    if !self.card_head(ui, "Mesh", &note) {
-                        return;
-                    }
-                    info_row(
-                        ui,
-                        "Size",
-                        &format!("{:.1} × {:.1} × {:.1} mm", size.x, size.y, size.z),
-                    );
-                    info_row(ui, "Volume", &format!("{:.2} cm³", volume / 1000.0));
-                    info_row(ui, "Triangles", &tris.to_string());
-                    info_row(ui, "Open edges", &open_edges.to_string());
-                });
-            }
         });
     }
 
@@ -1926,6 +1921,60 @@ impl App {
     /// has no print area of its own yet.
     pub(crate) fn default_area(&self) -> crate::optimize::Area {
         self.cfg.bed
+    }
+
+    /// The bar at the bottom of the Model tab: the figures of the mesh.
+    fn model_bar(&mut self, ui: &mut egui::Ui) {
+        let (Some(i), Some(mesh)) = (&self.info, &self.mesh) else {
+            return;
+        };
+        let size = i.bounds.size();
+        let main = format!("{:.1} × {:.1} × {:.1} mm", size.x, size.y, size.z);
+        let sub = format!(
+            "{:.2} cm³  ·  {} triangles",
+            i.volume / 1000.0,
+            mesh.triangles.len()
+        );
+        stats(ui, &main, &sub);
+        if i.open_edges > 0 {
+            ui.label(
+                RichText::new(format!("{} open edges", i.open_edges))
+                    .size(12.5)
+                    .color(ui::ACCENT),
+            )
+            .on_hover_text("The mesh is not closed. Slicing and STEP export may be wrong.");
+        }
+    }
+
+    /// The figures of the plate at the top of the Optimize bar: the copies,
+    /// and with a slice the layers, the print time and the filament.
+    fn plate_stats(&mut self, ui: &mut egui::Ui) {
+        let Some(copies) = self.plate_copies() else {
+            return;
+        };
+        let mut sub = vec![plural_of(copies, "copy", "copies")];
+        let sliced = (self.sliced.as_ref())
+            .filter(|s| self.sliced_for == self.plate_key() && !s.layers.is_empty());
+        let main = match sliced {
+            Some(sl) => {
+                sub.push(format!("{} layers", sl.layers.len()));
+                format!(
+                    "{}  ·  {:.1} g",
+                    fmt_duration(sl.stats.seconds),
+                    sl.stats.grams
+                )
+            }
+            None => sub.remove(0),
+        };
+        if let Some(t) = self.opt.time {
+            sub.push(if t.as_secs_f32() < 1.0 {
+                format!("prepared in {} ms", t.as_millis())
+            } else {
+                format!("prepared in {:.1} s", t.as_secs_f32())
+            });
+        }
+        stats(ui, &main, &sub.join("  ·  "));
+        ui.add_space(6.0);
     }
 
     /// The bar at the bottom of the Optimize tab. Export 3MF writes the
@@ -1944,6 +1993,7 @@ impl App {
         };
         let multicolor = !crate::parts::names(&self.params).is_empty();
         let summary = self.export_summary();
+        self.plate_stats(ui);
         let mut pick: Option<Format> = None;
         let mut slicer_pick = None;
         ui.scope(|ui| {
@@ -2245,13 +2295,19 @@ impl App {
     /// Closes all parameter groups, or opens all when all are closed.
     fn fold_button(&mut self, ui: &mut egui::Ui, size: f32) {
         let all_closed = !self.params.is_empty()
-            && self.params.iter().all(|p| self.collapsed.contains(&p.group));
+            && self
+                .params
+                .iter()
+                .all(|p| self.collapsed.contains(&p.group));
         let (icon, hover) = if all_closed {
             (ui::Icon::Expand, "Open all groups")
         } else {
             (ui::Icon::Collapse, "Close all groups")
         };
-        if ui::icon_button(ui, icon, size, false).on_hover_text(hover).clicked() {
+        if ui::icon_button(ui, icon, size, false)
+            .on_hover_text(hover)
+            .clicked()
+        {
             if all_closed {
                 self.collapsed.clear();
             } else {
@@ -2260,10 +2316,11 @@ impl App {
         }
     }
 
-    /// The set list with Save and the set menu, and the description of the
-    /// active set. The list sits directly above the parameter groups,
-    /// because the set gives their values. The sets are in the definition
-    /// `<model>.yml` next to the model.
+    /// One box with the set list, its buttons (Save, Reset all, Collapse
+    /// and the set menu) and the description of the active set. The box
+    /// sits directly above the parameter groups, because the set gives their
+    /// values. The sets are in the definition `<model>.yml` next to the
+    /// model.
     fn sets_bar(&mut self, ui: &mut egui::Ui) {
         if self.file.is_none() {
             return;
@@ -2273,91 +2330,100 @@ impl App {
         let mut gear_rect = egui::Rect::NOTHING;
         let mut pick: Option<Option<String>> = None;
         let mut new_set = false;
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 6.0;
-            let label = match &self.active_set {
-                Some(n) if self.set_edited => format!("{n} (edited)"),
-                Some(n) => n.clone(),
-                None => "Model defaults".into(),
-            };
-            // Height of a button row. Save and the menu are squares of this size.
-            let sp = ui.spacing();
-            let row = (ui.text_style_height(&egui::TextStyle::Button) + 2.0 * sp.button_padding.y)
-                .max(sp.interact_size.y);
-            // Show 4.5 rows. The half row tells the user that the list scrolls.
-            let list_height = 4.0 * (row + sp.item_spacing.y) + 0.5 * row;
-            // Save, the set menu, Reset all and Collapse are squares.
-            let width = ui.available_width() - 4.0 * (row + sp.item_spacing.x);
-            // egui keeps the popup size of the first open. A new id for each
-            // number of sets lets the popup take the new size.
-            egui::ComboBox::from_id_salt(("sets", self.sets.len()))
-                .selected_text(label)
-                .width(width)
-                .height(list_height)
-                .show_ui(ui, |ui| {
-                    if ui
-                        .selectable_label(self.active_set.is_none(), "Model defaults")
-                        .clicked()
-                    {
-                        pick = Some(None);
-                    }
-                    for n in &self.sets {
-                        if ui
-                            .selectable_label(self.active_set.as_ref() == Some(n), n)
-                            .clicked()
-                        {
-                            pick = Some(Some(n.clone()));
-                        }
-                    }
-                })
-                .response
-                .on_hover_text(format!(
-                    "Parameter sets in {}",
-                    path.file_name().unwrap_or_default().to_string_lossy()
-                ));
-            let edited = self.set_edited && self.active_set.is_some();
-            let save = ui::icon_button(ui, ui::Icon::Save, row, edited).on_hover_text(match &self
-                .active_set
-            {
-                Some(n) => format!("Save the values to {n}"),
-                None => "Save the values as a new set".into(),
-            });
-            if save.clicked() {
-                match self.active_set.clone() {
-                    Some(n) => match presets::save(&path, &n, &self.params) {
-                        Ok(()) => {
-                            self.set_edited = false;
-                            self.autosave_at = None;
-                            msg = Some(format!("Saved {n}"));
-                        }
-                        Err(e) => msg = Some(format!("{e:#}")),
-                    },
-                    None => new_set = true,
-                }
-            }
-            let gear = ui::icon_button(ui, ui::Icon::Gear, row, self.sets_menu)
-                .on_hover_text("New set, delete set");
-            if gear.clicked() {
-                self.sets_menu = !self.sets_menu;
-            }
-            gear_rect = gear.rect;
-            self.reset_all_button(ui, row);
-            self.fold_button(ui, row);
-        });
-        if let Some(d) = (self.active_set.as_deref())
+        let description = (self.active_set.as_deref())
             .and_then(|n| self.def.set(n))
-            .and_then(|s| s.description.clone())
-        {
-            ui.add_space(4.0);
-            egui::Frame::NONE
-                .fill(ui::c().input)
-                .corner_radius(8)
-                .inner_margin(egui::Margin::symmetric(10, 8))
-                .show(ui, |ui| {
-                    ui.set_width(ui.available_width());
-                    ui.add(egui::Label::new(RichText::new(d).size(12.5).color(ui::c().dim)).wrap());
+            .and_then(|s| s.description.clone());
+        egui::Frame::NONE
+            .fill(ui::c().card)
+            .corner_radius(12)
+            .inner_margin(egui::Margin::same(8))
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 6.0;
+                    let label = match &self.active_set {
+                        Some(n) if self.set_edited => format!("{n} (edited)"),
+                        Some(n) => n.clone(),
+                        None => "Model defaults".into(),
+                    };
+                    // Height of a button row. Save and the menu are squares of this size.
+                    let sp = ui.spacing();
+                    let row = (ui.text_style_height(&egui::TextStyle::Button)
+                        + 2.0 * sp.button_padding.y)
+                        .max(sp.interact_size.y);
+                    // Show 4.5 rows. The half row tells the user that the list scrolls.
+                    let list_height = 4.0 * (row + sp.item_spacing.y) + 0.5 * row;
+                    // Save, the set menu, Reset all and Collapse are squares.
+                    let width = ui.available_width() - 4.0 * (row + sp.item_spacing.x);
+                    // egui keeps the popup size of the first open. A new id for each
+                    // number of sets lets the popup take the new size.
+                    egui::ComboBox::from_id_salt(("sets", self.sets.len()))
+                        .selected_text(label)
+                        .width(width)
+                        .height(list_height)
+                        .show_ui(ui, |ui| {
+                            if ui
+                                .selectable_label(self.active_set.is_none(), "Model defaults")
+                                .clicked()
+                            {
+                                pick = Some(None);
+                            }
+                            for n in &self.sets {
+                                if ui
+                                    .selectable_label(self.active_set.as_ref() == Some(n), n)
+                                    .clicked()
+                                {
+                                    pick = Some(Some(n.clone()));
+                                }
+                            }
+                        })
+                        .response
+                        .on_hover_text(format!(
+                            "Parameter sets in {}",
+                            path.file_name().unwrap_or_default().to_string_lossy()
+                        ));
+                    let edited = self.set_edited && self.active_set.is_some();
+                    let save =
+                        ui::icon_button(ui, ui::Icon::Save, row, edited).on_hover_text(match &self
+                            .active_set
+                        {
+                            Some(n) => format!("Save the values to {n}"),
+                            None => "Save the values as a new set".into(),
+                        });
+                    if save.clicked() {
+                        match self.active_set.clone() {
+                            Some(n) => match presets::save(&path, &n, &self.params) {
+                                Ok(()) => {
+                                    self.set_edited = false;
+                                    self.autosave_at = None;
+                                    msg = Some(format!("Saved {n}"));
+                                }
+                                Err(e) => msg = Some(format!("{e:#}")),
+                            },
+                            None => new_set = true,
+                        }
+                    }
+                    self.reset_all_button(ui, row);
+                    self.fold_button(ui, row);
+                    let gear = ui::icon_button(ui, ui::Icon::Gear, row, self.sets_menu)
+                        .on_hover_text("New set, delete set");
+                    if gear.clicked() {
+                        self.sets_menu = !self.sets_menu;
+                    }
+                    gear_rect = gear.rect;
                 });
-        }
+                if let Some(d) = description {
+                    ui.add_space(2.0);
+                    egui::Frame::NONE
+                        .inner_margin(egui::Margin::symmetric(4, 2))
+                        .show(ui, |ui| {
+                            ui.add(
+                                egui::Label::new(RichText::new(d).size(12.5).color(ui::c().dim))
+                                    .wrap(),
+                            );
+                        });
+                }
+            });
 
         // The set menu, under the gear button, right aligned.
         let mut delete = false;
@@ -2619,58 +2685,11 @@ impl App {
                     .on_hover_text(format!("{}: no Manifold backend", self.cfg.binary()));
             }
 
-            // Model.
-            if let Some(i) = &self.info {
+            // A mesh that is not closed. The Model tab shows the figures.
+            if let Some(i) = self.info.as_ref().filter(|i| i.open_edges > 0) {
                 sep(ui);
-                let s = i.bounds.size();
-                let tris = self.mesh.as_ref().map(|m| m.triangles.len()).unwrap_or(0);
-                ui.label(small(format!("{:.1} × {:.1} × {:.1} mm", s.x, s.y, s.z)));
-                ui.label(dim(format!(
-                    "{tris} triangles  ·  {:.2} cm³",
-                    i.volume / 1000.0
-                )));
-                if i.open_edges > 0 {
-                    ui.label(small(format!("{} open edges", i.open_edges)).color(ui::ACCENT))
-                        .on_hover_text(
-                            "The mesh is not closed. Slicing and STEP export may be wrong.",
-                        );
-                }
-            }
-
-            // Mode details.
-            match self.mode {
-                Mode::Optimize => {
-                    if let Some(sl) = (self.sliced.as_ref())
-                        .filter(|s| self.sliced_for == self.plate_key() && !s.layers.is_empty())
-                    {
-                        sep(ui);
-                        ui.label(small(format!(
-                            "Layer {} / {}",
-                            self.layer + 1,
-                            sl.layers.len()
-                        )));
-                        ui.label(dim(format!(
-                            "{}  ·  {:.1} g",
-                            fmt_duration(sl.stats.seconds),
-                            sl.stats.grams
-                        )));
-                    }
-                }
-                Mode::Render => {
-                    sep(ui);
-                    let on = match self.photo_job.as_ref().map(|j| j.backend()) {
-                        Some(pathtrace::Backend::Gpu) => "  ·  GPU",
-                        Some(pathtrace::Backend::Cpu) => "  ·  CPU",
-                        None => "",
-                    };
-                    ui.label(small(format!(
-                        "Render {} / {}{on}",
-                        self.photo_samples(),
-                        self.photo.samples
-                    )));
-                    ui.label(dim(format!("{} × {}", self.photo.width, self.photo.height)));
-                }
-                Mode::Model => {}
+                ui.label(small(format!("{} open edges", i.open_edges)).color(ui::ACCENT))
+                    .on_hover_text("The mesh is not closed. Slicing and STEP export may be wrong.");
             }
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -2964,6 +2983,15 @@ impl App {
                 .desired_height(6.0)
                 .fill(ui::ACCENT),
         );
+        let on = match self.photo_job.as_ref().map(|j| j.backend()) {
+            Some(pathtrace::Backend::Gpu) => "GPU  ·  ",
+            Some(pathtrace::Backend::Cpu) => "CPU  ·  ",
+            None => "",
+        };
+        ui.label(ui::dim(format!(
+            "{on}{} × {} px",
+            self.photo.width, self.photo.height
+        )));
         ui.add_space(4.0);
         let w = ui.available_width();
         let size = Vec2::new(w, 34.0);
@@ -3252,9 +3280,110 @@ impl App {
         });
     }
 
+    /// The bar at the bottom right of the 3D view `rect`: the views and
+    /// Fit, and the Section menu. Returns its rectangle.
+    fn view_bar(&mut self, ui: &mut egui::Ui, rect: egui::Rect) -> egui::Rect {
+        let m = 16.0;
+        let can_cut = (self.view3d.section).bounds(self.section_space()).is_some();
+        egui::Area::new(egui::Id::new("view_bar"))
+            .order(egui::Order::Middle)
+            .pivot(egui::Align2::RIGHT_BOTTOM)
+            .fixed_pos(rect.right_bottom() - Vec2::splat(m))
+            .constrain_to(rect)
+            .show(ui.ctx(), |ui| {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 8.0;
+                    ui::glass_group(ui, |ui| {
+                        for (label, yaw, pitch) in VIEWS.into_iter().skip(1) {
+                            if ui.add(ui::ghost(label, false)).clicked() {
+                                self.set_view(yaw, pitch);
+                            }
+                        }
+                        if ui
+                            .add(ui::ghost("Fit", false))
+                            .on_hover_text("F or double click")
+                            .clicked()
+                        {
+                            self.fit();
+                        }
+                    });
+                    if can_cut {
+                        ui::glass_group(ui, |ui| {
+                            let s = &mut self.view3d.section;
+                            let on = s.open || s.any();
+                            if ui
+                                .add(ui::ghost("Section", on))
+                                .on_hover_text("Cut the view across the X, Y and Z axes")
+                                .clicked()
+                            {
+                                s.open = !s.open;
+                            }
+                        });
+                    }
+                });
+            })
+            .response
+            .rect
+    }
+
+    /// The bar at the bottom left of the 3D view `rect`: Iso (the parallel
+    /// projection), Wire and Grid. It goes above the bar `right` when the two
+    /// do not fit next to each other. Returns its rectangle.
+    fn display_bar(
+        &mut self,
+        ui: &mut egui::Ui,
+        rect: egui::Rect,
+        right: egui::Rect,
+    ) -> egui::Rect {
+        let m = 16.0;
+        let id = egui::Id::new("display_bar");
+        let width = ui
+            .ctx()
+            .memory(|mem| mem.area_rect(id))
+            .map_or(0.0, |r| r.width());
+        let mut at = rect.left_bottom() + Vec2::new(m, -m);
+        if rect.left() + m + width + 8.0 > right.left() {
+            at.y = right.top() - 8.0;
+        }
+        let render = self.mode == Mode::Render;
+        egui::Area::new(id)
+            .order(egui::Order::Middle)
+            .pivot(egui::Align2::LEFT_BOTTOM)
+            .fixed_pos(at)
+            .constrain_to(rect)
+            .show(ui.ctx(), |ui| {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 8.0;
+                    ui::glass_group(ui, |ui| {
+                        // The Render tab always uses perspective, as the photo.
+                        let iso = ui
+                            .add_enabled(!render, ui::ghost("Iso", self.ortho && !render))
+                            .on_hover_text("On: parallel projection. Off: perspective.")
+                            .on_disabled_hover_text("The Render tab uses perspective");
+                        if iso.clicked() {
+                            self.ortho = !self.ortho;
+                        }
+                        if ui
+                            .add(ui::ghost("Wire", self.wireframe))
+                            .on_hover_text("W")
+                            .clicked()
+                        {
+                            self.wireframe = !self.wireframe;
+                        }
+                        if ui.add(ui::ghost("Grid", self.grid)).clicked() {
+                            self.grid = !self.grid;
+                        }
+                    });
+                });
+            })
+            .response
+            .rect
+    }
+
     fn viewport(&mut self, ui: &mut egui::Ui) {
         let rect = ui.available_rect_before_wrap();
         let resp = ui.allocate_rect(rect, egui::Sense::click_and_drag());
+        self.cam.ortho = self.ortho && self.mode != Mode::Render;
 
         // Background gradient.
         let mut bg = egui::Mesh::default();
@@ -3369,63 +3498,23 @@ impl App {
         }
 
         let m = 16.0;
-        // View toolbar, top right.
-        let bar = egui::Rect::from_min_size(
-            egui::pos2(rect.right() - m - 430.0, rect.bottom() - m - 40.0),
-            Vec2::new(430.0, 40.0),
-        );
-        ui.scope_builder(
-            egui::UiBuilder::new()
-                .max_rect(bar)
-                .layout(egui::Layout::right_to_left(egui::Align::Center)),
-            |ui| {
-                egui::Frame::NONE
-                    .fill(ui::glass())
-                    .corner_radius(10)
-                    .inner_margin(egui::Margin::same(4))
-                    .show(ui, |ui| {
-                        ui.spacing_mut().item_spacing.x = 2.0;
-                        ui.spacing_mut().button_padding = Vec2::new(10.0, 5.0);
-                        ui.horizontal(|ui| {
-                            if ui.add(ui::ghost("Grid", self.grid)).clicked() {
-                                self.grid = !self.grid;
-                            }
-                            if ui
-                                .add(ui::ghost("Wire", self.wireframe))
-                                .on_hover_text("W")
-                                .clicked()
-                            {
-                                self.wireframe = !self.wireframe;
-                            }
-                            if ui
-                                .add(ui::ghost("Fit", false))
-                                .on_hover_text("F or double click")
-                                .clicked()
-                            {
-                                self.fit();
-                            }
-                            for (label, yaw, pitch) in VIEWS.into_iter().rev() {
-                                if ui.add(ui::ghost(label, false)).clicked() {
-                                    self.set_view(yaw, pitch);
-                                }
-                            }
-                        });
-                    });
-            },
-        );
+        // The bars at the bottom: the view buttons and the Section menu at
+        // the right, the plate view and the display at the left.
+        let right = self.view_bar(ui, rect);
+        let section = self.section_menu(ui, rect, right);
+        let left = self.display_bar(ui, rect, right);
+        if optimize && self.mesh.is_some() {
+            self.plate_status(ui, rect);
+        }
 
-        let taken = (optimize && self.mesh.is_some()).then(|| self.plate_overlay(ui, rect));
-        let bar = self.section_bar(ui, rect, taken);
-
-        // Layer slider, right edge, below the Section bar and the number
-        // above the slider.
+        // Layer slider, right edge, above the bars and the open Section
+        // menu, with the number above the slider.
         if slicing {
-            let top = (bar.map_or(0.0, |b| b.bottom() + 62.0))
-                .max(rect.top() + 70.0)
-                .min(rect.bottom() - 160.0);
+            let bottom = section.map_or(right.top(), |s| s.top()) - 24.0;
+            let top = (rect.top() + 70.0).min(bottom - 60.0);
             let strip = egui::Rect::from_min_max(
                 egui::pos2(rect.right() - m - 36.0, top),
-                egui::pos2(rect.right() - m, rect.bottom() - 100.0),
+                egui::pos2(rect.right() - m, bottom),
             );
             ui.painter()
                 .rect_filled(strip.expand2(Vec2::new(0.0, 14.0)), 18.0, ui::glass());
@@ -3464,7 +3553,7 @@ impl App {
             }
         }
 
-        // Toast, bottom centre.
+        // Toast, centred above the bars at the bottom.
         let toast = if self.export_rx.is_some() {
             Some("Exporting…".to_string())
         } else {
@@ -3474,9 +3563,10 @@ impl App {
                 .map(|(m, _)| m.clone())
         };
         if let Some(msg) = toast {
+            let bottom = right.top().min(left.top()) - 8.0;
             ui::pill(
                 &painter,
-                rect.center_bottom() + Vec2::new(0.0, -m),
+                egui::pos2(rect.center().x, bottom),
                 egui::Align2::CENTER_BOTTOM,
                 &msg,
                 font,
@@ -4202,9 +4292,9 @@ impl eframe::App for App {
                         }
                     });
                 // The bar at the bottom before the tab, so that the tab gets
-                // the height that is left above it: Export in the Optimize
-                // tab, Render and Save in the Render tab. The Model tab has
-                // none. The bar goes to the edges of the panel.
+                // the height that is left above it: the figures of the tab,
+                // and Export in the Optimize tab, Render and Save in the
+                // Render tab. The bar goes to the edges of the panel.
                 let bar = |id: &'static str| {
                     egui::TopBottomPanel::bottom(id)
                         .frame(
@@ -4215,7 +4305,11 @@ impl eframe::App for App {
                         .show_separator_line(false)
                 };
                 let shown = match self.mode {
-                    Mode::Model => None,
+                    Mode::Model => self.info.is_some().then(|| {
+                        bar("model")
+                            .show_inside(ui, |ui| self.model_bar(ui))
+                            .response
+                    }),
                     Mode::Optimize => Some(
                         bar("export")
                             .show_inside(ui, |ui| self.export_bar(ui))
@@ -4364,6 +4458,23 @@ fn setting_lines<N: egui::emath::Numeric>(
         .add(egui::Slider::new(v, range).step_by(step).show_value(false))
         .changed();
     changed
+}
+
+/// The figures of a tab at the top of its bottom bar: a main line and a
+/// dim line.
+fn stats(ui: &mut egui::Ui, main: &str, sub: &str) {
+    ui.scope(|ui| {
+        ui.spacing_mut().item_spacing.y = 2.0;
+        ui.label(RichText::new(main).size(14.0));
+        if !sub.is_empty() {
+            ui.label(ui::dim(sub));
+        }
+    });
+}
+
+/// "1 copy", "3 copies".
+fn plural_of(n: usize, one: &str, many: &str) -> String {
+    format!("{n} {}", if n == 1 { one } else { many })
 }
 
 /// Dim label on the left, value on the right.

@@ -10,7 +10,7 @@ A model for CoCAD needs only one view: the assembled model, with each part in it
 
 | Do not put this in the model | CoCAD does it |
 |---|---|
-| A print layout of all parts | The **Plate** card: all parts or one part, and copies |
+| A print layout of all parts | The **Plate** card: all parts or one part |
 | `rotate()` and `translate()` to put a part on the bed | **Custom orientation**: Auto or Select face |
 | Teardrop shapes for horizontal holes | **Teardrop holes** |
 | Larger diameters for vertical holes, or polygon holes | **Hole size** |

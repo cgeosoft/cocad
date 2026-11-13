@@ -661,6 +661,22 @@ pub fn ghost(text: &str, active: bool) -> egui::Button<'static> {
         .corner_radius(8)
 }
 
+/// A row of buttons on glass, as in the bars at the bottom of the 3D view.
+pub fn glass_group<R>(
+    ui: &mut egui::Ui,
+    add: impl FnOnce(&mut egui::Ui) -> R,
+) -> egui::InnerResponse<R> {
+    egui::Frame::NONE
+        .fill(glass())
+        .corner_radius(10)
+        .inner_margin(Margin::same(4))
+        .show(ui, |ui| {
+            ui.spacing_mut().item_spacing.x = 2.0;
+            ui.spacing_mut().button_padding = vec2(8.0, 5.0);
+            ui.horizontal(add).inner
+        })
+}
+
 /// The CoCAD mark, as in packaging/cocad.svg without the tile: a cube with a
 /// teardrop hole, tip up, in the left face. The teardrop is the hole shape
 /// that prints without support (Optimize tab).
@@ -730,6 +746,8 @@ pub enum Icon {
     Expand,
     /// An "i" in a circle: more information.
     Info,
+    /// A box cut in two, with a dashed cut line: the split of a part.
+    Split,
 }
 
 /// Draws `icon` on a 16 × 16 grid around `center`.
@@ -795,6 +813,13 @@ fn paint_icon(p: &egui::Painter, icon: Icon, center: Pos2, color: Color32) {
             p.circle_stroke(center, 6.25, s);
             p.circle_filled(o + vec2(8.0, 4.9), 1.0, color);
             line(&[(8.0, 7.25), (8.0, 11.5)]);
+        }
+        Icon::Split => {
+            closed(&[(1.75, 4.25), (6.25, 4.25), (6.25, 11.75), (1.75, 11.75)]);
+            closed(&[(9.75, 4.25), (14.25, 4.25), (14.25, 11.75), (9.75, 11.75)]);
+            line(&[(8.0, 1.0), (8.0, 3.0)]);
+            line(&[(8.0, 7.0), (8.0, 9.0)]);
+            line(&[(8.0, 13.0), (8.0, 15.0)]);
         }
     }
 }

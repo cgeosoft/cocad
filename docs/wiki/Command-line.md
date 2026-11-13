@@ -55,7 +55,7 @@ cocad photo model.scad -o model.png --size 1600x1200 --samples 256 --color eb6f4
 
 ## Print options of `export` and `slice`
 
-`export` and `slice` do the same print preparation as the [Optimize](Optimize) tab. They start from the Optimize values that the app stored for the model: the print area, the fixes, the parts, the copies, the orientations and the splits. When the app stored no values, they start from the defaults: all parts, the rotation of the model, all fixes off, and the print area of **File > Settings > Printer**. The options below change these values for this run only.
+`export` and `slice` do the same print preparation as the [Optimize](Optimize) tab. They start from the Optimize values that the app stored for the model: the print area, the fixes, the parts, the orientations and the splits. When the app stored no values, they start from the defaults: all parts, the rotation of the model, all fixes off, and the print area of **File > Settings > Printer**. The options below change these values for this run only.
 
 | Option | Action |
 |---|---|

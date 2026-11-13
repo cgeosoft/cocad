@@ -269,8 +269,8 @@ The slicer can also do elephant foot compensation. With both on, the bed edge ge
 The Optimize tab has a **Plate** card:
 
 - At the top: **All parts** (default) or one part.
-- A list of the print parts: name, count, size, a check box (print or not), copies, and a status (fits the bed, open check items).
-- With one part selected, the plate holds only this part and its copies. The 3D view and the export show it.
+- A list of the print parts, one row each: the color, the name with the count of the model, a split button for a part that is too large or split, and a switch (print or not). The size and the status (fits the bed, open check items) are in the hover text. The slicer sets more copies: CoCAD 0.7 had a copies field, and CoCAD now ignores the stored value.
+- With one part selected, the plate holds only this part. The 3D view and the export show it.
 - A click on a part in the 3D view selects its row. The part menu (right click) gets **Print only this part**.
 
 This replaces the `part` dropdown of the scad-models models.
@@ -654,7 +654,7 @@ The 3D view of the Optimize tab shows the bed with a grid and the parts in print
 - Default print area: global, in `<config>/config` (feature 8).
 - Print area of a model: per model in `models.json` (feature 8).
 - Cuts and joints: per model and per part, in `models.json` (feature 9).
-- Optimize tab values: per model in `models.json`, as the slice settings today. New keys: part selection, copies, the custom orientation switch and choice of each part, the fix switches and values. A new model starts with Auto orientation and all fixes off.
+- Optimize tab values: per model in `models.json`, as the slice settings today. New keys: part selection, the custom orientation switch and choice of each part, the fix switches and values. A new model starts with Auto orientation and all fixes off.
 - Card open state: global (feature 7).
 - `models.json` today stores `"mode": "slice"` or `"photo"`. Read them as `"optimize"` and `"render"`.
 

@@ -656,12 +656,7 @@ pub fn report(built: &Built, p: &Prepared) -> String {
                 size_text(&q.mesh)
             )
         } else {
-            let model = if q.copies != q.count {
-                format!(" (model: {})", q.count)
-            } else {
-                String::new()
-            };
-            format!("x{}{model}  {}", on[k], size_text(&q.mesh))
+            format!("x{}  {}", on[k], size_text(&q.mesh))
         };
         let _ = writeln!(s, "  {:<width$}  {what}", q.name);
     }

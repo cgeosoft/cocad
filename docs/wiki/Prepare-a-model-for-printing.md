@@ -25,15 +25,15 @@ Press `O`, or click **Optimize**.
 
 ![The Optimize tab before the changes](https://raw.githubusercontent.com/cgeosoft/cocad/main/assets/guide/app-2-before.jpg)
 
-The **Plate** card shows three print parts:
+The **Plate** card shows three print parts. Hold the mouse on the name of a part to see its size and its status:
 
 | Print part | What it is | Status |
 |---|---|---|
-| **Base plate** | The base plate | Too large |
-| **Stand** | The stand. CoCAD lays it on its side. | 4 problems |
+| **Base plate** | The base plate | Too large for the print area |
+| **Stand** | The stand. CoCAD lays it on its side. | Fits. 4 problems |
 | **Cable clip 1 ×3** | The clips. CoCAD found three parts with the same shape, and puts them on their flat face. | Fits |
 
-The print area is 220 × 220 × 250 mm, the default. The base plate is 260 mm long, so it is too large. It stays on the plate, but your printer cannot print it. Below its row, a **Split** section shows a proposal. You split the plate in [step 6](#6-split-the-base-plate).
+The print area is 220 × 220 × 250 mm, the default. The base plate is 260 mm long, so it is too large. It stays on the plate, but your printer cannot print it. Its name in the **Plate** card is red, and its row has a split button. You split the plate in [step 6](#6-split-the-base-plate).
 
 CoCAD puts each part on its best face. This is **Auto** orientation, the default. See [step 5](#5-check-the-orientation).
 
@@ -51,7 +51,7 @@ Open the **Print fixes** card. Turn on **Teardrop holes**, **Bridges**, **Bed ch
 
 ![Four print fixes on](https://raw.githubusercontent.com/cgeosoft/cocad/main/assets/guide/app-3-fixes.jpg)
 
-Each fix shows the number of places that it changed. The stand now has the status **Fits**: the fixes removed all its problems. Hold the mouse on **Export 3MF** to see the fixes: "Bed chamfer, 4 teardrops, 6 bridge fixes".
+Each fix shows the number of places that it changed. Hold the mouse on **Stand**: the status is now **Fits**, with no problems. The fixes removed all its problems. Hold the mouse on **Export 3MF** to see the fixes: "Bed chamfer, 4 teardrops, 6 bridge fixes".
 
 The sections below show each fix on a part of the desk dock. The parts are in print position. In the section pictures, the bed is at the bottom.
 
@@ -160,7 +160,7 @@ The orientation applies to all copies of the part. Only you know which face must
 
 ## 6. Split the base plate
 
-The base plate is 260 mm long. It does not fit the print area of 220 × 220 mm. The **Split** section below its row shows the proposal:
+The base plate is 260 mm long. It does not fit the print area of 220 × 220 mm. Click the split button in its row. The **Split** section opens below the row and shows the proposal:
 
 - **Dovetail**: CoCAD proposes a dovetail for a flat part. The tabs are in the plane of the plate, so they print flat on the bed.
 - **Clearance**: 0.20 mm, the total gap of the joint.
@@ -184,7 +184,7 @@ Click **Top** at the bottom of the 3D view to see the plate from above:
 
 The pieces lie as the whole base plate, so both pieces have the same face on the bed. The print fixes also apply to the pieces.
 
-To change the split, select a piece. **Remove split** makes the plate whole again.
+The **Split of Base plate** section stays open below the pieces. To change the split, change a value and click **Apply**. CoCAD cuts the plate again. **Remove split** makes the plate whole again.
 
 ## 7. A smaller printer
 
@@ -198,7 +198,7 @@ Export the plate as usual. The file contains all parts. In your slicer, arrange 
 
 ## 8. Look at the layers
 
-Click **Layers** at the top left of the 3D view. The view shows the print layers of the plate, with the fixes. Move the slider at the right edge of the view, or press Up and Down, to go through the layers.
+In the **Layers** card, click **Layers**. The view shows the print layers of the plate, with the fixes. Move the slider at the right edge of the view, or press Up and Down, to go through the layers.
 
 ![The layers of the plate](https://raw.githubusercontent.com/cgeosoft/cocad/main/assets/guide/app-8-layers.jpg)
 

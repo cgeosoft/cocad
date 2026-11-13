@@ -542,6 +542,7 @@ mod tests {
             pitch: 0.55,
             dist: 200.0,
             target: Vec3::new(10.0, -5.0, 3.0),
+            ortho: false,
         };
         let aspect = 1.6;
         // The center of the view: from the eye to the target.
@@ -569,6 +570,32 @@ mod tests {
         assert!(!cam.sees(&side, aspect));
     }
 
+    /// In the parallel projection all rays have the view direction, and a
+    /// ray goes through the point that the matrix puts under the cursor.
+    #[test]
+    fn ortho_ray_goes_through_the_cursor() {
+        let cam = Camera {
+            yaw: -0.9,
+            pitch: 0.55,
+            dist: 200.0,
+            target: Vec3::new(10.0, -5.0, 3.0),
+            ortho: true,
+        };
+        let aspect = 1.6;
+        let to_target = (cam.target - cam.eye()).normalize();
+        for p in [cam.target, Vec3::new(40.0, 20.0, -10.0)] {
+            let c = cam.matrix(aspect).project_point3(p);
+            let (o, d) = cam.ray(aspect, glam::Vec2::new(c.x, c.y));
+            assert!(d.dot(to_target) > 0.99999);
+            assert!((p - o).cross(d).length() < 1e-2);
+        }
+        let b = Bounds {
+            min: cam.target - 5.0,
+            max: cam.target + 5.0,
+        };
+        assert!(cam.sees(&b, aspect));
+    }
+
     #[test]
     fn pivot_on_turns_around_the_part() {
         let mut cam = Camera {
@@ -576,6 +603,7 @@ mod tests {
             pitch: 0.4,
             dist: 300.0,
             target: Vec3::ZERO,
+            ortho: false,
         };
         let small = Bounds {
             min: Vec3::new(40.0, 10.0, 0.0),

@@ -176,8 +176,12 @@ pub(super) struct Opt {
     pub view: PlateView,
     plate: Option<PlateMesh>,
     plate_rev: u64,
-    /// Split values that the user changed before the split, by part name.
+    /// Split values that the user changed and did not apply yet, by part
+    /// name.
     drafts: HashMap<String, split::Split>,
+    /// The part whose split editor is open, by part name. For a split part:
+    /// the name of the whole part.
+    split_open: Option<String>,
     /// The state as it was stored last.
     saved: Option<Json>,
     /// The print area that the camera fits now.
@@ -206,6 +210,7 @@ impl Opt {
             plate: None,
             plate_rev: 0,
             drafts: HashMap::new(),
+            split_open: None,
             fit_area: None,
         }
     }
@@ -883,62 +888,32 @@ impl App {
         }
     }
 
-    /// The view switch and the state of the plate at the top left of the 3D
-    /// view. Returns the rectangle that they use.
-    pub(super) fn plate_overlay(&mut self, ui: &mut egui::Ui, rect: egui::Rect) -> egui::Rect {
-        let m = 16.0;
-        let area = egui::Rect::from_min_size(
-            rect.left_top() + Vec2::new(m, m),
-            Vec2::new(rect.width().min(420.0) - m, 40.0),
-        );
-        ui.scope_builder(
-            egui::UiBuilder::new()
-                .max_rect(area)
-                .layout(egui::Layout::left_to_right(egui::Align::Center)),
-            |ui| {
-                egui::Frame::NONE
-                    .fill(ui::glass())
-                    .corner_radius(10)
-                    .inner_margin(egui::Margin::same(4))
-                    .show(ui, |ui| {
-                        ui.set_width(150.0);
-                        let mut v = self.opt.view;
-                        let options = [(PlateView::Plate, "Plate"), (PlateView::Layers, "Layers")];
-                        if ui::segmented(ui, &mut v, &options) {
-                            self.opt.view = v;
-                        }
-                    });
-                ui.add_space(8.0);
-                let text = if let Some(t) = self.opt.run_seconds() {
-                    Some(format!("Preparing the plate…  {t:.1} s"))
-                } else if self.parts_job.is_some() {
-                    Some("Finding the parts…".to_string())
-                } else {
-                    self.opt.outcome.as_ref().and_then(|o| {
-                        if o.instances.is_empty() {
-                            Some("No part on the plate".to_string())
-                        } else if !o.too_large().is_empty() {
-                            Some("A part is too large for the print area".to_string())
-                        } else if o.overflow {
-                            Some("Larger than the bed. The slicer arranges the parts.".to_string())
-                        } else {
-                            None
-                        }
-                    })
-                };
-                if let Some(text) = text {
-                    egui::Frame::NONE
-                        .fill(ui::glass())
-                        .corner_radius(10)
-                        .inner_margin(egui::Margin::symmetric(12, 9))
-                        .show(ui, |ui| {
-                            ui.label(RichText::new(text).size(13.5));
-                        });
+    /// The state of the plate at the top left of the 3D view, when there is
+    /// something to tell. The Plate card shows a part that is too large.
+    pub(super) fn plate_status(&self, ui: &mut egui::Ui, rect: egui::Rect) {
+        let text = if let Some(t) = self.opt.run_seconds() {
+            format!("Preparing the plate…  {t:.1} s")
+        } else if self.parts_job.is_some() {
+            "Finding the parts…".to_string()
+        } else {
+            match self.opt.outcome.as_ref() {
+                Some(o) if o.instances.is_empty() => "No part on the plate".to_string(),
+                Some(o) if o.overflow => {
+                    "Larger than the bed. The slicer arranges the parts.".to_string()
                 }
-            },
-        )
-        .response
-        .rect
+                _ => return,
+            }
+        };
+        let m = 16.0;
+        ui::pill(
+            ui.painter(),
+            rect.left_top() + Vec2::new(m, m),
+            egui::Align2::LEFT_TOP,
+            &text,
+            egui::FontId::proportional(13.5),
+            ui::c().text,
+            ui::glass(),
+        );
     }
 
     // ------------------------------------------------------------- cards ----
@@ -954,17 +929,6 @@ impl App {
             self.layers_card(ui);
             self.printer_card(ui);
             self.print_settings_card(ui);
-            if let Some(t) = self.opt.time {
-                ui.add_space(4.0);
-                ui.label(ui::dim(format!(
-                    "Prepared in {}",
-                    if t.as_secs_f32() < 1.0 {
-                        format!("{} ms", t.as_millis())
-                    } else {
-                        format!("{:.1} s", t.as_secs_f32())
-                    }
-                )));
-            }
         });
         if self.settings != before.0 {
             self.slice_dirty_since = Some(Instant::now());
@@ -981,7 +945,10 @@ impl App {
         ui::card(ui, |ui| {
             let info = "All print parts go on one plate. The print area sets the bed, the fit \
                         of each part and the splits. When the parts need more room than the \
-                        bed, some are outside it: the slicer arranges them on its plates.";
+                        bed, some are outside it: the slicer arranges them on its plates. The \
+                        slicer also sets the number of copies.\n\n\
+                        The switch of a part puts it on the plate. The split button opens the \
+                        split of a part that is too large, or of a split part.";
             if !self.card_head_info(ui, "Plate", &note, info) {
                 return;
             }
@@ -1027,19 +994,18 @@ impl App {
             }
             ui.add_space(4.0);
             for (k, p) in o.parts.iter().enumerate() {
-                // The name row and the size row of a part close together.
-                ui.scope(|ui| {
-                    ui.spacing_mut().item_spacing.y = 2.0;
-                    self.part_row(ui, &o, k);
-                });
-                // After the pieces of a split part: its split.
+                self.part_row(ui, &o, k);
+                // After the pieces of a split part: its split, when it is open.
                 let parent = p.piece.as_ref().map(|(parent, _)| parent);
                 let next =
                     (o.parts.get(k + 1)).and_then(|q| q.piece.as_ref().map(|(parent, _)| parent));
                 if let Some(parent) = parent
                     && Some(parent) != next
+                    && self.opt.split_open.as_ref() == Some(parent)
+                    && let Some(whole) = p.whole.clone()
                 {
-                    self.split_done_row(ui, &o, parent);
+                    let current = self.opt.state.part(parent).split;
+                    self.split_editor(ui, &parent.clone(), &whole, current, None);
                 }
             }
             // Errors that are not of one part.
@@ -1058,93 +1024,87 @@ impl App {
         ui.add_space(4.0);
     }
 
-    /// One print part in the Plate card.
+    /// One print part in the Plate card, on one row: the color, the name,
+    /// the split button of a part that is too large or split, and the
+    /// switch that puts the part on the plate. The size and the state are
+    /// in the hover text of the name.
     fn part_row(&mut self, ui: &mut egui::Ui, o: &pipeline::Outcome, k: usize) {
         let p = &o.parts[k];
         let name = p.name.clone();
         let ps = self.opt.state.part(&name);
         let selected = self.opt.selected.as_deref() == Some(name.as_str());
-        ui.add_space(2.0);
-        ui.horizontal(|ui| {
-            let mut include = ps.include;
-            if ui
-                .checkbox(&mut include, "")
-                .on_hover_text("Print this part")
-                .changed()
-            {
-                self.opt.part_mut(&name).include = include;
-            }
-            let (r, _) = ui.allocate_exact_size(Vec2::splat(10.0), egui::Sense::hover());
-            ui.painter()
-                .circle_filled(r.center(), 5.0, rgb(part_color(k)));
-            let label = if p.count > 1 {
-                format!("{name} ×{}", p.count)
-            } else {
-                name.clone()
-            };
-            let rtl = egui::Layout::right_to_left(egui::Align::Center);
-            ui.with_layout(rtl, |ui| {
-                let mut text = ps.copies.map(|c| c.to_string()).unwrap_or_default();
-                let edit = egui::TextEdit::singleline(&mut text)
-                    .desired_width(34.0)
-                    .hint_text(p.count.to_string());
-                if ui
-                    .add(edit)
-                    .on_hover_text("Copies. Empty: the count in the model.")
-                    .changed()
-                {
-                    let t = text.trim();
-                    if t.is_empty() {
-                        self.opt.part_mut(&name).copies = None;
-                    } else if let Ok(n) = t.parse::<u32>() {
-                        self.opt.part_mut(&name).copies = Some(n.min(999));
-                    }
-                }
-                let ltr = egui::Layout::left_to_right(egui::Align::Center);
-                ui.with_layout(ltr, |ui| {
-                    let resp = ui.add(
-                        egui::Button::new(label)
-                            .selected(selected)
-                            .frame(false)
-                            .truncate(),
-                    );
-                    if resp.clicked() {
-                        self.opt.selected = if selected { None } else { Some(name.clone()) };
-                        self.opt.issue = None;
-                    }
-                });
-            });
-        });
-        // Size and status.
-        let size = opt::bounds_or_zero(&p.mesh).size();
+        // The split belongs to the whole part.
+        let split_of = p.piece.as_ref().map_or(&name, |(parent, _)| parent).clone();
+        let too_large = !p.fits && ps.include && p.piece.is_none();
+        let can_split = too_large || p.piece.is_some();
+        let open = can_split && self.opt.split_open.as_ref() == Some(&split_of);
         let (status, color) = if !ps.include {
             ("Not printed".to_string(), ui::c().dim)
         } else if p.copies == 0 {
             ("Not on the plate".to_string(), ui::c().dim)
         } else if !p.fits {
-            ("Too large".to_string(), ui::c().danger)
+            ("Too large for the print area".to_string(), ui::c().danger)
         } else if p.issues.is_empty() {
-            ("Fits".to_string(), ui::GOOD)
+            ("Fits".to_string(), ui::c().text)
         } else {
-            (plural(p.issues.len(), "problem", "problems"), ui::ACCENT)
+            let n = plural(p.issues.len(), "problem", "problems");
+            (format!("Fits. {n}: see the Check card."), ui::c().text)
         };
-        ui.horizontal_wrapped(|ui| {
-            ui.add_space(22.0);
-            let mut text = size_text(size);
-            if let Some((parent, label)) = &p.piece {
-                text = format!("Piece {label} of {parent} · {text}");
-            }
-            ui.label(ui::dim(text));
-            let tip =
-                (!p.fits && ps.include && p.copies > 0).then_some("Too large for the print area");
-            let l = ui.label(RichText::new(status).color(color).size(12.5));
-            if let Some(t) = tip {
-                l.on_hover_text(t);
-            }
-            if !p.report.skipped.is_empty() {
-                ui.label(ui::dim(format!("{} skipped", p.report.skipped.len())))
-                    .on_hover_text(p.report.skipped.join("\n"));
-            }
+        let mut hover = size_text(opt::bounds_or_zero(&p.mesh).size());
+        if let Some((parent, label)) = &p.piece {
+            hover = format!("Piece {label} of {parent}. {hover}");
+        }
+        if p.count > 1 {
+            hover = format!("{} in the model. {hover}", p.count);
+        }
+        hover = format!("{hover}\n{status}");
+        if !p.report.skipped.is_empty() {
+            hover = format!("{hover}\nSkipped:\n{}", p.report.skipped.join("\n"));
+        }
+        ui.add_space(2.0);
+        ui.horizontal(|ui| {
+            let (r, _) = ui.allocate_exact_size(Vec2::splat(10.0), egui::Sense::hover());
+            ui.painter()
+                .circle_filled(r.center(), 5.0, rgb(part_color(k)));
+            let rtl = egui::Layout::right_to_left(egui::Align::Center);
+            ui.with_layout(rtl, |ui| {
+                let mut include = ps.include;
+                if ui::toggle(ui, &mut include)
+                    .on_hover_text("Print this part")
+                    .changed()
+                {
+                    self.opt.part_mut(&name).include = include;
+                }
+                if can_split {
+                    let tip = if p.piece.is_some() {
+                        format!("Change the split of {split_of}")
+                    } else {
+                        "Too large for the print area. Split the part.".to_string()
+                    };
+                    let b = ui::icon_button(ui, ui::Icon::Split, 22.0, open || too_large);
+                    if b.on_hover_text(tip).clicked() {
+                        self.opt.split_open = (!open).then(|| split_of.clone());
+                    }
+                }
+                let ltr = egui::Layout::left_to_right(egui::Align::Center);
+                ui.with_layout(ltr, |ui| {
+                    let label = if p.count > 1 {
+                        format!("{name} ×{}", p.count)
+                    } else {
+                        name.clone()
+                    };
+                    let resp = ui.add(
+                        egui::Button::new(RichText::new(label).color(color))
+                            .selected(selected)
+                            .frame(false)
+                            .truncate(),
+                    );
+                    if resp.on_hover_text(hover).clicked() {
+                        self.opt.selected = if selected { None } else { Some(name.clone()) };
+                        self.opt.issue = None;
+                    }
+                });
+            });
         });
         for e in o
             .errors
@@ -1153,16 +1113,28 @@ impl App {
         {
             ui.add(egui::Label::new(RichText::new(e).color(ui::c().danger).size(12.5)).wrap());
         }
-        if !p.fits && ps.include && p.piece.is_none() {
-            self.split_editor(ui, p);
+        if open && p.piece.is_none() {
+            let (model, proposal) = (p.model.clone(), p.proposal.clone());
+            self.split_editor(ui, &name, &model, None, proposal);
         }
     }
 
-    /// The Split section of a part that does not fit: the proposal, or the
-    /// values that the user changed, and the Split button.
-    fn split_editor(&mut self, ui: &mut egui::Ui, p: &pipeline::PrintPart) {
-        let name = p.name.clone();
-        let Some(mut draft) = self.opt.drafts.get(&name).cloned().or(p.proposal.clone()) else {
+    /// The split of the part `name`: the joint, the clearance, the cuts and
+    /// the sizes of the pieces. `model` is the whole part in the model
+    /// frame. A part that is not split yet starts from the `proposal`, and
+    /// Split cuts it. A split part starts from its `current` split: Apply
+    /// cuts it again with the changed values, and Remove split puts the
+    /// whole part back.
+    fn split_editor(
+        &mut self,
+        ui: &mut egui::Ui,
+        name: &str,
+        model: &Mesh,
+        current: Option<split::Split>,
+        proposal: Option<split::Split>,
+    ) {
+        let base = current.clone().or(proposal);
+        let Some(mut draft) = self.opt.drafts.get(name).cloned().or(base) else {
             ui.add(
                 egui::Label::new(ui::dim(
                     "No parallel cuts make it fit. Turn it with a custom orientation, or use a \
@@ -1180,9 +1152,27 @@ impl App {
             .inner_margin(egui::Margin::same(8))
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
-                ui.label(RichText::new("Split").strong());
-                split_values(ui, &mut draft, &p.model, &name);
-                let sizes = split::piece_sizes(&p.model, &draft);
+                ui.horizontal(|ui| {
+                    let title = match &current {
+                        Some(_) => format!("Split of {name}"),
+                        None => "Split".to_string(),
+                    };
+                    ui.add(egui::Label::new(RichText::new(title).strong()).truncate());
+                    if current.is_some() {
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui
+                                .add(ui::ghost("Remove split", false))
+                                .on_hover_text("Put the whole part back on the plate")
+                                .clicked()
+                            {
+                                self.opt.part_mut(name).split = None;
+                                self.opt.drafts.remove(name);
+                            }
+                        });
+                    }
+                });
+                split_values(ui, &mut draft, model, name);
+                let sizes = split::piece_sizes(model, &draft);
                 for (i, s) in sizes.iter().enumerate() {
                     let fits = box_fits(*s, &area);
                     let text = format!("{}/{}: {}", i + 1, sizes.len(), size_text(*s));
@@ -1190,79 +1180,41 @@ impl App {
                     ui.label(RichText::new(text).color(color).size(12.5));
                 }
                 ui.horizontal(|ui| {
+                    let changed = current.as_ref() != Some(&draft);
+                    let (label, tip) = if current.is_some() {
+                        ("Apply", "Cut the part again with these values")
+                    } else {
+                        ("Split", "Cut the part into pieces with these values")
+                    };
                     if ui
-                        .add(ui::primary("Split"))
-                        .on_hover_text("Cut the part into pieces with these values")
+                        .add_enabled(changed, ui::primary(label))
+                        .on_hover_text(tip)
                         .clicked()
                     {
-                        self.opt.part_mut(&name).split = Some(draft.clone());
-                        self.opt.drafts.remove(&name);
+                        self.opt.part_mut(name).split = Some(draft.clone());
+                        self.opt.drafts.remove(name);
                         self.opt.selected = None;
                     }
-                    if self.opt.drafts.contains_key(&name)
+                    if self.opt.drafts.contains_key(name)
                         && ui.add(ui::ghost("Reset", false)).clicked()
                     {
-                        self.opt.drafts.remove(&name);
+                        self.opt.drafts.remove(name);
                     }
                 });
             });
         if draft != before {
             // A new joint gets new cut positions.
             if draft.joint != before.joint
-                && let Some(again) = split::propose_with(&p.model, &area, draft.joint, draft.values)
+                && let Some(again) = split::propose_with(model, &area, draft.joint, draft.values)
             {
                 draft = again;
             }
-            self.opt.drafts.insert(name, draft);
-        }
-    }
-
-    /// The split of `parent`, after its pieces: the values and Remove split.
-    fn split_done_row(&mut self, ui: &mut egui::Ui, o: &pipeline::Outcome, parent: &str) {
-        let Some(mut sp) = self.opt.state.part(parent).split else {
-            return;
-        };
-        // The model of the part is the pieces together.
-        let mut model = Mesh::default();
-        for p in &o.parts {
-            if p.piece
-                .as_ref()
-                .is_some_and(|(q, l)| q == parent && l != "pin")
-            {
-                pipeline::append(&mut model, &p.model, Mat4::IDENTITY);
+            if current.as_ref() == Some(&draft) {
+                self.opt.drafts.remove(name);
+            } else {
+                self.opt.drafts.insert(name.to_string(), draft);
             }
         }
-        let open = (self.opt.selected.as_ref())
-            .and_then(|s| o.parts.iter().find(|p| &p.name == s))
-            .is_some_and(|p| p.piece.as_ref().is_some_and(|(q, _)| q == parent));
-        egui::Frame::NONE
-            .fill(ui::c().input)
-            .corner_radius(8)
-            .inner_margin(egui::Margin::same(8))
-            .show(ui, |ui| {
-                ui.set_width(ui.available_width());
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new(format!("Split of {parent}")).strong());
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.add(ui::ghost("Remove split", false)).clicked() {
-                            self.opt.part_mut(parent).split = None;
-                        }
-                    });
-                });
-                if open {
-                    let before = sp.clone();
-                    split_values(ui, &mut sp, &model, parent);
-                    if sp != before {
-                        self.opt.part_mut(parent).split = Some(sp);
-                    }
-                } else {
-                    ui.label(ui::dim(format!(
-                        "{}, {}. Select a piece to change it.",
-                        joint_label(sp.joint),
-                        plural(sp.pieces(), "piece", "pieces")
-                    )));
-                }
-            });
     }
 
     fn orientation_card(&mut self, ui: &mut egui::Ui) {
@@ -1940,6 +1892,7 @@ mod tests {
             fits: true,
             proposal: None,
             piece: None,
+            whole: None,
         }
     }
 
@@ -2085,7 +2038,7 @@ mod tests {
         s.parts.insert(
             "Box".into(),
             pipeline::PartState {
-                copies: Some(3),
+                include: false,
                 ..pipeline::PartState::default()
             },
         );
@@ -2099,7 +2052,7 @@ mod tests {
         assert!((m.fixes.chamfer_mm - 0.6).abs() < 1e-6);
         assert_eq!(m.only, None);
         let b = m.part("Box");
-        assert_eq!(b.copies, Some(3));
+        assert!(!b.include);
         assert_eq!(b.orientation.choice, orient::Choice::Auto);
         assert!(!m.part("Lid").include);
         // null removes a part: it takes the defaults again.

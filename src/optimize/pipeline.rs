@@ -18,8 +18,6 @@ use std::sync::{Arc, Mutex};
 pub struct PartState {
     /// False: the part is not on the plate.
     pub include: bool,
-    /// Copies on the plate. `None`: the count in the model.
-    pub copies: Option<u32>,
     pub orientation: orient::Orientation,
     /// The split that the user accepted.
     pub split: Option<split::Split>,
@@ -29,7 +27,6 @@ impl Default for PartState {
     fn default() -> Self {
         PartState {
             include: true,
-            copies: None,
             orientation: orient::Orientation::default(),
             split: None,
         }
@@ -93,9 +90,9 @@ pub struct PrintPart {
     pub name: String,
     /// The `Input` parts in it.
     pub sources: Vec<usize>,
-    /// The number of this part in the model.
+    /// The number of this part in the model. The slicer sets other counts.
     pub count: u32,
-    /// Copies on the plate (0 when it is not included).
+    /// Copies on the plate: the count, or 0 when it is not on the plate.
     pub copies: u32,
     pub state: PartState,
     /// The part in the model frame, for the face pick.
@@ -112,6 +109,9 @@ pub struct PrintPart {
     pub proposal: Option<split::Split>,
     /// For a piece of a split part: the name of the part and the label.
     pub piece: Option<(String, String)>,
+    /// For a piece of a split part: the whole part in the model frame, for
+    /// a change of the split.
+    pub whole: Option<Arc<Mesh>>,
 }
 
 /// One copy of a print part on the plate.
@@ -236,6 +236,7 @@ struct Pre {
     count: u32,
     mesh: Arc<Mesh>,
     piece: Option<(String, String)>,
+    whole: Option<Arc<Mesh>>,
     state: PartState,
     /// For a piece of a split part: how the whole part lies. A piece on
     /// Auto lies the same way, so that all pieces have the same face on the
@@ -339,6 +340,7 @@ pub fn run(
             count: same.len() as u32,
             mesh: mesh.clone(),
             piece: None,
+            whole: None,
             state: st.part(name),
             lie_as: None,
         });
@@ -397,8 +399,8 @@ pub fn run(
                 };
                 for piece in pieces.iter() {
                     let name = format!("{} {}", p.name, piece.label);
-                    // A piece keeps its own orientation and copies. A pin is
-                    // a part of its own: it does not lie as the whole part.
+                    // A piece keeps its own orientation. A pin is a part of
+                    // its own: it does not lie as the whole part.
                     let mut state = st.part(&name);
                     state.split = None;
                     split_pres.push(Pre {
@@ -407,6 +409,7 @@ pub fn run(
                         count: p.count,
                         mesh: Arc::new(piece.mesh.clone()),
                         piece: Some((p.name.clone(), piece.label.clone())),
+                        whole: Some(p.mesh.clone()),
                         state,
                         lie_as: (piece.label != "pin").then_some(whole),
                     });
@@ -488,11 +491,7 @@ pub fn run(
             && st.only.as_ref().is_none_or(|o| {
                 *o == p.name || p.piece.as_ref().is_some_and(|(parent, _)| parent == o)
             });
-        p.copies = if on {
-            p.state.copies.unwrap_or(p.count)
-        } else {
-            0
-        };
+        p.copies = if on { p.count } else { 0 };
         let b = super::bounds_or_zero(&p.mesh);
         let size = Vec2::new(b.max.x - b.min.x, b.max.y - b.min.y);
         for _ in 0..p.copies {
@@ -510,9 +509,7 @@ pub fn run(
             *size
         };
         let (lo, hi) = (pl.center - foot * 0.5, pl.center + foot * 0.5);
-        overflow |= lo.min_element() < -1e-3
-            || hi.x > st.area.w + 1e-3
-            || hi.y > st.area.d + 1e-3;
+        overflow |= lo.min_element() < -1e-3 || hi.x > st.area.w + 1e-3 || hi.y > st.area.d + 1e-3;
         let b = super::bounds_or_zero(&parts[*k].mesh);
         let c = b.center();
         let turn = if pl.turned {
@@ -606,6 +603,7 @@ fn prepare(
         fits,
         proposal,
         piece: p.piece.clone(),
+        whole: p.whole.clone(),
     })
 }
 
@@ -689,7 +687,7 @@ mod tests {
     }
 
     #[test]
-    fn only_include_and_copies_change_the_plate() {
+    fn only_and_include_change_the_plate() {
         let mut j = job(vec![
             input("Part 1", boxed(10.0, 10.0, 10.0, Vec3::ZERO)),
             input("Part 2", boxed(20.0, 10.0, 5.0, Vec3::new(0.0, 50.0, 0.0))),
@@ -704,15 +702,8 @@ mod tests {
                 ..PartState::default()
             },
         );
-        j.state.parts.insert(
-            "Part 2".into(),
-            PartState {
-                copies: Some(3),
-                ..PartState::default()
-            },
-        );
         let o = go(&j);
-        assert_eq!(o.instances.len(), 3);
+        assert_eq!(o.instances.len(), 1);
         assert!(o.instances.iter().all(|i| o.parts[i.part].name == "Part 2"));
     }
 
@@ -770,7 +761,7 @@ mod tests {
 //              "brim": false, "brim_w": 5, "brim_gap": 1,
 //              "ears": false, "ear_d": 15, "ear_min": 100,
 //              "hole_size": false, "hole_add": 0.2 },
-//   "parts": { "Part 1": { "include": true, "copies": 2,
+//   "parts": { "Part 1": { "include": true,
 //                          "orient": "face", "down": [0, 1, 0], "turns": 1,
 //                          "split": { "joint": "dovetail", "cuts": [[0, 150]],
 //                                     "clearance": 0.2, ... } } } }
@@ -905,9 +896,6 @@ impl PartState {
     pub fn to_json(&self) -> Json {
         let mut m = Map::new();
         m.insert("include".into(), json!(self.include));
-        if let Some(c) = self.copies {
-            m.insert("copies".into(), json!(c));
-        }
         let o = &self.orientation;
         match o.choice {
             orient::Choice::Model => {
@@ -935,10 +923,6 @@ impl PartState {
         if let Some(b) = v.get("include").and_then(Json::as_bool) {
             p.include = b;
         }
-        p.copies = v
-            .get("copies")
-            .and_then(Json::as_u64)
-            .map(|c| c.min(999) as u32);
         p.orientation.choice = match v.get("orient").and_then(Json::as_str) {
             Some("model") => orient::Choice::Model,
             Some("face") => match vec3_of(v.get("down")) {
@@ -1026,7 +1010,6 @@ mod storage_tests {
             "Part 1".into(),
             PartState {
                 include: false,
-                copies: Some(3),
                 orientation: orient::Orientation {
                     choice: orient::Choice::Face(Vec3::Y),
                     quarter_turns: 1,
@@ -1050,6 +1033,14 @@ mod storage_tests {
         );
         let back = State::from_json(&s.to_json(), Area::default());
         assert_eq!(back, s);
+    }
+
+    /// CoCAD 0.7 stored copies for each part. The slicer sets the count now.
+    #[test]
+    fn old_copies_key_is_ignored() {
+        let p = PartState::from_json(&json!({ "include": true, "copies": 3 }));
+        assert_eq!(p, PartState::default());
+        assert!(p.to_json().get("copies").is_none());
     }
 
     #[test]

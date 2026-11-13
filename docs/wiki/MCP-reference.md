@@ -54,7 +54,7 @@ The client starts `cocad mcp`. This process has no window. It sends each tool ca
 | `export_model` | Write the plate as STL or 3MF, or the model as STEP. With `slicer`, write a multicolor 3MF |
 | `save_photo` | Write a path traced PNG |
 | `slice` | Slice the plate and return layers, filament, weight and a rough print time |
-| `set_view` | Change the tab, camera direction, wireframe, grid, part colors, explode, section cut and the layer of the Optimize tab. Start or stop the render of the Render tab |
+| `set_view` | Change the tab, camera direction, projection, wireframe, grid, Layers view, part colors, explode, section cut and the layer of the Optimize tab. Start or stop the render of the Render tab |
 | `list_windows`, `select_window` | Choose a window when more than one is open |
 
 ## Behavior
@@ -85,7 +85,7 @@ There is one plate. All print parts are on it, also a part that is too large for
 | `gap` | The gap between the parts on the plate, in mm |
 | `only` | The name of one print part, or `null` for all parts |
 | `fixes` | `teardrops`, `bridges`, `hole_above` (`sacrificial` or `stepped`), `sacrificial_layers`, `chamfer`, `chamfer_mm`, `brim`, `brim_w`, `brim_gap`, `ears`, `ear_d`, `ear_min`, `hole_size`, `hole_add` |
-| `parts` | The values of each print part, by name: `include`, `copies`, `orient` (`model`, `auto` or `face`), `down` (with `face`: the direction of the model that goes down), `turns` (quarter turns on the bed) and `split`: `joint` (`flat`, `pins` or `dovetail`), `cuts` (a list of `[axis 0 to 2, position in mm]`), `clearance`, and the sizes in mm `pin_d`, `pin_depth`, `tab_root`, `tab_tip`, `tab_depth`, `tab_pitch` |
+| `parts` | The values of each print part, by name: `include`, `orient` (`model`, `auto` or `face`), `down` (with `face`: the direction of the model that goes down), `turns` (quarter turns on the bed) and `split`: `joint` (`flat`, `pins` or `dovetail`), `cuts` (a list of `[axis 0 to 2, position in mm]`), `clearance`, and the sizes in mm `pin_d`, `pin_depth`, `tab_root`, `tab_tip`, `tab_depth`, `tab_pitch` |
 
 For example, this call turns on the bed chamfer, puts the part "Clip" on its best face and splits the part "Plate" with a dovetail joint at x = 130 mm:
 
@@ -128,7 +128,9 @@ For example, this call turns on the bed chamfer, puts the part "Clip" on its bes
 ### `set_view`: tab and layer
 
 - `mode` is `model`, `optimize` or `render`. The names before 0.7, `slice` and `photo`, also work.
-- `layer` sets the layer of the Optimize tab, from 1.
+- `layers: true` shows the Layers view of the Optimize tab, `false` the Plate view, as the switch of the **Layers** card. `get_state` shows the value.
+- `layer` sets the layer of the Optimize tab, from 1. The slice is ready some time after the Layers view opens: set the layer in a later call.
+- `projection` is `iso` (parallel projection) or `persp` (perspective), as the **Iso** button turns on or off. The Render tab and the photo always use perspective. `get_state` shows the value.
 - `render: true` starts the render of the Render tab, as the **Render** button does. It needs the Render tab, so give `mode: "render"` in the same call or before it. `false` stops the render. The tab does not start a render by itself. The `render` value of `get_state` has `running`, `samples` and `of`. To save an image, use `save_photo`.
 
 ### `set_view`: explode

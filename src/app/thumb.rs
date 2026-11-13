@@ -33,6 +33,7 @@ impl Job {
             pitch,
             dist: 1.0,
             target: b.center(),
+            ortho: false,
         };
         cam.fit(&b);
         // The fit holds the bounding sphere. Move closer until the corners

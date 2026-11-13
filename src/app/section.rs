@@ -1,6 +1,7 @@
 //! The section cut of the 3D view: at most three planes, one across each
-//! axis. Each plane removes one side of the view. The "Section" bar at the
-//! top right of the 3D view sets the cuts. All tabs show it.
+//! axis. Each plane removes one side of the view. The Section menu above
+//! the view bar at the bottom right of the 3D view sets the cuts. All tabs
+//! show it.
 //!
 //! The Model and the Render tabs cut the model. This cut is in model space,
 //! before the explode offset, so each part keeps the same cut when it moves.
@@ -83,6 +84,8 @@ pub(super) struct Section {
     /// The axis of the position that the user changes. The view then shows
     /// where the plane is.
     shown: Option<usize>,
+    /// The Section menu above the view bar is open.
+    pub open: bool,
 }
 
 /// The plane of a cut across axis `k` at `at` mm. A point p stays when
@@ -334,37 +337,30 @@ impl App {
         Some(Arc::new(pathtrace::Clip::new(planes, ranges)))
     }
 
-    /// The "Section" bar at the top right of the 3D view `rect`: a switch
-    /// for each axis, and for each cut that is on, its position and the side
-    /// to keep. When the bar does not fit next to `taken`, it goes below
-    /// it. Returns the rectangle of the bar. All tabs show it when there is
-    /// something to cut.
-    pub(super) fn section_bar(
+    /// The Section menu: it opens above the view bar `bar` at the bottom
+    /// right of the 3D view `rect`. A switch for each axis, and for each cut
+    /// that is on, its position and the side to keep. Returns the rectangle
+    /// of the menu when it is open. The cuts stay when the menu closes.
+    pub(super) fn section_menu(
         &mut self,
         ui: &mut egui::Ui,
         rect: egui::Rect,
-        taken: Option<egui::Rect>,
+        bar: egui::Rect,
     ) -> Option<egui::Rect> {
         self.view3d.section.shown = None;
         let space = self.section_space();
         let bounds = self.view3d.section.bounds(space)?;
+        if !self.view3d.section.open {
+            return None;
+        }
+        if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+            self.view3d.section.open = false;
+            return None;
+        }
         let rows = self.view3d.section.any();
         let m = 16.0;
-        // The widths of the bar, without and with the rows of the cuts. A
-        // fixed width keeps the bar at the right edge: a layout that aligns
-        // to the right puts the items of each row in the opposite order.
-        let width: f32 = if rows { 300.0 } else { 160.0 };
-        let width = width.min(rect.width() - 2.0 * m).max(0.0);
-        let mut top = rect.top() + m;
-        if let Some(t) = taken
-            && rect.right() - m - width < t.right() + 8.0
-        {
-            top = t.bottom() + 8.0;
-        }
-        let area = egui::Rect::from_min_max(
-            egui::pos2(rect.right() - m - width, top),
-            egui::pos2(rect.right() - m, rect.bottom() - m),
-        );
+        // A fixed width: the rows of the cuts do not change it.
+        let width = 300.0_f32.min(rect.width() - 2.0 * m).max(0.0);
         let what = if space == Space::Plate {
             "the plate"
         } else {
@@ -378,11 +374,12 @@ impl App {
              the cut. The export does not use it."
         };
         let s = &mut self.view3d.section;
-        let r = ui.scope_builder(
-            egui::UiBuilder::new()
-                .max_rect(area)
-                .layout(egui::Layout::top_down(egui::Align::Min)),
-            |ui| {
+        let r = egui::Area::new(egui::Id::new("section_menu"))
+            .order(egui::Order::Middle)
+            .pivot(egui::Align2::RIGHT_BOTTOM)
+            .fixed_pos(egui::pos2(bar.right(), bar.top() - 8.0))
+            .constrain_to(rect)
+            .show(ui.ctx(), |ui| {
                 egui::Frame::NONE
                     .fill(ui::glass())
                     .corner_radius(10)
@@ -406,8 +403,7 @@ impl App {
                                     s.cuts[k].on = !on;
                                 }
                             }
-                            // Reset needs room: it shows with the rows.
-                            if rows && s.changed() {
+                            if s.changed() {
                                 ui.with_layout(
                                     egui::Layout::right_to_left(egui::Align::Center),
                                     |ui| {
@@ -424,14 +420,15 @@ impl App {
                                 );
                             }
                         });
-                        for k in 0..3 {
-                            if s.cuts[k].on {
-                                cut_row(ui, s, space, &bounds, k);
+                        if rows {
+                            for k in 0..3 {
+                                if s.cuts[k].on {
+                                    cut_row(ui, s, space, &bounds, k);
+                                }
                             }
                         }
                     });
-            },
-        );
+            });
         Some(r.response.rect)
     }
 }

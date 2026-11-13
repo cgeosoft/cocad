@@ -78,7 +78,17 @@ Each tab has cards. Click the header of a card to close it or to open it. Some c
 | Turn the mouse wheel | Moves nearer or farther |
 | Double click, or press `F` | Shows the full model |
 
-The buttons at the bottom of the 3D view set a fixed direction: **Iso**, **Top**, **Front** and **Right**. **Fit** shows the full model. **Wire** shows the triangles of the model. **Grid** shows or hides the floor grid.
+The buttons at the bottom right of the 3D view:
+
+- **Top**, **Front** and **Right** set a fixed direction. **View > Iso** in the menu goes back to the start direction.
+- **Fit** shows the full model.
+- **Section** opens a menu that cuts the model. See [Section](Parts#section).
+
+The buttons at the bottom left of the 3D view turn a display on or off:
+
+- **Iso** shows the model with no perspective: parallel lines stay parallel. Off, the view has perspective. The [Render](Render) tab always uses perspective.
+- **Wire** shows the triangles of the model.
+- **Grid** shows or hides the floor grid.
 
 ## The status bar
 
@@ -86,10 +96,10 @@ The status bar shows, from left to right:
 
 - The state of the build and the time it took. **Ready** means that the model is up to date. CoCAD calls the OpenSCAD step "build".
 - The OpenSCAD version. It shows in red when the program has no Manifold backend. See [Install](Install).
-- The size of the model in mm, the number of triangles and the volume.
 - The number of open edges, if the model has some. See [Export](Export#check-the-model-before-you-export).
-- In the **Optimize** tab: the plate (when there are two or more), the layer and the print estimate. In the **Render** tab: the samples and the image size.
 - The **Console** button. It shows the messages of OpenSCAD. Look there when a model shows an error.
+
+The bar at the bottom of the right panel shows the data of the tab: in the **Model** tab the size, the volume and the triangles of the model, in the **Optimize** tab the print time and the plate, in the **Render** tab the samples and the image size.
 
 ## When the model file changes
 

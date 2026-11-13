@@ -494,7 +494,7 @@ pub(crate) fn tools() -> Json {
                     },
                     "parts": {
                         "type": "object",
-                        "description": "Values of each print part, by name: {\"include\": bool, \"copies\": n, \"orient\": \"model\" | \"auto\" | \"face\", \"down\": [x, y, z] (with face: the model direction that goes down), \"turns\": quarter turns about z, \"split\": {\"joint\": \"flat\" | \"pins\" | \"dovetail\", \"cuts\": [[axis 0 to 2, position mm]], \"clearance\": mm}}. A split_proposal of get_optimize is a valid split.",
+                        "description": "Values of each print part, by name: {\"include\": bool, \"orient\": \"model\" | \"auto\" | \"face\", \"down\": [x, y, z] (with face: the model direction that goes down), \"turns\": quarter turns about z, \"split\": {\"joint\": \"flat\" | \"pins\" | \"dovetail\", \"cuts\": [[axis 0 to 2, position mm]], \"clearance\": mm}}. A split_proposal of get_optimize is a valid split.",
                         "additionalProperties": { "type": ["object", "null"] },
                     },
                     "wait": { "type": "boolean", "description": "Wait for the plate. Default: true." },
@@ -539,6 +539,8 @@ pub(crate) fn tools() -> Json {
                     "fit": { "type": "boolean", "description": "Fit the model in the view" },
                     "wireframe": { "type": "boolean" },
                     "grid": { "type": "boolean" },
+                    "projection": { "type": "string", "enum": ["iso", "persp"], "description": "iso: parallel projection, persp: perspective. The Render tab and the photo use perspective." },
+                    "layers": { "type": "boolean", "description": "The 3D view of the Optimize tab: true shows the Layers view (the slice of the plate), false the Plate view. The Layers card has the same switch." },
                     "layer": { "type": "integer", "description": "Slice layer of the Optimize tab, from 1" },
                     "render": { "type": "boolean", "description": "true starts the path-traced render of the Render tab, as the Render button does. The tab does not start it by itself. false stops it. It needs the Render tab. The render stops when the view or a render setting changes. To save an image, use save_photo." },
                     "part_colors": { "type": "boolean", "description": "Show each part in a different color. The 3D view, the photo and the images use the part colors." },

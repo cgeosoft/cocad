@@ -4,7 +4,7 @@
 
 use crate::mesh::Mesh;
 use glam::Vec2;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Settings {
@@ -222,9 +222,15 @@ pub(crate) fn cut(mesh: &Mesh, tris: &[u32], z: f32) -> Vec<Vec<Vec2>> {
         pts.insert(to, point(to));
     }
 
+    // First the paths that start at an edge with no segment into it: in a
+    // mesh with an open edge or a T-junction they do not close. Then the
+    // closed loops.
+    let ends: HashSet<Edge> = segs.values().copied().collect();
+    let mut starts: Vec<Edge> = segs.keys().copied().collect();
+    starts.sort_unstable_by_key(|e| (ends.contains(e), *e));
     let mut loops = Vec::new();
-    let mut used = std::collections::HashSet::new();
-    let starts: Vec<Edge> = segs.keys().copied().collect();
+    let mut open = Vec::new();
+    let mut used = HashSet::new();
     for start in starts {
         if used.contains(&start) {
             continue;
@@ -232,27 +238,102 @@ pub(crate) fn cut(mesh: &Mesh, tris: &[u32], z: f32) -> Vec<Vec<Vec2>> {
         let mut lp = Vec::new();
         let mut cur = start;
         let mut closed = false;
-        while used.insert(cur) {
+        loop {
             lp.push(pts[&cur]);
+            // A path that runs into another path ends at that point.
+            if !used.insert(cur) {
+                break;
+            }
             match segs.get(&cur) {
-                Some(&nx) => {
-                    if nx == start {
-                        closed = true;
-                        break;
-                    }
-                    cur = nx;
+                Some(&nx) if nx == start => {
+                    closed = true;
+                    break;
                 }
+                Some(&nx) => cur = nx,
                 None => break,
             }
         }
         if closed {
-            let lp = simplify(lp, 0.02);
-            if lp.len() >= 3 && area(&lp).abs() > 1e-3 {
-                loops.push(lp);
+            loops.push(lp);
+        } else {
+            open.push(lp);
+        }
+    }
+    // A T-junction gives a gap of almost 0. Then the larger gaps of a mesh
+    // with defects, as other slicers do.
+    for gap in JOIN_GAPS {
+        if open.is_empty() {
+            break;
+        }
+        let (closed, rest) = join_paths(open, gap);
+        loops.extend(closed);
+        open = rest;
+    }
+    loops
+        .into_iter()
+        .map(|lp| simplify(lp, 0.02))
+        .filter(|lp| lp.len() >= 3 && area(lp).abs() > 1e-3)
+        .collect()
+}
+
+/// The gaps between the open paths of a cut that `cut` closes, in mm, in
+/// the order of the passes.
+const JOIN_GAPS: [f32; 2] = [0.05, 1.0];
+
+/// Joins open paths into closed loops: the end of a path goes to the
+/// nearest start of a path within `gap`. A path that comes back to its own
+/// start closes. Returns the closed loops and the paths that stay open.
+fn join_paths(mut open: Vec<Vec<Vec2>>, gap: f32) -> (Vec<Vec<Vec2>>, Vec<Vec<Vec2>>) {
+    let cell = |p: Vec2| ((p.x / gap).floor() as i64, (p.y / gap).floor() as i64);
+    // The paths by the grid cell of their start.
+    let mut grid: HashMap<(i64, i64), Vec<usize>> = HashMap::new();
+    for (i, p) in open.iter().enumerate() {
+        grid.entry(cell(p[0])).or_default().push(i);
+    }
+    let mut taken = vec![false; open.len()];
+    let (mut loops, mut rest) = (Vec::new(), Vec::new());
+    for i in 0..open.len() {
+        if taken[i] {
+            continue;
+        }
+        taken[i] = true;
+        let mut lp = std::mem::take(&mut open[i]);
+        loop {
+            let end = *lp.last().unwrap();
+            let home = end.distance(lp[0]);
+            let (cx, cy) = cell(end);
+            let mut best: Option<(usize, f32)> = None;
+            for dx in -1..=1 {
+                for dy in -1..=1 {
+                    for &j in grid.get(&(cx + dx, cy + dy)).into_iter().flatten() {
+                        if taken[j] {
+                            continue;
+                        }
+                        let d = end.distance(open[j][0]);
+                        if d <= gap && best.is_none_or(|(_, b)| d < b) {
+                            best = Some((j, d));
+                        }
+                    }
+                }
+            }
+            match best {
+                Some((j, d)) if d < home => {
+                    taken[j] = true;
+                    let next = std::mem::take(&mut open[j]);
+                    lp.extend(next);
+                }
+                _ => {
+                    if home <= gap && lp.len() >= 3 {
+                        loops.push(lp);
+                    } else {
+                        rest.push(lp);
+                    }
+                    break;
+                }
             }
         }
     }
-    loops
+    (loops, rest)
 }
 
 /// Removes points closer than `tol` to the previous kept point, and
@@ -633,6 +714,64 @@ mod tests {
             assert_eq!(loops.len(), 1);
             assert!((area(&loops[0]) - 50.0).abs() < 0.01);
         }
+    }
+
+    /// A cube with a T-junction: the -y side has a vertex in the middle of
+    /// its edge to the +x side, and the +x side does not. The fixes can
+    /// make such meshes. The outline must still close.
+    #[test]
+    fn t_junction_keeps_the_loop_closed() {
+        let p = |x, y, z| Vec3::new(x, y, z);
+        let mesh = Mesh {
+            vertices: vec![
+                p(0., 0., 0.),
+                p(10., 0., 0.),
+                p(10., 10., 0.),
+                p(0., 10., 0.),
+                p(0., 0., 10.),
+                p(10., 0., 10.),
+                p(10., 10., 10.),
+                p(0., 10., 10.),
+                p(10., 0., 5.), // 8: on the edge 1-5, only in the -y side
+            ],
+            triangles: vec![
+                [0, 2, 1],
+                [0, 3, 2],
+                [4, 5, 6],
+                [4, 6, 7],
+                [0, 1, 8],
+                [0, 8, 5],
+                [0, 5, 4],
+                [1, 2, 6],
+                [1, 6, 5],
+                [2, 3, 7],
+                [2, 7, 6],
+                [3, 0, 4],
+                [3, 4, 7],
+            ],
+        };
+        let tris: Vec<u32> = (0..mesh.triangles.len() as u32).collect();
+        for z in [2.0, 5.0, 7.0] {
+            let loops = cut(&mesh, &tris, z);
+            assert_eq!(loops.len(), 1, "z {z}");
+            assert!((area(&loops[0]) - 100.0).abs() < 0.01, "z {z}");
+        }
+    }
+
+    /// Paths that do not meet stay open and are dropped.
+    #[test]
+    fn far_paths_do_not_join() {
+        let a = vec![Vec2::new(0., 0.), Vec2::new(10., 0.), Vec2::new(10., 10.)];
+        let b = vec![
+            Vec2::new(10., 10.02),
+            Vec2::new(0., 10.),
+            Vec2::new(0., 0.03),
+        ];
+        let (closed, rest) = join_paths(vec![a.clone(), b], JOIN_GAPS[0]);
+        assert_eq!((closed.len(), rest.len()), (1, 0));
+        let far = vec![Vec2::new(10., 11.5), Vec2::new(0., 10.), Vec2::new(0., 1.5)];
+        let (closed, rest) = join_paths(vec![a, far], JOIN_GAPS[1]);
+        assert_eq!((closed.len(), rest.len()), (0, 2));
     }
 
     /// In a thin wall the offsets of the outside and the hole cross over.

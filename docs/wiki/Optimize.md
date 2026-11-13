@@ -12,13 +12,13 @@ For a full example with pictures of each change, see [Prepare a model for printi
 
 Click **Optimize** on the right, or press `O`. Press `O` again to go back to the **Model** tab. Point to the tab name to see its key.
 
-When you open the tab, CoCAD prepares the plate. The **Plate** card shows "Preparing the plate…" and the time. For the print fixes and the splits, CoCAD runs OpenSCAD in the background, so this can take some seconds. CoCAD keeps the results of these slow steps. When you change one value, CoCAD makes again only the parts that the change touches. The last line of the tab shows the time of the last run, for example "Prepared in 240 ms".
+When you open the tab, CoCAD prepares the plate. The **Plate** card shows "Preparing the plate…" and the time. For the print fixes and the splits, CoCAD runs OpenSCAD in the background, so this can take some seconds. CoCAD keeps the results of these slow steps. When you change one value, CoCAD makes again only the parts that the change touches. The bar at the bottom of the tab shows the time of the last run, for example "prepared in 240 ms".
 
 ## Print parts
 
 The rows of the **Plate** card are the print parts. CoCAD makes them from the [parts](Parts) of the model:
 
-- Parts with the same shape are one row with a count, for example "Part 3 ×3". The plate gets one copy for each count.
+- Parts with the same shape are one row with a count, for example "Part 3 ×3". The plate gets one copy for each part in the model. To print more copies, set the number in your slicer.
 - Parts that overlap in volume cannot be separate printed pieces. CoCAD joins them into one print part with the name "Part 1 + Part 2". Parts that only touch, for example a lid on a box, stay separate.
 - The parts of a multicolor model are the colors of one object. They are one print part with the name of the model. See [Multicolor prints](Multicolor-prints).
 - Each piece of a [split](#split-a-part-that-is-too-large) part is a print part, for example "Part 1 1/2".
@@ -26,45 +26,47 @@ The rows of the **Plate** card are the print parts. CoCAD makes them from the [p
 
 ## Plate and Layers views
 
-Two buttons at the top left of the 3D view change what the view shows:
+Two buttons at the top of the **Layers** card change what the 3D view shows:
 
 | View | What it shows |
 |---|---|
 | **Plate** | The parts on the bed, in print position. Each print part has its own color. The grid is the print area of your printer. |
 | **Layers** | The print layers of the plate. See [Layers](#layers). |
 
-When the parts need more room than the bed, the label next to the buttons shows "Larger than the bed. The slicer arranges the parts." When a part is too large for the print area, the label shows "A part is too large for the print area" instead. The **Layers** card has the same two buttons.
+When the parts need more room than the bed, a label at the top left of the 3D view shows "Larger than the bed. The slicer arranges the parts." A part that is too large for the print area has a red name in the **Plate** card.
 
 In the **Plate** view, click a part to select it. The **Plate** card marks its row, and the **Orientation** card shows its values. Click the background to clear the selection.
 
 The Optimize tab shows no explode and no reference parts. **Fit** and the `F` key show the full bed, and the parts that are outside it.
 
-The **Section** bar at the top right of the 3D view cuts the plate across the axes of the bed. The cuts that you turn on in the other tabs stay on. The plate has its own positions, at first the center of the plate. The **Layers** view shows the cut too. **Export 3MF** does not use the cut. See [Section](Parts#section).
+The **Section** menu at the bottom right of the 3D view cuts the plate across the axes of the bed. The cuts that you turn on in the other tabs stay on. The plate has its own positions, at first the center of the plate. The **Layers** view shows the cut too. **Export 3MF** does not use the cut. See [Section](Parts#section).
 
 ## The cards
 
-The tab has these cards, from top to bottom: **Plate**, **Orientation**, **Print fixes**, **Check**, **Layers**, **Printer** and **Print settings**. **Export 3MF** is below them, at the bottom of the tab. See [Export](Export).
+The tab has these cards, from top to bottom: **Plate**, **Orientation**, **Print fixes**, **Check**, **Layers**, **Printer** and **Print settings**. The bar at the bottom of the tab shows the print time, the filament weight, the copies, the layers and the time of the last run. **Export 3MF** is in this bar. See [Export](Export).
 
 Click the header of a card to close it or to open it. A closed card shows a short value in its header, for example the print time in the **Layers** card. CoCAD remembers which cards are closed. **Export 3MF** at the bottom of the tab is not in a card: it is always there.
 
 ### Plate
 
-- The dropdown at the top: **All parts** (the default), or one print part. With one part, the plate holds only this part and its copies.
+- The dropdown at the top: **All parts** (the default), or one print part. With one part, the plate holds only this part.
 - One row for each print part:
-  - The check box. Clear it to not print the part, for example when you printed it already.
   - The color of the part on the plate, and its name. Click the name to select the part.
-  - The number of copies. Empty means the count in the model. Type a number to print more or fewer copies, up to 999.
-  - Below the name: the size of the part in print position, and its status.
+  - The split button, only for a part that is too large and for the pieces of a split part. Click it to open the split. See [Split a part that is too large](#split-a-part-that-is-too-large).
+  - The switch at the right. Turn it off to not print the part, for example when you printed it already.
+
+Hold the mouse on the name to see the size of the part in print position and its status:
 
 | Status | Meaning |
 |---|---|
-| **Fits** | The part fits the print area. The Check found no problems. |
-| **3 problems** | The **Check** card lists problems of this part. |
-| **Too large** | The part does not fit the print area. It is on the plate, but your printer cannot print it. A **Split** section shows below the row. |
-| **Not printed** | You cleared the check box. |
-| **Not on the plate** | The dropdown shows a different part, or the copies are 0. |
+| **Fits** | The part fits the print area. When the Check found problems, the text gives their number. The **Check** card lists them. |
+| **Too large for the print area** | The part does not fit the print area. It is on the plate, but your printer cannot print it. The name is red, and the split button shows. |
+| **Not printed** | You turned off the switch. The name is gray. |
+| **Not on the plate** | The dropdown shows a different part. The name is gray. |
 
-When a fix found a place that it did not change, the row shows "1 skipped". Hold the mouse on it to see the place and the reason.
+When a fix found a place that it did not change, the hover text also shows the place and the reason.
+
+CoCAD does not set the number of copies. The plate holds each part of the model one time. To print more copies, set the number in your slicer.
 
 #### One plate
 
@@ -76,7 +78,7 @@ When the parts need more room than the bed, CoCAD makes the rows longer, and som
 
 #### Split a part that is too large
 
-A part that does not fit the print area shows a **Split** section with a proposal:
+A part that does not fit the print area has a red name and a split button. Click the split button. A **Split** section opens below the row with a proposal:
 
 - The joint: **Flat**, **Pins** or **Dovetail**. CoCAD proposes a dovetail for a flat part (thinner than 10 mm) and pins for other parts.
 - **Clearance**: the total gap of the joint, 0.20 mm by default. Each side gets one half.
@@ -85,7 +87,7 @@ A part that does not fit the print area shows a **Split** section with a proposa
 
 Click **Split** to cut the part. **Reset** goes back to the proposal. When you select a different joint, CoCAD finds new cut positions for it.
 
-After the split, each piece is a print part, for example "Part 1 1/2" and "Part 1 2/2". A **Split of Part 1** box shows the joint and the number of pieces. Select a piece to change the values of the split. **Remove split** makes the part whole again.
+After the split, each piece is a print part, for example "Part 1 1/2" and "Part 1 2/2". Each piece has a split button. The **Split of Part 1** section stays open below the pieces. To change the split, change the joint, the clearance or a cut, then click **Apply**. CoCAD cuts the whole part again with the new values. **Reset** goes back to the values of the split. **Remove split** makes the part whole again. Click a split button again to close the section.
 
 | Joint | Shape | After the print |
 |---|---|---|
