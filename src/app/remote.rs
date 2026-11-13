@@ -18,9 +18,11 @@ const MAX_VIEW_SIDE: u64 = 1024;
 const MAX_SAMPLES: u64 = 4096;
 const LOG_LINES: usize = 60;
 
-/// Internal calls: send the state or the slice result when the work ends.
+/// Internal calls: send the state, the slice result or the Optimize state
+/// when the work ends.
 const STATE_WHEN_DONE: &str = "__state";
 const SLICE_WHEN_DONE: &str = "__slice";
+const OPTIMIZE_WHEN_DONE: &str = "__optimize";
 
 pub(super) struct Pending {
     req: Request,
@@ -143,12 +145,34 @@ impl App {
 
     fn busy_for(&self, tool: &str) -> bool {
         match tool {
-            SLICE_WHEN_DONE => self.slice_job.is_some(),
-            STATE_WHEN_DONE | "export_model" | "save_photo" | "view_model" | "slice" => {
+            SLICE_WHEN_DONE => {
                 self.rendering()
+                    || self.optimize_waits()
+                    || self.slice_job.is_some()
+                    || (self.opt.outcome.is_some() && self.sliced_for != self.plate_key())
             }
+            OPTIMIZE_WHEN_DONE | "get_optimize" => self.rendering() || self.optimize_waits(),
+            // The plate needs the parts.
+            "export_model" => self.rendering() || self.parts_job.is_some(),
+            STATE_WHEN_DONE | "save_photo" | "view_model" | "slice" => self.rendering(),
             _ => false,
         }
+    }
+
+    /// A waiting tool call needs the Optimize outcome: the pipeline runs
+    /// also outside the Optimize tab.
+    pub(super) fn tool_needs_outcome(&self) -> bool {
+        self.pending.iter().any(|p| {
+            matches!(
+                p.req.tool.as_str(),
+                "get_optimize" | OPTIMIZE_WHEN_DONE | SLICE_WHEN_DONE
+            )
+        })
+    }
+
+    /// A waiting tool call needs the slice of the plate.
+    pub(super) fn tool_needs_slice(&self) -> bool {
+        self.pending.iter().any(|p| p.req.tool == SLICE_WHEN_DONE)
     }
 
     /// Images show the part colors and the explode of the window. While the
@@ -197,6 +221,8 @@ impl App {
                 | "view_model"
                 | "save_photo"
                 | "slice"
+                | "get_optimize"
+                | "set_optimize"
         );
         if builds && let Some((binary, probe)) = &self.no_manifold {
             let problem = openscad::problem(binary, probe).unwrap_or_default();
@@ -250,6 +276,8 @@ impl App {
             "save_photo" => self.save_photo_to(args, reply),
             "slice" => self.slice_now(args, reply),
             SLICE_WHEN_DONE => self.slice_result().map(Some),
+            "get_optimize" | OPTIMIZE_WHEN_DONE => self.optimize_json().map(Some),
+            "set_optimize" => self.set_optimize(args, reply),
             "set_view" => self.view_change(args),
             _ => Err(format!("Unknown tool {tool}.")),
         }
@@ -358,6 +386,8 @@ impl App {
             "part_colors": v.part_colors,
             "explode": explode,
             "section": v.section.to_json(),
+            "plates": self.current_plates(),
+            "plate": self.opt.state.plate + 1,
             "log": log,
         })
     }
@@ -476,51 +506,97 @@ impl App {
         Ok(Some(json!({ "saved": name, "file": self.sets_file })))
     }
 
+    /// `export_model`: STL and 3MF write the plate as the window does (the
+    /// current plate, a plate number from 1, or "all"), STEP writes the
+    /// model, and `slicer` writes a multicolor 3MF.
     fn export_to(&mut self, args: &Json, reply: &Reply) -> Outcome {
         let mesh = self.current_mesh()?;
-        let path = output(args)?;
-        if Format::from_path(&path).is_none() {
-            return Err("The path must end in .stl, .3mf or .step.".into());
-        }
-        let meta = Meta {
-            title: self.stem(),
-            params: self
-                .params
-                .iter()
-                .map(|p| (p.name.clone(), p.value.to_scad()))
-                .collect(),
-        };
-        let target = match args["slicer"].as_str() {
+        let target = absolute(args)?;
+        let fmt = Format::from_path(&target).ok_or("The path must end in .stl, .3mf or .step.")?;
+        let meta = self.export_meta();
+        let slicer = match args["slicer"].as_str() {
             Some(name) => Some(
                 export::Slicer::from_name(name)
                     .ok_or_else(|| format!("slicer must be prusa or orca, got {name}"))?,
             ),
             None => None,
         };
-        let job = match target {
+        let which = match &args["plate"] {
+            Json::Null => optimize_tab::Plates::One(self.opt.state.plate),
+            Json::String(s) if s == "all" => optimize_tab::Plates::All,
+            v => match v.as_u64() {
+                Some(n) if n >= 1 => optimize_tab::Plates::One(n as usize - 1),
+                _ => return Err(format!("plate must be a number from 1 or \"all\", got {v}")),
+            },
+        };
+        let overwrite = flag(args, "overwrite", false);
+        // Each file that the export writes must pass the checks of `output`.
+        let check = move |p: &std::path::Path| -> Result<(), String> {
+            if p.symlink_metadata()
+                .is_ok_and(|m| m.file_type().is_symlink())
+            {
+                return Err(format!("{} is a symbolic link", p.display()));
+            }
+            if p.exists() && !overwrite {
+                return Err(format!(
+                    "{} exists. Set overwrite to replace it.",
+                    p.display()
+                ));
+            }
+            Ok(())
+        };
+        if which != optimize_tab::Plates::All || slicer.is_some() || fmt == Format::Step {
+            output(args)?;
+        }
+        let only = self.opt.state.only.clone();
+        let source = match (slicer, fmt) {
+            (Some(_), _) => None,
+            (None, Format::Step) if only.is_none() => None,
+            _ => Some(self.plate_source()?),
+        };
+        let job = match slicer {
             Some(_) => {
                 let file = self.file.clone().ok_or("No model is open.")?;
                 Some((file, self.cfg.clone(), self.params.clone()))
             }
             None => None,
         };
-        self.note(format!("exporting {}", path.display()));
+        self.note(format!("exporting {}", target.display()));
         let reply = reply.clone();
         std::thread::spawn(move || {
-            let written = match (job, target) {
-                (Some((file, cfg, params)), Some(slicer)) => {
+            let written: Result<Vec<PathBuf>, String> = match (job, slicer, source) {
+                (Some((file, cfg, params)), Some(slicer), _) => {
                     let cancel = Arc::new(AtomicBool::new(false));
                     crate::parts::render(&cfg, &file, &params, &cancel)
-                        .and_then(|parts| export::write_parts(&path, &parts, &meta, slicer))
+                        .and_then(|parts| export::write_parts(&target, &parts, &meta, slicer))
+                        .map(|_| vec![target.clone()])
+                        .map_err(|e| e.to_string())
                 }
-                _ => export::write(&path, &mesh, &meta),
+                (_, _, None) => export::write(&target, &mesh, &meta)
+                    .map(|_| vec![target.clone()])
+                    .map_err(|e| e.to_string()),
+                (_, _, Some(src)) if fmt == Format::Step => src.outcome().and_then(|o| {
+                    let m = optimize_tab::only_mesh(&o, only.as_deref().unwrap_or_default())?;
+                    export::write(&target, &m, &meta)
+                        .map(|_| vec![target.clone()])
+                        .map_err(|e| e.to_string())
+                }),
+                (_, _, Some(src)) => src.outcome().and_then(|o| {
+                    let files = optimize_tab::write_plates(&target, &o, which, &meta, check)?;
+                    Ok(files)
+                }),
             };
-            let r = written
-                .map(|_| {
-                    let bytes = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
-                    json!({ "path": path, "bytes": bytes })
-                })
-                .map_err(|e| e.to_string());
+            let r = written.map(|files| {
+                let bytes = |p: &PathBuf| std::fs::metadata(p).map(|m| m.len()).unwrap_or(0);
+                if files.len() == 1 {
+                    json!({ "path": files[0], "bytes": bytes(&files[0]) })
+                } else {
+                    let list: Vec<Json> = (files.iter())
+                        .map(|p| json!({ "path": p, "bytes": bytes(p) }))
+                        .collect();
+                    json!({ "files": list })
+                }
+            });
             let _ = reply.send(r);
         });
         Ok(None)
@@ -645,20 +721,29 @@ impl App {
         s.infill = num("infill", 0.0, 100.0)?.map_or(s.infill, |v| v as f32 / 100.0);
         s.solid_layers = num("solid_layers", 0.0, 100.0)?.map_or(s.solid_layers, |v| v as u32);
         s.speed = num("speed", 1.0, 1000.0)?.map_or(s.speed, |v| v as f32);
-        self.settings = s;
-        self.start_slice();
+        if s != self.settings {
+            self.settings = s;
+            self.slice_for_rev = u64::MAX;
+        }
+        // The slice starts when the plate is ready (see `App::poll`).
         self.later(SLICE_WHEN_DONE, reply);
         Ok(None)
     }
 
     fn slice_result(&self) -> Result<Json, String> {
+        if let Some(e) = &self.opt.error {
+            return Err(format!("The print preparation failed: {e}"));
+        }
         let r = self
             .sliced
             .as_ref()
-            .filter(|_| self.slice_for_rev == self.mesh_rev)
+            .filter(|_| self.sliced_for == self.plate_key() && self.outcome_current())
             .ok_or("The slice result is out of date. Call slice again.")?;
         let st = &r.stats;
+        let plates = self.opt.outcome.as_ref().map_or(0, |o| o.plates);
         Ok(json!({
+            "plate": self.opt.state.plate + 1,
+            "plates": plates,
             "layers": st.layers,
             "path_m": st.path_mm / 1000.0,
             "filament_m": st.filament_m,
@@ -674,6 +759,30 @@ impl App {
                 "speed": self.settings.speed,
             },
         }))
+    }
+
+    /// `set_optimize`: merges a partial state into the Optimize state, then
+    /// waits for the plates.
+    fn set_optimize(&mut self, args: &Json, reply: &Reply) -> Outcome {
+        self.need_model()?;
+        let mut patch = args.as_object().cloned().unwrap_or_default();
+        let wait = patch
+            .remove("wait")
+            .and_then(|w| w.as_bool())
+            .unwrap_or(true);
+        if patch.is_empty() {
+            return Err(
+                "Give one or more state keys: area, gap, only, plate, fixes, parts.".into(),
+            );
+        }
+        self.apply_optimize(&Json::Object(patch))?;
+        self.note("changed the Optimize values".into());
+        if wait {
+            self.later(OPTIMIZE_WHEN_DONE, reply);
+            Ok(None)
+        } else {
+            Ok(Some(json!({ "state": self.opt.state.to_json() })))
+        }
     }
 
     fn view_change(&mut self, args: &Json) -> Outcome {

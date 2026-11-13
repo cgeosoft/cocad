@@ -9,8 +9,15 @@
 //!     "photo": { "color": [255, 147, 0], "finish": "satin", ... },
 //!     "parts": { "colors": true, "explode": false, "axis": "z", "custom": { "Lid": [1, 2, 3] } },
 //!     "set": "big", "edited": true, "params": { "width": "80" },
-//!     "closed_groups": ["Advanced"] } }
+//!     "closed_groups": ["Advanced"],
+//!     "optimize": { "area": [220, 220, 250], "fixes": { ... }, ... },
+//!     "area_preset": "Creality K1C" } }
 //! ```
+//!
+//! "optimize" is the state of the Optimize tab (`pipeline::State::to_json`).
+//! A model without it starts with the default print area of the settings,
+//! custom orientation off and all fixes off. "slice" also holds the limits
+//! of the check: "overhang_deg" and "bridge_mm".
 //!
 //! Before 0.7 the "mode" values were "slice" and "photo". They read as
 //! "optimize" and "render".
@@ -131,6 +138,8 @@ impl App {
                 "infill": s.infill,
                 "solid_layers": s.solid_layers,
                 "speed": s.speed,
+                "overhang_deg": self.opt.limits.overhang_deg,
+                "bridge_mm": self.opt.limits.bridge_mm,
             },
             "ghost": self.ghost,
             "photo": {
@@ -154,6 +163,8 @@ impl App {
             "edited": self.set_edited,
             "params": params,
             "closed_groups": closed,
+            "optimize": self.opt.state.to_json(),
+            "area_preset": self.opt.area_preset,
         });
         if let Json::Object(state) = state {
             store(path, state);
@@ -200,6 +211,20 @@ impl App {
             if let Some(v) = u32_of(o, "solid_layers").filter(|v| *v <= 10) {
                 s.solid_layers = v;
             }
+            let l = &mut self.opt.limits;
+            if let Some(v) = mm("overhang_deg", 20.0, 80.0) {
+                l.overhang_deg = v;
+            }
+            if let Some(v) = mm("bridge_mm", 1.0, 100.0) {
+                l.bridge_mm = v;
+            }
+        }
+        if let Some(o) = st.get("optimize") {
+            self.opt.state = crate::optimize::pipeline::State::from_json(o, self.default_area());
+            self.opt.restored();
+        }
+        if let Some(p) = st.get("area_preset").and_then(|p| p.as_str()) {
+            self.opt.area_preset = p.to_string();
         }
         if let Some(o) = st.get("photo") {
             let p = &mut self.photo;

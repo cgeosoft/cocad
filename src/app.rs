@@ -9,8 +9,8 @@ use crate::params::{self, Param, Value, Widget};
 use crate::pathtrace;
 use crate::presets;
 use crate::recent;
-use crate::render::{self, Renderer, View};
-use crate::slicer::{self, Kind, Settings, Sliced};
+use crate::render::{Renderer, View};
+use crate::slicer::{self, Settings, Sliced};
 use crate::telemetry::{self, Event, Screen, Source};
 use crate::ui;
 use crate::update;
@@ -22,6 +22,7 @@ use std::sync::mpsc::{Receiver, channel};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
+mod optimize_tab;
 mod remote;
 mod section;
 mod select;
@@ -88,7 +89,15 @@ impl Mode {
     fn cards(self) -> &'static [&'static str] {
         match self {
             Mode::Model => &["Build", "Parts", "Explode", "Section", "Mesh"],
-            Mode::Optimize => &["Estimate", "Layer", "Print settings"],
+            Mode::Optimize => &[
+                "Plate",
+                "Orientation",
+                "Print fixes",
+                "Check",
+                "Layers",
+                "Printer",
+                "Print settings",
+            ],
             Mode::Render => &[
                 "Progress", "Material", "Parts", "Explode", "Scene", "Quality",
             ],
@@ -329,6 +338,8 @@ pub struct App {
     slice_for_rev: u64,
     slice_dirty_since: Option<Instant>,
     slice_job: Option<Receiver<(u64, Sliced, Duration)>>,
+    /// The plate key (`plate_key`) of `sliced`.
+    sliced_for: u64,
     slice_time: Option<Duration>,
     layer: usize,
     ghost: bool,
@@ -372,7 +383,10 @@ pub struct App {
     no_manifold: Option<(String, openscad::Probe)>,
     renderer: Option<Arc<Mutex<Renderer>>>,
     toast: Option<(String, Instant)>,
-    export_rx: Option<Receiver<Result<PathBuf, String>>>,
+    /// A running export: the written files, or the error.
+    export_rx: Option<Receiver<Result<Vec<PathBuf>, String>>>,
+    /// The Optimize tab: its state, the pipeline and the plate view.
+    opt: optimize_tab::Opt,
     menu: Option<Menu>,
     menu_at: egui::Pos2,
     menu_bar_rect: egui::Rect,
@@ -441,6 +455,7 @@ impl App {
             }
         });
         let cfg = openscad::Config::load();
+        let (cfg_bed, cfg_preset) = (cfg.bed, cfg.bed_preset.clone());
         let start_mode = Mode::from_name(mode).unwrap_or(Mode::Model);
         let consent = telemetry::load_consent();
         telemetry::event(Event::AppStarted {
@@ -473,6 +488,7 @@ impl App {
             slice_for_rev: u64::MAX,
             slice_dirty_since: None,
             slice_job: None,
+            sliced_for: u64::MAX,
             slice_time: None,
             layer: 0,
             ghost: false,
@@ -530,6 +546,7 @@ impl App {
             renderer,
             toast: None,
             export_rx: None,
+            opt: optimize_tab::Opt::new(cfg_bed, &cfg_preset),
             menu: None,
             menu_at: egui::Pos2::ZERO,
             menu_bar_rect: egui::Rect::NOTHING,
@@ -576,6 +593,10 @@ impl App {
                 self.set_assembly(None);
                 self.view3d.new_model();
                 self.collapsed.clear();
+                let (area, preset) = (self.default_area(), self.cfg.bed_preset.clone());
+                self.opt.new_model(area, &preset);
+                self.sliced_for = u64::MAX;
+                self.slice_for_rev = u64::MAX;
                 if let Some(st) = &saved {
                     self.restore_panels(st);
                     if self.restore_params(st) {
@@ -895,21 +916,30 @@ impl App {
         });
     }
 
+    /// Slices the current plate in the background.
     fn start_slice(&mut self) {
-        let Some(mesh) = self.mesh.clone() else {
+        let Some(o) = self.opt.outcome.clone() else {
             return;
         };
         self.slice_dirty_since = None;
         let (tx, rx) = channel();
         let s = self.settings;
-        let rev = self.mesh_rev;
+        let rev = self.plate_key();
+        let plate = self.opt.state.plate;
         std::thread::spawn(move || {
             let t = Instant::now();
+            let mesh = o.plate_mesh(plate);
             let r = slicer::slice(&mesh, &s);
             let _ = tx.send((rev, r, t.elapsed()));
         });
         self.slice_for_rev = rev;
         self.slice_job = Some(rx);
+    }
+
+    /// True when the slice preview must follow the plate: in the Optimize
+    /// tab, or for a tool call.
+    fn slice_wanted(&self) -> bool {
+        self.mode == Mode::Optimize || self.tool_needs_slice()
     }
 
     fn poll(&mut self, ctx: &egui::Context) {
@@ -930,9 +960,6 @@ impl App {
                     if self.fit_pending {
                         self.fit();
                         self.fit_pending = false;
-                    }
-                    if self.mode == Mode::Optimize {
-                        self.start_slice();
                     }
                 }
                 Err(e) if e == "cancelled" => {}
@@ -968,10 +995,11 @@ impl App {
             && let Ok((rev, sliced, t)) = rx.try_recv()
         {
             self.slice_job = None;
-            if rev == self.mesh_rev {
-                let first = self.sliced.is_none();
+            if rev == self.plate_key() {
+                let first = self.sliced.as_ref().is_none_or(|s| s.layers.is_empty());
                 let n = sliced.layers.len();
                 self.sliced = Some(Arc::new(sliced));
+                self.sliced_for = rev;
                 self.slice_rev += 1;
                 self.slice_time = Some(t);
                 if first || self.layer >= n {
@@ -985,11 +1013,15 @@ impl App {
             self.export_rx = None;
             self.toast = Some((
                 match r {
-                    Ok(p) => {
-                        if let Some(format) = Format::from_path(&p) {
+                    Ok(paths) => {
+                        if let Some(format) = paths.first().and_then(|p| Format::from_path(p)) {
                             telemetry::event(Event::ModelExported { format });
                         }
-                        format!("Saved {}", p.display())
+                        match paths.as_slice() {
+                            [] => "Nothing saved".to_string(),
+                            [p] => format!("Saved {}", p.display()),
+                            [p, ..] => format!("Saved {} files: {} …", paths.len(), p.display()),
+                        }
                     }
                     Err(e) => format!("Export failed: {e}"),
                 },
@@ -1017,9 +1049,20 @@ impl App {
         if self.autosave_at.is_some_and(|t| t.elapsed() > AUTOSAVE) {
             self.autosave();
         }
-        if self
-            .slice_dirty_since
-            .is_some_and(|t| t.elapsed() > DEBOUNCE)
+        self.poll_optimize(ctx);
+        if self.slice_dirty_since.is_some() && self.slice_wanted() {
+            ctx.request_repaint_after(DEBOUNCE);
+        }
+        // The slice follows the current plate, after the print settings
+        // settle.
+        if self.slice_wanted()
+            && self.slice_job.is_none()
+            && self
+                .slice_dirty_since
+                .is_none_or(|t| t.elapsed() > DEBOUNCE)
+            && self.opt.outcome.is_some()
+            && self.outcome_current()
+            && self.slice_for_rev != self.plate_key()
         {
             self.start_slice();
         }
@@ -1028,6 +1071,7 @@ impl App {
             || self.slice_job.is_some()
             || self.parts_job.is_some()
             || self.export_rx.is_some()
+            || self.opt.running()
             || !self.pending.is_empty()
         {
             ctx.request_repaint_after(Duration::from_millis(50));
@@ -1076,16 +1120,45 @@ impl App {
         recent::export_dir().or_else(|| self.file.as_ref()?.parent().map(PathBuf::from))
     }
 
-    fn export(&mut self, fmt: Format) {
+    /// The parameter values for the 3MF and STEP headers.
+    fn export_meta(&self) -> Meta {
+        Meta {
+            title: self.stem(),
+            params: self
+                .params
+                .iter()
+                .map(|p| (p.name.clone(), p.value.to_scad()))
+                .collect(),
+        }
+    }
+
+    /// Exports STL or 3MF of the current plate (`all`: of all plates, one
+    /// file each), or STEP of the model as built. With one print part
+    /// selected in the Plate card, STEP writes only that part. When the
+    /// plates are not ready, the export thread prepares them first.
+    fn export(&mut self, fmt: Format, all: bool) {
         let Some(mesh) = self.mesh.clone() else {
             return;
         };
+        let only = self.opt.state.only.clone();
+        let source = if fmt != Format::Step || only.is_some() {
+            match self.plate_source() {
+                Ok(s) => Some(s),
+                Err(e) => {
+                    self.toast = Some((format!("Cannot export: {e}"), Instant::now()));
+                    return;
+                }
+            }
+        } else {
+            None
+        };
+        let plate = self.opt.state.plate;
+        let mut name = export::suggested_name(&self.stem(), self.active_set.as_deref(), fmt);
+        if fmt != Format::Step && !all && self.current_plates().is_some_and(|n| n > 1) {
+            name = export::plate_name(&name, plate);
+        }
         let mut dialog = rfd::FileDialog::new()
-            .set_file_name(export::suggested_name(
-                &self.stem(),
-                self.active_set.as_deref(),
-                fmt,
-            ))
+            .set_file_name(name)
             .add_filter(fmt.label(), &[fmt.ext()]);
         if let Some(dir) = self.export_dir() {
             dialog = dialog.set_directory(dir);
@@ -1094,21 +1167,30 @@ impl App {
             return;
         };
         recent::set_export_dir(&path);
-        let meta = Meta {
-            title: self.stem(),
-            params: self
-                .params
-                .iter()
-                .map(|p| (p.name.clone(), p.value.to_scad()))
-                .collect(),
-        };
+        let meta = self.export_meta();
         let (tx, rx) = channel();
         std::thread::spawn(move || {
-            let _ = tx.send(
-                export::write(&path, &mesh, &meta)
-                    .map(|_| path)
+            let r = match (fmt, source) {
+                (Format::Step, None) => export::write(&path, &mesh, &meta)
+                    .map(|_| vec![path])
                     .map_err(|e| e.to_string()),
-            );
+                (Format::Step, Some(src)) => src.outcome().and_then(|o| {
+                    let m = optimize_tab::only_mesh(&o, only.as_deref().unwrap_or_default())?;
+                    export::write(&path, &m, &meta)
+                        .map(|_| vec![path])
+                        .map_err(|e| e.to_string())
+                }),
+                (_, Some(src)) => src.outcome().and_then(|o| {
+                    let which = if all {
+                        optimize_tab::Plates::All
+                    } else {
+                        optimize_tab::Plates::One(plate)
+                    };
+                    optimize_tab::write_plates(&path, &o, which, &meta, |_| Ok(()))
+                }),
+                (_, None) => Err("no plate".to_string()),
+            };
+            let _ = tx.send(r);
         });
         self.export_rx = Some(rx);
     }
@@ -1132,14 +1214,7 @@ impl App {
             return;
         };
         recent::set_export_dir(&path);
-        let meta = Meta {
-            title: self.stem(),
-            params: self
-                .params
-                .iter()
-                .map(|p| (p.name.clone(), p.value.to_scad()))
-                .collect(),
-        };
+        let meta = self.export_meta();
         let (cfg, params) = (self.cfg.clone(), self.params.clone());
         let (tx, rx) = channel();
         std::thread::spawn(move || {
@@ -1147,7 +1222,7 @@ impl App {
             let _ = tx.send(
                 crate::parts::render(&cfg, &file, &params, &cancel)
                     .and_then(|parts| export::write_parts(&path, &parts, &meta, slicer))
-                    .map(|_| path)
+                    .map(|_| vec![path])
                     .map_err(|e| e.to_string()),
             );
         });
@@ -1321,7 +1396,7 @@ impl App {
         for fmt in Format::ALL {
             let label = format!("Export {}", fmt.label());
             if ui::menu_item(ui, &label, "", can_export, false).clicked() {
-                self.export(fmt);
+                self.export(fmt, false);
             }
         }
         if !crate::parts::names(&self.params).is_empty() {
@@ -1809,19 +1884,17 @@ impl App {
 
     /// The default print area from Settings > Printer, for a model that
     /// has no print area of its own yet.
-    #[allow(dead_code)]
     pub(crate) fn default_area(&self) -> crate::optimize::Area {
         self.cfg.bed
     }
 
-    /// What the export buttons write, in one short line above them.
-    pub(crate) fn export_summary(&self) -> String {
-        "Model as built.".to_string()
-    }
-
     /// The Export card. It stays at the bottom of the right panel in all
-    /// tabs, and it does not close.
+    /// tabs, and it does not close. STL and 3MF write the current plate,
+    /// STEP writes the model as built.
     fn export_card(&mut self, ui: &mut egui::Ui) {
+        let plates = self.current_plates();
+        let empty = plates == Some(0);
+        let parts_ready = self.parts_job.is_none();
         ui::card(ui, |ui| {
             ui::section(ui, "Export");
             ui.add(egui::Label::new(ui::dim(self.export_summary())).wrap());
@@ -1831,17 +1904,48 @@ impl App {
             ui.horizontal(|ui| {
                 for fmt in Format::ALL {
                     let b = ui::primary(&fmt.ext().to_uppercase()).min_size(Vec2::new(w, 34.0));
-                    if ui
-                        .add_enabled(can_export, b)
-                        .on_hover_text(fmt.label())
-                        .clicked()
-                    {
-                        pick = Some(fmt);
+                    let (enabled, hover) = if fmt == Format::Step {
+                        (
+                            can_export,
+                            "STEP (AP214, faceted): the model as built".to_string(),
+                        )
+                    } else if !parts_ready {
+                        (false, "CoCAD is still finding the parts".to_string())
+                    } else if empty {
+                        (false, "No part is on the plate".to_string())
+                    } else {
+                        (can_export, format!("{}: the current plate", fmt.label()))
+                    };
+                    let r = ui.add_enabled(enabled, b);
+                    let r = if enabled {
+                        r.on_hover_text(hover)
+                    } else {
+                        r.on_disabled_hover_text(hover)
+                    };
+                    if r.clicked() {
+                        pick = Some((fmt, false));
                     }
                 }
             });
-            if let Some(fmt) = pick {
-                self.export(fmt);
+            if let Some(n) = plates.filter(|n| *n > 1) {
+                ui.label(ui::dim(format!("All {n} plates, one file each")));
+                let w = (ui.available_width() - ui.spacing().item_spacing.x) / 2.0;
+                ui.horizontal(|ui| {
+                    for fmt in [Format::Stl, Format::ThreeMf] {
+                        let b = ui::primary(&format!("All {}", fmt.ext().to_uppercase()))
+                            .min_size(Vec2::new(w, 34.0));
+                        if ui
+                            .add_enabled(can_export, b)
+                            .on_hover_text("Export all plates")
+                            .clicked()
+                        {
+                            pick = Some((fmt, true));
+                        }
+                    }
+                });
+            }
+            if let Some((fmt, all)) = pick {
+                self.export(fmt, all);
             }
             if !crate::parts::names(&self.params).is_empty() {
                 ui.label(ui::dim("Multicolor 3MF"));
@@ -1868,9 +1972,11 @@ impl App {
                 view: mode.screen(),
             });
         }
+        let refit = (mode == Mode::Optimize) != (self.mode == Mode::Optimize);
         self.mode = mode;
-        if mode == Mode::Optimize && self.slice_for_rev != self.mesh_rev {
-            self.start_slice();
+        // The Optimize tab shows the bed, the other tabs the model.
+        if refit {
+            self.fit();
         }
     }
 
@@ -2436,7 +2542,19 @@ impl App {
             // Mode details.
             match self.mode {
                 Mode::Optimize => {
-                    if let Some(sl) = &self.sliced {
+                    if let Some(o) = &self.opt.outcome
+                        && o.plates > 1
+                    {
+                        sep(ui);
+                        ui.label(small(format!(
+                            "Plate {} of {}",
+                            self.opt.state.plate + 1,
+                            o.plates
+                        )));
+                    }
+                    if let Some(sl) = (self.sliced.as_ref())
+                        .filter(|s| self.sliced_for == self.plate_key() && !s.layers.is_empty())
+                    {
                         sep(ui);
                         ui.label(small(format!(
                             "Layer {} / {}",
@@ -2828,149 +2946,6 @@ impl App {
             });
     }
 
-    /// The Optimize tab. For now it holds the slice preview.
-    fn optimize_panel(&mut self, ui: &mut egui::Ui) {
-        self.panel_head(ui, "Rough preview for checking. Not for printing.");
-        let before = self.settings;
-        egui::ScrollArea::vertical()
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                if let Some(sl) = self.sliced.clone() {
-                    let st = &sl.stats;
-                    ui::card(ui, |ui| {
-                        let note = format!("{}, {:.1} g", fmt_duration(st.seconds), st.grams);
-                        if !self.card_head(ui, "Estimate", &note) {
-                            return;
-                        }
-                        ui.label(
-                            RichText::new(fmt_duration(st.seconds))
-                                .size(30.0)
-                                .color(ui::ACCENT),
-                        );
-                        ui.columns(3, |c| {
-                            stat(&mut c[0], &format!("{:.1} g", st.grams), "weight");
-                            stat(&mut c[1], &format!("{:.2} m", st.filament_m), "filament");
-                            stat(&mut c[2], &st.layers.to_string(), "layers");
-                        });
-                    });
-                    ui.add_space(4.0);
-                    ui::card(ui, |ui| {
-                        let note = format!("{} / {}", self.layer + 1, sl.layers.len());
-                        if !self.card_head(ui, "Layer", &note) {
-                            return;
-                        }
-                        if let Some(l) = sl.layers.get(self.layer) {
-                            ui.horizontal(|ui| {
-                                ui.label(RichText::new(format!("{}", self.layer + 1)).size(22.0));
-                                ui.label(ui::dim(format!(
-                                    "of {}   ·   z = {:.2} mm",
-                                    sl.layers.len(),
-                                    l.z
-                                )));
-                            });
-                        }
-                        ui.add_space(2.0);
-                        egui::Grid::new("legend")
-                            .num_columns(2)
-                            .spacing([16.0, 8.0])
-                            .show(ui, |ui| {
-                                for (i, k) in
-                                    [Kind::OuterWall, Kind::InnerWall, Kind::Infill, Kind::Solid]
-                                        .into_iter()
-                                        .enumerate()
-                                {
-                                    ui.horizontal(|ui| {
-                                        let (r, _) = ui.allocate_exact_size(
-                                            Vec2::new(10.0, 10.0),
-                                            egui::Sense::hover(),
-                                        );
-                                        ui.painter().circle_filled(
-                                            r.center(),
-                                            5.0,
-                                            rgb(render::kind_color(k)),
-                                        );
-                                        ui.label(
-                                            RichText::new(match k {
-                                                Kind::OuterWall => "Outer wall",
-                                                Kind::InnerWall => "Inner wall",
-                                                Kind::Infill => "Sparse infill",
-                                                Kind::Solid => "Solid infill",
-                                            })
-                                            .size(13.0),
-                                        );
-                                    });
-                                    if i % 2 == 1 {
-                                        ui.end_row();
-                                    }
-                                }
-                            });
-                        ui.label(ui::dim("Up/Down or PgUp/PgDn change the layer."));
-                    });
-                    ui.add_space(4.0);
-                } else if self.slice_job.is_some() {
-                    ui::card(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.spinner();
-                            ui.label("Slicing…");
-                        });
-                    });
-                }
-
-                ui::card(ui, |ui| {
-                    let s = self.settings;
-                    let note = format!("{:.2} mm, {:.0} %", s.layer_height, s.infill * 100.0,);
-                    if !self.card_head(ui, "Print settings", &note) {
-                        return;
-                    }
-                    let s = &mut self.settings;
-                    setting(
-                        ui,
-                        "Layer height",
-                        &mut s.layer_height,
-                        0.05..=0.6,
-                        0.01,
-                        " mm",
-                    );
-                    setting(
-                        ui,
-                        "First layer",
-                        &mut s.first_layer,
-                        0.05..=0.6,
-                        0.01,
-                        " mm",
-                    );
-                    setting(ui, "Line width", &mut s.line_width, 0.2..=1.2, 0.01, " mm");
-                    setting(ui, "Walls", &mut s.walls, 0..=6, 1.0, "");
-                    let mut pct = s.infill * 100.0;
-                    if setting(ui, "Infill", &mut pct, 0.0..=100.0, 1.0, " %") {
-                        s.infill = pct / 100.0;
-                    }
-                    setting(
-                        ui,
-                        "Top and bottom layers",
-                        &mut s.solid_layers,
-                        0..=10,
-                        1.0,
-                        "",
-                    );
-                    setting(ui, "Speed", &mut s.speed, 10.0..=300.0, 5.0, " mm/s");
-                    ui.horizontal(|ui| {
-                        ui.label("Show model ghost");
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            ui::toggle(ui, &mut self.ghost);
-                        });
-                    });
-                });
-                if let Some(t) = self.slice_time {
-                    ui.add_space(4.0);
-                    ui.label(ui::dim(format!("Sliced in {} ms", t.as_millis())));
-                }
-            });
-        if self.settings != before {
-            self.slice_dirty_since = Some(Instant::now());
-        }
-    }
-
     fn viewport(&mut self, ui: &mut egui::Ui) {
         let rect = ui.available_rect_before_wrap();
         let resp = ui.allocate_rect(rect, egui::Sense::click_and_drag());
@@ -3003,29 +2978,45 @@ impl App {
                 self.cam.dist = (self.cam.dist * (-scroll * 0.0015).exp()).clamp(0.5, 20_000.0);
             }
         }
+        // The Optimize tab shows the plate on the bed.
+        let optimize = self.mode == Mode::Optimize;
+        if optimize {
+            self.plate_click(&resp, rect);
+            self.ensure_plate();
+        }
         self.select_input(&resp, rect);
         if resp.double_clicked() {
             self.fit();
         }
         self.update_selection();
 
-        let layer_max = self.sliced.as_ref().map(|s| s.layers.len()).unwrap_or(0);
-        let slicing = self.mode == Mode::Optimize && layer_max > 0;
+        let sliced = (self.sliced.clone()).filter(|_| self.sliced_for == self.plate_key());
+        let layer_max = sliced.as_ref().map(|s| s.layers.len()).unwrap_or(0);
+        let slicing = optimize && self.opt.view == optimize_tab::PlateView::Layers && layer_max > 0;
         if let Some(r) = &self.renderer {
             let view = View {
                 mvp: self.cam.matrix(rect.width() / rect.height().max(1.0)),
                 eye: self.cam.eye(),
                 show_mesh: !slicing || self.ghost,
                 mesh_alpha: if slicing { 0.12 } else { 1.0 },
-                parts: self.part_styles(),
+                parts: if optimize {
+                    self.plate_styles()
+                } else {
+                    self.part_styles()
+                },
                 wireframe: self.wireframe,
                 grid: self.grid,
                 layer: slicing.then_some(self.layer),
                 section: self.section_view(),
             };
-            let (assembly, assembly_rev) = (self.assembly.clone(), self.assembly_rev);
-            let (sliced, slice_rev) = (self.sliced.clone(), self.slice_rev);
+            let (assembly, assembly_rev) = if optimize {
+                self.plate_mesh()
+            } else {
+                (self.assembly.clone(), self.assembly_rev)
+            };
+            let slice_rev = self.slice_rev;
             let bounds = self.view_bounds();
+            let bed = optimize.then_some(self.opt.state.area);
             let dark = ui::is_dark();
             let r = r.clone();
             let cb = egui::PaintCallback {
@@ -3035,11 +3026,15 @@ impl App {
                     let mut r = r.lock().unwrap();
                     r.set_mesh(gl, assembly.as_deref(), assembly_rev);
                     r.set_slice(gl, sliced.as_deref(), slice_rev);
-                    let b = bounds.unwrap_or(Bounds {
-                        min: Vec3::splat(-50.0),
-                        max: Vec3::splat(50.0),
-                    });
-                    r.set_grid(gl, b.min, b.max, dark);
+                    if let Some(a) = bed {
+                        r.set_bed(gl, a.w, a.d, dark);
+                    } else {
+                        let b = bounds.unwrap_or(Bounds {
+                            min: Vec3::splat(-50.0),
+                            max: Vec3::splat(50.0),
+                        });
+                        r.set_grid(gl, b.min, b.max, dark);
+                    }
                     r.paint(gl, &view);
                 })),
             };
@@ -3106,6 +3101,10 @@ impl App {
                     });
             },
         );
+
+        if optimize && self.mesh.is_some() {
+            self.plate_overlay(ui, rect);
+        }
 
         // Layer slider, right edge.
         if slicing {
@@ -3490,7 +3489,7 @@ fn printer_settings(ui: &mut egui::Ui, edit: &mut openscad::Config) {
         .wrap(),
     );
     ui.add_space(6.0);
-    crate::printer::area_editor(ui, &mut edit.bed);
+    crate::printer::area_editor(ui, &mut edit.bed, &mut edit.bed_preset);
 }
 
 /// The MCP server page of the Settings window.
