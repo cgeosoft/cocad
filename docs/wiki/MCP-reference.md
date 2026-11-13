@@ -2,7 +2,7 @@
 
 *Advanced topic. This page is for technical readers. For a simple introduction, see [AI assistant](AI-assistant).*
 
-CoCAD has an MCP server, so that an AI client can work with the open window. The client can read the model and its parameters, change values, see the result as an image, and run app commands.
+CoCAD has an MCP server, so that an AI client can work with the open window. The client can read the model and its parameters, change values, see the result as an image, prepare the print plates, and run app commands.
 
 ## Setup
 
@@ -40,31 +40,74 @@ The client starts `cocad mcp`. This process has no window. It sends each tool ca
 
 | Tool | Action |
 |---|---|
-| `get_state` | Loaded file, render status, last error, mesh data, changed parameters, parameter sets, parts, part colors, explode, section cut, end of the OpenSCAD log |
+| `get_state` | Loaded file, build status, last error, mesh data, changed parameters, parameter sets, tab, parts and reference parts, part colors, explode, section cut, the plates of the Optimize tab, end of the OpenSCAD log |
 | `get_params` | All Customizer parameters with type, value, default, limits and options |
 | `get_source` | Source of the `.scad` file |
 | `view_model` | Render an image and return it to the client |
 | `open_model` | Open a `.scad` file |
-| `set_params`, `reset_params` | Change parameters or reset them, then render |
-| `render` | Run OpenSCAD again |
+| `set_params`, `reset_params` | Change parameters or reset them, then build |
+| `build` | Build the model: run OpenSCAD again. The name before 0.7, `render`, also works. |
 | `load_parameter_set`, `save_parameter_set` | Load or save a parameter set |
-| `export_model` | Write STL, 3MF or STEP. With `slicer`, write a multicolor 3MF |
+| `get_optimize` | The print preparation of the Optimize tab: the state and the result |
+| `set_optimize` | Change the print preparation of the Optimize tab |
+| `export_model` | Write a plate as STL or 3MF, or the model as STEP. With `slicer`, write a multicolor 3MF |
 | `save_photo` | Write a path traced PNG |
-| `slice` | Slice and return layers, filament, weight and a rough print time |
-| `set_view` | Change the tab, camera direction, wireframe, grid, part colors, explode, section cut and slice layer |
+| `slice` | Slice the current plate and return layers, filament, weight and a rough print time |
+| `set_view` | Change the tab, camera direction, wireframe, grid, part colors, explode, section cut and the layer of the Optimize tab |
 | `list_windows`, `select_window` | Choose a window when more than one is open |
 
 ## Behavior
 
-### Parameters and renders
+### Parameters and builds
 
 - `set_params` uses the limits of the Customizer panel. One bad value rejects the whole call.
-- Calls wait for the render, for at most 45 seconds. Then they return the state with status `rendering`, or an error.
+- `set_params` builds the model by default. With `"build": false`, the app follows its **Auto build** switch. The name before 0.7, `render`, also works.
+- Calls wait for the build, for at most 45 seconds. Then they return the state with status `building`, or an error.
+- The status of `get_state` is one of `ready`, `building`, `needs build`, `failed`, `no model`, `idle` and `no openscad with manifold`.
+
+### Optimize
+
+`get_optimize` returns:
+
+- `state`: the values of the Optimize tab, in the form that `set_optimize` takes.
+- `parts`: one entry for each print part: `name`, `count`, `copies`, `fits`, `size_mm`, `plates`, `orientation`, `issues` (the problems of the Check card), `fixes` (the number of places that each fix changed, and the places that it skipped), and for a part that does not fit, `split_proposal`. A piece of a split part has `piece`.
+- `plates`, `plate` (from 1), `summary` (the line of the Export card), `errors` and `seconds`.
+
+`set_optimize` merges the given keys into the state, as a JSON merge patch: objects merge key by key, and `null` removes a key. Then it waits for the plates and returns the result as `get_optimize` does.
+
+| Key | Value |
+|---|---|
+| `area` | The print area `[width, depth, height]` in mm |
+| `gap` | The gap between the parts on a plate, in mm |
+| `only` | The name of one print part, or `null` for all parts |
+| `plate` | The plate that the window and the export show, from 0 |
+| `fixes` | `teardrops`, `bridges`, `hole_above` (`sacrificial` or `stepped`), `sacrificial_layers`, `chamfer`, `chamfer_mm`, `brim`, `brim_w`, `brim_gap` |
+| `parts` | The values of each print part, by name: `include`, `copies`, `orient` (`model`, `auto` or `face`), `down` (with `face`: the direction of the model that goes down), `turns` (quarter turns on the bed) and `split`: `joint` (`flat`, `pins` or `dovetail`), `cuts` (a list of `[axis 0 to 2, position in mm]`), `clearance`, and the sizes in mm `pin_d`, `pin_depth`, `tab_root`, `tab_tip`, `tab_depth`, `tab_pitch` |
+
+For example, this call turns on the bed chamfer, puts the part "Clip" on its best face and splits the part "Plate" with a dovetail joint at x = 130 mm:
+
+```json
+{
+  "fixes": {"chamfer": true},
+  "parts": {
+    "Clip": {"orient": "auto"},
+    "Plate": {"split": {"joint": "dovetail", "cuts": [[0, 130]], "clearance": 0.2}}
+  }
+}
+```
+
+- A `split_proposal` of `get_optimize` is a valid `split`.
+- `"parts": {"Lid": null}` gives the part "Lid" its default values again.
+- An unknown key rejects the call.
+- All fixes are off until you turn them on.
 
 ### Files
 
+- `export_model` writes `.stl` and `.3mf` as the window does: a plate of the Optimize tab, with the print parts in print position and the fixes that are on. `plate` selects the plate (from 1) or `all`. The default is the plate that the window shows. With `all`, each plate goes to its own file, with `-plateN` before the extension. A plate 3MF has one object for each print part and one build item for each copy.
+- `export_model` writes `.step` as the model as built. When `only` of the Optimize state names a part, the STEP file has only that part.
+- `export_model` prepares the plates when they are not ready.
 - `export_model` and `save_photo` do not replace a file without `overwrite`.
-- `export_model`, `save_photo` and `view_model` fail when the last render failed, so that they do not use an old mesh.
+- `export_model`, `save_photo` and `view_model` fail when the last build failed, so that they do not use an old mesh.
 - `open_model` opens only `.scad` files. `save_photo` writes only `.png` files.
 - `export_model` and `save_photo` do not write through a symbolic link.
 - The tools cannot delete a parameter set or a file.
@@ -72,8 +115,17 @@ The client starts `cocad mcp`. This process has no window. It sends each tool ca
 ### Images
 
 - `view_model` and `save_photo` put the whole model in the frame. They use the camera direction of the window, or the given `view`.
-- `view_model` and `save_photo` show the part colors, the explode and the section cut of the window, as the **Photo** tab does. When the part colors or the explode are on and CoCAD still finds the parts, they wait for the parts, for at most 45 seconds.
+- `view_model` and `save_photo` show the model as built, with the part colors, the explode and the section cut of the window, as the **Render** tab does. They do not show the reference parts. When the part colors or the explode are on and CoCAD still finds the parts, they wait for the parts, for at most 45 seconds.
 - `save_photo` stops after 40 seconds and saves the samples it has.
+
+### `slice`
+
+`slice` slices the current plate of the Optimize tab, with the fixes. Given values (`layer_height`, `first_layer`, `line_width`, `walls`, `infill`, `solid_layers`, `speed`) also change the print settings of the window. The result has the plate, the number of plates, the layers, the path and filament length, the weight and a rough print time in minutes.
+
+### `set_view`: tab and layer
+
+- `mode` is `model`, `optimize` or `render`. The names before 0.7, `slice` and `photo`, also work.
+- `layer` sets the layer of the Optimize tab, from 1.
 
 ### `set_view`: explode
 

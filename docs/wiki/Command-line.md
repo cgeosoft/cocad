@@ -7,29 +7,37 @@ The `cocad` program also works in a terminal, without the window. Use it to expo
 ## Open the window
 
 ```bash
-cocad model.scad            # open in the model view
-cocad --slice model.scad    # open in the slice view
-cocad --photo model.scad    # open in the photo view
+cocad model.scad              # open in the Model tab
+cocad --optimize model.scad   # open in the Optimize tab
+cocad --render model.scad     # open in the Render tab
 ```
+
+The names before 0.7, `--slice` and `--photo`, also work.
 
 ## Commands without the window
 
 | Command | Action |
 |---|---|
 | `cocad params FILE.scad` | List the Customizer parameters |
-| `cocad export FILE.scad -o OUT` | Render and write `OUT`. The extension sets the format: `.stl`, `.3mf` or `.step`. |
-| `cocad slice FILE.scad` | Slice and show the estimates |
+| `cocad export FILE.scad -o OUT` | Build and write `OUT`. The extension sets the format: `.stl`, `.3mf` or `.step`. STL and 3MF get the print plate, STEP gets the model as built. |
+| `cocad slice FILE.scad` | Slice the plates and show the estimates |
 | `cocad photo FILE.scad -o OUT.png` | Make a path traced photo from the iso view |
 | `cocad mcp` | Serve MCP on stdin and stdout. See [MCP reference](MCP-reference). |
 | `cocad --help` | Show the usage text |
 | `cocad --version` | Show the version |
+
+`export`, `slice`, `photo` and `mcp` stop with an error when the OpenSCAD binary has no Manifold backend. The error shows the install steps. `params` does not run OpenSCAD.
 
 ## Examples
 
 ```bash
 cocad params model.scad
 cocad export model.scad -o model.3mf -D width=80 -D 'shape="square"'
-cocad export model.scad -o big.stl -P big          # saved set 'big' from model.json
+cocad export model.scad -o big.stl -P big           # saved set 'big' from model.json
+cocad export model.scad -o box.3mf --chamfer --teardrops --bridges=stepped --brim
+cocad export model.scad -o box.stl --bed 250x210x220 --plate all   # box-plate1.stl, box-plate2.stl, ...
+cocad export model.scad -o lid.stl --part Lid --orient auto
+cocad export model.scad -o model.stl --as-built     # the whole model, as before 0.7
 cocad export badge.scad -o badge.3mf --for orca     # multicolor 3MF for OrcaSlicer
 cocad slice model.scad --layer-height 0.2 --infill 20 --walls 3
 cocad photo model.scad -o model.png --size 1600x1200 --samples 256 --color eb6f40 --finish satin --layer-lines
@@ -43,20 +51,51 @@ cocad photo model.scad -o model.png --size 1600x1200 --samples 256 --color eb6f4
 | `-p FILE` | Read the sets from `FILE`. Without `-p`, the command uses the sets file that the app remembers for the model, else `<model>.json`. |
 | `-D name=value` | Set one parameter. You can use it more than once. These values apply after the set. |
 
-## Options of `export`
+## Print options of `export` and `slice`
+
+`export` and `slice` do the same print preparation as the [Optimize](Optimize) tab. They start from the Optimize values that the app stored for the model: the print area, the fixes, the parts, the copies, the orientations and the splits. When the app stored no values, they start from the defaults: all parts, the rotation of the model, all fixes off, and the print area of **File > Settings > Printer**. The options below change these values for this run only.
+
+| Option | Action |
+|---|---|
+| `--plate N` or `--plate all` | The plate to export or slice. `export` writes plate 1 by default. `slice` slices all plates by default. With `--plate all`, `export` writes one file for each plate: `OUT-plate1.ext`, `OUT-plate2.ext` and so on. |
+| `--part NAME` or `--part all` | Only this print part, or all print parts. A part that you turned off in the app is printed when you name it. |
+| `--bed WxDxH` | The print area in mm, for example `--bed 250x210x220` |
+| `--orient model` or `--orient auto` | The orientation of all parts: the rotation of the model, or the best face |
+| `--chamfer` or `--chamfer=MM` | Bed chamfer. 0.4 mm by default. `--chamfer=0` turns it off. |
+| `--teardrops` | Teardrop holes |
+| `--bridges` or `--bridges=sacrificial` or `--bridges=stepped` | Bridge fixes, with the fix for a hole above a bridge |
+| `--brim` | Brim on small bed islands |
+| `--no-fixes` | All stored fixes off. The fix options above still turn a fix on. |
+| `--as-built` | The model as built, without the print preparation, as before 0.7. With `--part NAME`, only that part, in its place in the model. |
+
+The command line cannot split a part. It uses the splits that you made in the app. A part that is too large for the print area is on no plate. The report tells you to split it in the Optimize tab.
+
+`export` and `slice` write a report on stderr: the parts, the print parts with their sizes, the plates, the fixes and the problems of the check.
+
+### Options of `export`
 
 | Option | Action |
 |---|---|
 | `-o OUT` | The output file |
-| `--for prusa` or `--for orca` | Write a multicolor 3MF for that slicer. See [Multicolor prints](Multicolor-prints). |
+| `--for prusa` or `--for orca` | Write a multicolor 3MF for that slicer. See [Multicolor prints](Multicolor-prints). The print options do nothing with `--for`. |
 
-## Options of `slice`
+STEP always gets the model as built. With `--part NAME`, the STEP file has only that part. The print options do nothing for STEP.
+
+A 3MF plate has one object for each print part and one build item for each copy.
+
+### Options of `slice`
 
 | Option | Action |
 |---|---|
 | `--layer-height MM` | Layer height in mm |
+| `--first-layer MM` | First layer height in mm |
+| `--line-width MM` | Line width in mm |
 | `--infill PCT` | Infill in percent |
 | `--walls N` | Number of walls |
+| `--solid-layers N` | Number of solid layers at the top and the bottom |
+| `--speed MM_S` | Print speed in mm/s |
+
+With two or more plates, `slice` shows one line for each plate, and then the sum of all plates. The layer heights also set the steps of the bed chamfer, the brim and the sacrificial layers, for `export` too.
 
 ## Options of `photo`
 
@@ -69,6 +108,8 @@ cocad photo model.scad -o model.png --size 1600x1200 --samples 256 --color eb6f4
 | `--finish matte\|satin\|gloss` | `satin` | Finish |
 | `--studio dark\|light` | `dark` | Backdrop |
 | `--layer-lines` | off | Show print layer lines |
+
+`photo` shows the model as built, not the print plate.
 
 ## Environment
 

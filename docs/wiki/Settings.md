@@ -16,13 +16,20 @@ The window has one page for each topic. Change what you want, then click **Save*
 
 ## OpenSCAD
 
-This page shows if CoCAD found OpenSCAD, and its version.
+This page shows if CoCAD found OpenSCAD, and its version. The version shows in green when the program has the Manifold backend, and in red when it does not.
 
 - **Binary**: the OpenSCAD program. Leave it empty and CoCAD finds the program itself. Click **Browse** to select a program, for example a development snapshot that you downloaded.
 - **Extra arguments**: options that CoCAD gives to OpenSCAD. Most users leave this empty.
-- **Manifold backend**: uses the fast method of OpenSCAD to calculate the shape. It needs an OpenSCAD development build. The switch is not available when your OpenSCAD does not have this method.
 
-If the page shows "Not found. Set the binary.", see [Install](Install#if-cocad-does-not-find-openscad).
+CoCAD needs an OpenSCAD development snapshot with the Manifold backend. It always adds `--backend=manifold`. When the program has no Manifold backend, the page says so and shows a link to the development snapshots. When you type `--backend=cgal` in **Extra arguments**, the page shows a warning: the builds are much slower, and CoCAD needs Manifold.
+
+If the page shows "Not found. Set the binary.", see [Install](Install#if-cocad-does-not-find-openscad-with-manifold).
+
+## Printer
+
+The default print area of your printer: width, depth and height in mm. Select a printer in the dropdown, or type the values. When the values are not the same as a printer in the list, the dropdown shows **Custom**.
+
+A model that you open for the first time gets this print area. To change the print area of one model, use the **Printer** card of the [Optimize](Optimize#printer) tab. The default is 220 × 220 × 250 mm.
 
 ## MCP server
 

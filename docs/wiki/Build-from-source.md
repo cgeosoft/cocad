@@ -5,7 +5,7 @@
 ## Requirements
 
 - Rust (stable, 1.85 or later)
-- OpenSCAD
+- An OpenSCAD development snapshot with the Manifold backend. See [Install](Install#step-1-install-an-openscad-development-snapshot).
 - Debian and Ubuntu: the GTK 3 and OpenGL development files
 
 ```bash
@@ -29,7 +29,7 @@ scripts/build.sh --debug    # debug build
 scripts/package-deb.sh      # writes dist/cocad_<version>_<arch>.deb
 ```
 
-The `.deb` installs the binary, a desktop entry, an icon, the `.scad` MIME type and the examples.
+The `.deb` installs the binary, a desktop entry, an icon, the `.scad` MIME type and the examples. It does not depend on OpenSCAD, because Debian has no OpenSCAD package with Manifold. The notice at the start of the app tells the user how to install a development snapshot.
 
 ## Analytics key
 
@@ -49,8 +49,9 @@ A tag `v*` (for example `v0.2.0`) also makes a GitHub release with all files att
 
 ## Tests
 
-- `cargo test`: parser, mesh, STL round trip, STEP faces, 3MF zip, parameter sets, slicer skin, path tracer BVH, parts of the 3D view.
-- `scripts/test-models.sh`: renders every model in `examples/`, exports STL, 3MF and STEP, and slices it. Use `--release` for speed, or give model files to test only those.
+- `cargo test`: parser, mesh, STL round trip, STEP faces, 3MF zip, parameter sets, slicer skin, path tracer BVH, parts of the 3D view, and the print preparation: plates, same parts, orientation, fixes, check and split.
+- `cargo test showcase -- --ignored --nocapture`: the Optimize features on `examples/desk-dock.scad`. These tests need OpenSCAD. With `COCAD_SHOWCASE_OUT=<dir>`, they also write the part meshes before and after each change as STL files.
+- `scripts/test-models.sh`: builds every model in `examples/`, exports STL, 3MF and STEP, and slices it. STL and 3MF get the print plate, STEP gets the model as built. Then two print preparation runs: all fixes on `bracket.scad`, and two plates of `lid-box.scad` with `--plate all`. Use `--release` for speed, or give model files to test only those.
 - The STEP export of `examples/demo-box.scad` loads in OpenCASCADE as one valid solid. Its volume is the same as the STL volume.
 
 | Model | Tests |
@@ -62,6 +63,8 @@ A tag `v*` (for example `v0.2.0`) also makes a GitHub release with all files att
 | `bracket.scad` | Holes, slots, a gusset, overhangs |
 | `honeycomb-tray.scad` | Many holes per layer, thin webs, `include <lib/hex.scad>` |
 | `multicolor-badge.scad` | SVG inlays, one part for each color in touching solids |
+| `desk-dock.scad` | The showcase of the Optimize tab: a part too large for the bed, horizontal holes, counterbores with holes above, blind holes, a thin foot, three same parts in a tilted rotation, `%` reference parts |
+| `reference-part.scad` | A `%` reference part that is not printed or exported |
 | `open-mesh.scad` | Open mesh: open-edge warning, STEP as an open shell |
 | `flat-2d.scad` | 2D only: must fail with a clear error |
 | `empty.scad` | No geometry: must fail with a clear error |
@@ -77,6 +80,7 @@ Models with `// expect: error` on the first line must fail.
 | `src/app/remote.rs` | MCP tools inside the window |
 | `src/app/select.rs` | Select a part in the 3D view, part menu, focus, color window of one part |
 | `src/app/tour.rs` | Welcome tour |
+| `src/app/optimize_tab.rs` | The Optimize tab: cards, plate view, pipeline runs in the background, plate export, MCP Optimize state |
 | `src/mcp.rs` | MCP server, tool list, window listener |
 | `src/app/view3d.rs` | 3D view options for the parts: part colors, explode, Parts and Explode cards, part colors window |
 | `src/app/state.rs` | State of each model: right panel settings and last parameter values, in `models.json` |
@@ -99,6 +103,8 @@ Models with `// expect: error` on the first line must fail.
 | `src/parts.rs` | Finds the parts of a multicolor model and renders each one |
 | `src/export.rs` | STL, 3MF, multicolor 3MF and STEP writers |
 | `src/slicer.rs` | Preview slicer |
+| `src/optimize/` | Print preparation: `pipeline.rs` (print parts, plates, cache), `plate.rs` (same parts, overlap, layout), `orient.rs`, `split.rs`, `fixes.rs` with `teardrop.rs`, `bridges.rs` and `brim.rs`, `check.rs`, `scad.rs` (OpenSCAD runs on part meshes), `headless.rs` (CLI print options and report) |
+| `src/printer.rs` | Printer presets and the print area editor |
 | `src/pathtrace.rs` | Path tracer for photo renders (BVH, plastic material, studio light, section cut) |
 | `examples/` | Test models. The binary embeds the models that render. |
 | `scripts/` | Build and packaging scripts |

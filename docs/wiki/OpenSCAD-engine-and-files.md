@@ -2,21 +2,24 @@
 
 *Advanced topic. This page is for technical readers.*
 
-OpenSCAD does the geometry. CoCAD runs the `openscad` command in the background, reads the mesh that it writes, and does the rest.
+OpenSCAD does the geometry. CoCAD runs the `openscad` command in the background, reads the mesh that it writes, and does the rest. CoCAD calls this step **build**.
 
-## Backends: CGAL and Manifold
+## The Manifold backend
 
-OpenSCAD 2021.01 (the Debian package) uses the CGAL backend. CGAL is slow on large models. OpenSCAD development builds have the Manifold backend. A model that takes 13 s with CGAL can take 0.3 s with Manifold.
+CoCAD needs an OpenSCAD binary with the Manifold backend. The development snapshots have it. The release 2021.01 (the Debian 13 package) has only the CGAL backend, which is slow on large models. A model that takes 13 s with CGAL can take 0.3 s with Manifold.
 
-When the binary supports Manifold, CoCAD adds `--backend=manifold`. To stop this, turn off **Manifold backend** in **File > Settings > OpenSCAD**, or set your own `--backend` argument.
+- CoCAD runs the binary with `--version` and `--help`. The binary has Manifold when its `--help` text names the `--backend` option and `manifold`.
+- CoCAD adds `--backend=manifold` to each OpenSCAD run, unless **Extra arguments** has a `--backend` argument. With `--backend=cgal`, the settings page shows a warning.
+- When the binary has no Manifold, the window shows a notice with the install steps and builds no model. See [Install](Install#if-cocad-does-not-find-openscad-with-manifold). `cocad export`, `cocad slice`, `cocad photo` and `cocad mcp` stop with an error that shows the same steps.
+- The status bar shows the OpenSCAD version. It is red when the binary has no Manifold.
 
-The status bar shows the OpenSCAD version and the backend.
+The print fixes and the splits of the [Optimize](Optimize) tab also run OpenSCAD: CoCAD writes a small `.scad` file that imports the part mesh and adds or cuts simple shapes. This is why CoCAD needs the fast Manifold backend.
 
 ## Which binary CoCAD uses
 
 1. `$OPENSCAD`, if it is set.
 2. The **Binary** of **File > Settings > OpenSCAD**, if it is set.
-3. `openscad-nightly`, then `openscad`, on the `PATH` and in the usual install folders: `C:\Program Files\OpenSCAD*`, `/Applications/OpenSCAD*.app` and Homebrew.
+3. `openscad-nightly`, then `openscad`, on the `PATH`, then the usual install folders: `C:\Program Files\OpenSCAD (Nightly)`, `C:\Program Files\OpenSCAD`, `/Applications/OpenSCAD (Nightly).app`, `/Applications/OpenSCAD.app`, `/opt/homebrew/bin` and `/usr/local/bin`. CoCAD uses the first binary that has Manifold. When none has it, CoCAD uses the first binary that it found.
 
 **Extra arguments** in the settings go to each OpenSCAD run. `$OPENSCAD_ARGS` overrides them.
 
@@ -32,11 +35,11 @@ The [command line](Command-line) uses the same settings.
 
 | Item | Content |
 |---|---|
-| `config` | The settings |
+| `config` | The settings, with the default print area and the cards that you closed |
 | `recent` | The list of recent models |
 | `sets-files` | The sets file of each model |
 | `last-sets` | The set that you used last for each model |
-| `models.json` | For each model: the settings of the right panel and your last parameter values (last 100 models) |
+| `models.json` | For each model: the settings of the right panel, the Optimize values (print area, fixes, orientation, splits, copies), the closed parameter groups and your last parameter values (last 100 models) |
 | `mcp/` | The addresses of the open windows, for the [MCP server](MCP-reference) |
 | `examples/` | The copies of the example models |
 | `tour_seen` | The marker of the welcome tour. Delete it to show the tour at the next start. |

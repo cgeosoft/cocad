@@ -4,11 +4,11 @@ Many models have more than one part, for example a box, a lid and a knob. CoCAD 
 
 ![A box with a lid and a knob, with part colors and explode](https://raw.githubusercontent.com/cgeosoft/cocad/main/assets/tour/5-parts.jpg)
 
-These functions change only what you see. They do not change the files that you [export](Export).
+These functions change only what you see. They do not change the files that you [export](Export). To put the parts on the bed of your printer, use the [Optimize](Optimize) tab.
 
 ## The Parts card
 
-The **Parts** card is in the **Model** tab and in the **Photo** tab. It shows the number of parts.
+The **Parts** card is in the **Model** tab and in the **Render** tab. It shows the number of parts. When the model has [reference parts](#reference-parts), it also shows their number, for example "5 parts, 3 not printed".
 
 While CoCAD looks for the parts, the card shows "Finding the parts…". The parts have the names "Part 1", "Part 2" and so on, unless the model gives them names.
 
@@ -17,9 +17,9 @@ While CoCAD looks for the parts, the card shows "Finding the parts…". The part
 - Turn on **Part colors** to show each part in a different color.
 - Click **Colors…** to see the list of all parts with their volumes. Click a color to change it. **Reset** gives the part its default color again.
 - A color change turns on **Part colors**.
-- The colors stay when the model renders again. When you open a different model, CoCAD clears them.
+- The colors stay when the model builds again. When you open a different model, CoCAD clears them.
 
-The [photo](Photo-render) also uses the part colors when **Part colors** is on.
+The [photo](Render) also uses the part colors when **Part colors** is on.
 
 ## Select a part
 
@@ -48,7 +48,7 @@ The same menu has **Change color…**. It opens a color window for this one part
 
 Explode moves the parts away from each other, as in an assembly drawing. The model must have two or more parts.
 
-1. Find the **Explode** card in the **Model** tab or the **Photo** tab.
+1. Find the **Explode** card in the **Model** tab or the **Render** tab.
 2. Turn on **Explode**, or press `E`.
 3. Set the **Distance** in mm.
 4. Set the **Direction**: **All** moves the parts away from the center. **X**, **Y** and **Z** move them along one axis only.
@@ -61,7 +61,7 @@ Details:
 
 - The part that is farthest from the center moves the full distance. The other parts move less. A part at the center does not move.
 - When all parts have the same center, for example rings inside rings, the parts make a stack. The largest part does not move. The smallest part moves the full distance.
-- The [Slice tab](Slice-preview) shows the parts at their real positions.
+- The [Optimize tab](Optimize) shows no explode.
 
 ## Section
 
@@ -77,11 +77,22 @@ Details:
 - With two or three cuts on, you see only the space that all cuts keep. For example, cuts on X and Y keep one quarter of the model.
 - The cut faces show in the color of the part, a little darker.
 - **Reset** turns off all cuts.
-- The photo shows the cut. The **Slice** tab and the export do not use it.
+- The photo shows the cut. The **Optimize** tab and the export do not use it.
+
+## Reference parts
+
+A model can show objects that you do not print, for example a screw, a magnet or the phone on a phone stand. The author of the model marks them with `%`. See [Write models for CoCAD](Write-models-for-CoCAD#parts-that-are-not-printed).
+
+- The **Model** tab shows them in transparent gray.
+- The **Parts** card counts them apart from the other parts, for example "5 parts, 3 not printed". When you select one, the card shows "(not printed)".
+- They have the name "Reference", or "Reference 1", "Reference 2" and so on.
+- They are never on a plate of the [Optimize](Optimize) tab, in an export, in the slice or in the photo.
+
+To see an example, open **File > Examples > Reference part** or **File > Examples > Desk dock**.
 
 ## What stays and what goes
 
-| Item | When the model renders again | When you open a different model |
+| Item | When the model builds again | When you open a different model |
 |---|---|---|
 | Part colors | Stay | Cleared |
 | Selection and focus | Stay, if a part with the same name exists | Cleared |

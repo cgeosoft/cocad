@@ -6,7 +6,7 @@ OpenSCAD joins all shapes of a model into one mesh. CoCAD divides the model into
 
 ## Method 1: the `cocad_part` list
 
-For a model with a `cocad_part` list that shows all parts, CoCAD renders each part in the background. See [Write models for CoCAD](Write-models-for-CoCAD#parts-for-a-multicolor-print).
+For a model with a `cocad_part` list that shows all parts, CoCAD builds each part in the background. See [Write models for CoCAD](Write-models-for-CoCAD#parts-for-a-multicolor-print).
 
 - When the parts are done, they replace the solids, so parts that touch stay separate.
 - Shapes that are in no part become "Other" parts.
@@ -17,9 +17,9 @@ For a model with a `cocad_part` list that shows all parts, CoCAD renders each pa
 
 For a model without a `cocad_part` list:
 
-1. After each render, CoCAD runs OpenSCAD one more time to write the CSG tree of the model. This run makes no geometry.
+1. After each build, CoCAD runs OpenSCAD one more time to write the CSG tree of the model. This run makes no geometry.
 2. In the tree, each module call is a group. CoCAD finds the highest level with two or more module calls, and one more level below it. An example is `assembly() { board(); pieces(); }`.
-3. CoCAD renders each module call on its own, in parallel.
+3. CoCAD builds each module call on its own, in parallel.
 4. Each solid of each module is one part, so parts that touch stay separate.
 
 The **Parts** card shows "Finding the parts…" while this runs.
@@ -31,6 +31,15 @@ Limits of the module split:
 - A level with more than 64 module calls gives no split.
 - Fonts from `use <font.ttf>` in the model file work, but not fonts that only a library loads.
 - When the module split fails, the error goes to the OpenSCAD output and the solids stay.
+
+## Reference parts: the `%` subtrees
+
+OpenSCAD keeps the `%` (background) subtrees in the CSG tree, and leaves them out of the mesh. After each build, CoCAD builds each outermost `%` subtree on its own, as a [reference part](Parts#reference-parts). This works with all three methods.
+
+- A `%` subtree inside a `*` (disabled) subtree stays hidden, as in OpenSCAD.
+- More than 64 `%` subtrees build as one reference part.
+- A reference part that fails to build is left out.
+- The reference parts come after the other parts. The [Optimize](Optimize) tab, the export, the slice and the photo do not use them.
 
 ## Method 3: the solids of the mesh
 
@@ -49,7 +58,7 @@ For all other models, or when the module split finds no parts, CoCAD uses the so
 
 ## Selection and focus
 
-- The selection and the focus use the part name. When the model renders again and has a part with that name, they stay.
+- The selection and the focus use the part name. When the model builds again and has a part with that name, they stay.
 - With **Explode** on, a click finds the part at its moved position, and the focus moves with the part.
 - A click goes through the transparent parts to the part in focus. A click on a transparent part selects it when the part in focus is not under the mouse.
 - When the part in focus is not fully in the view, the camera moves back until the part fits.
@@ -65,4 +74,4 @@ For all other models, or when the module split finds no parts, CoCAD uses the so
 - The cut is in the coordinates of the model. With the explode on, each part moves with its cut.
 - A transparent part shows no cut face. A part that is not closed can show no cut face or a wrong cut face.
 - The cut faces need a stencil buffer in the OpenGL driver. Without it, the inside of each part shows in a dark part color.
-- The grid, the fit function, the **Slice** tab and the export do not use the cut.
+- The grid, the fit function, the **Optimize** tab and the export do not use the cut.

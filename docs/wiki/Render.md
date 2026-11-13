@@ -1,14 +1,14 @@
-# Photo render
+# Render
 
-The **Photo** tab makes a picture of the part that looks like a studio photo, with soft light and shadows. You can use it for a shop page, a README or a message to a friend.
+The **Render** tab makes a picture of the part that looks like a studio photo, with soft light and shadows. You can use it for a shop page, a README or a message to a friend.
 
-![The Photo tab](https://raw.githubusercontent.com/cgeosoft/cocad/main/assets/tour/7-photo.jpg)
+![The Render tab](https://raw.githubusercontent.com/cgeosoft/cocad/main/assets/tour/7-photo.jpg)
 
 ## Make a photo
 
-1. Click the **Photo** tab on the right, or press `P`.
+1. Click the **Render** tab on the right, or press `R`. Press `R` again to go back to the **Model** tab.
 2. Turn and move the view until you like it. The view dims the area outside the image frame, so you see what the photo will show.
-3. Let the view rest. The render starts. The image gets cleaner with time.
+3. Let the view rest. The render starts. The image gets cleaner with time. The **Progress** card shows the number of samples.
 4. Click **Save PNG**. The dialog opens in the folder of your last export.
 
 When you move the view or change a setting, the render starts again.
@@ -36,9 +36,13 @@ When [Part colors](Parts#part-colors) is on, each part has its own color in plac
 - **Resolution**: the size of the image in pixels. The presets are 720p, 1080p, 1440p, 4K, site preview 4:3 (1600 × 1200), square, portrait 4:5 and story 9:16. You can also type the width and the height.
 - **Swap** changes between landscape and portrait.
 
+The cards can close and open, as in the other tabs. The **Export** card is at the bottom. See [Export](Export).
+
 ## Parts in the photo
 
-The photo shows the [part colors](Parts#part-colors), the [explode](Parts#explode) and the [section](Parts#section) of the 3D view. It does not show the selection or the focus.
+The photo shows the model as built, with the [part colors](Parts#part-colors), the [explode](Parts#explode) and the [section](Parts#section) of the 3D view. It does not show the selection, the focus or the [reference parts](Parts#reference-parts).
+
+The photo shows the model, not the print plate of the [Optimize](Optimize) tab.
 
 ---
 

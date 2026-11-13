@@ -9,11 +9,12 @@ The connection uses MCP (Model Context Protocol). MCP is a standard that lets an
 ## What the assistant can do
 
 - Read the model, its parameters and its source code.
-- Change the values of parameters and render the model.
+- Change the values of parameters and build the model.
 - Look at the model. CoCAD sends it a picture.
 - Change the view: the tab, the camera direction, part colors, explode and section.
-- Slice the model and read the estimate.
-- Export STL, 3MF and STEP files, and save photos.
+- Prepare the print plates in the [Optimize](Optimize) tab: the print area, the print fixes, the orientation of the parts and the splits.
+- Slice the plate and read the estimate.
+- Export the plates as STL and 3MF files, export STEP files, and save photos.
 - Load and save parameter sets.
 - Open a different `.scad` file.
 
@@ -66,6 +67,7 @@ claude mcp add cocad -- "cocad" mcp
    - "Which parameters does this model have?"
    - "Set the number of teeth to 24 and show me the result."
    - "Save a photo of the part to my Pictures folder."
+   - "Turn on the bed chamfer and export the plate as 3MF."
 
 Do not minimize the CoCAD window. A minimized window may not answer until you restore it.
 

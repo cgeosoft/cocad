@@ -2,8 +2,11 @@
 
 ## Start and install
 
-**CoCAD says that it cannot find OpenSCAD.**
-Install OpenSCAD first. If it is installed in an unusual place, set the program in **File > Settings > OpenSCAD**. See [Install](Install#if-cocad-does-not-find-openscad).
+**At the start, CoCAD shows "CoCAD needs OpenSCAD with Manifold".**
+CoCAD did not find an OpenSCAD development snapshot. The release 2021.01 and the `openscad` package of Debian 13 do not work with CoCAD. Install a development snapshot with the steps in the notice, then click **Check again**. If the snapshot is in an unusual place, click **OpenSCAD settings** and select the program. See [Install](Install#if-cocad-does-not-find-openscad-with-manifold).
+
+**The status bar shows "Not built: OpenSCAD has no Manifold".**
+The OpenSCAD program in **File > Settings > OpenSCAD** has no Manifold backend. Select a development snapshot, or clear the **Binary** field so that CoCAD finds the program itself.
 
 **macOS does not open the app.**
 The app is not signed. The first time, right-click the app and choose **Open**.
@@ -17,9 +20,9 @@ CoCAD does not install updates. Download the new version from the [releases page
 ## The model
 
 **The model takes a long time to show.**
-The 2021 release of OpenSCAD is slow on large models. Install a development snapshot of OpenSCAD. The status bar shows the OpenSCAD version and the word "Manifold" when the fast backend is in use. See [OpenSCAD engine and files](OpenSCAD-engine-and-files).
+Make sure that **Extra arguments** in **File > Settings > OpenSCAD** has no `--backend=cgal`. See [OpenSCAD engine and files](OpenSCAD-engine-and-files).
 
-You can also turn off **Auto render** in the **Model** tab. Then the model renders only when you click **Render** or press `F5`.
+You can also turn off **Auto build** in the **Model** tab. Then the model builds only when you click **Build** or press `F5`.
 
 **The model shows an error.**
 Click **Console** in the status bar, or use **View > OpenSCAD console**. The console shows the messages of OpenSCAD.
@@ -58,10 +61,35 @@ CoCAD writes a new sets file at the first save.
 **Auto save does not save.**
 With **Model defaults** selected, auto save saves nothing. Select a set, or make a new one.
 
-## Slice and photo
+## Optimize and print
+
+**The Plate card says "Too large for the print area".**
+The part does not fit the print area of the **Printer** card. Do one of these:
+- Check the print area. Select your printer in the **Printer** card.
+- Turn on **Custom orientation** for the part. When the part fits on a different side, the **Plate** card tells you so.
+- Click **Split** in the **Split** section below the row. See [Optimize](Optimize#split-a-part-that-is-too-large).
+
+A part that is too large is on no plate, so it is not in the STL or 3MF export.
+
+**The Split section says that no parallel cuts make the part fit.**
+CoCAD cuts only with parallel planes across one axis. Turn the part with a custom orientation, or use a larger print area.
+
+**The Plate card says that a cut "has no room for pins" or "has no room for tabs".**
+The cut face is too small for the pins or the dovetail tabs, so that cut is a flat cut. Glue the pieces, or move the cut with its number field to a place with more material.
+
+**My STL does not contain the whole model.**
+The STL and 3MF export write the current plate of the Optimize tab. Parts with the `%` mark, parts that you turned off, and parts that are too large are not on the plate. When the parts are on two or more plates, use **All STL** or **All 3MF**. For the model as OpenSCAD built it, use **STEP**, or `cocad export --as-built` on the [command line](Command-line).
+
+**I use the Bed chamfer. Must I change a setting in my slicer?**
+Yes. With the **Bed chamfer** on, set the elephant foot compensation of your slicer to 0. In PrusaSlicer and OrcaSlicer, the setting is "Elephant foot compensation". In Cura, it is "Initial Layer Horizontal Expansion". Without this, the bed edges get two corrections.
+
+**The Print fixes card shows "1 place skipped".**
+A fix found a place that it cannot change, for example a hole with a wall above it that is too thin for the teardrop point. Hold the mouse on the text to see the place and the reason.
 
 **Can I print the slice preview?**
-No. The preview is for checks only and writes no G-code. Export the model and use a slicer program.
+No. The preview is for checks only and writes no G-code. Export the plate and use a slicer program.
+
+## Render
 
 **The photo is grainy.**
 Wait. The image gets cleaner with each sample. You can also set more **Samples** in the **Quality** section.

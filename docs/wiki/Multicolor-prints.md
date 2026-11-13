@@ -11,17 +11,23 @@ To try it, open **File > Examples > Multicolor badge**.
 ## What you see
 
 - The 3D view shows each part in its color.
-- After the first render, CoCAD renders each part in the background. Until this is done, the view shows the model in orange.
+- After the first build, CoCAD builds each part in the background. Until this is done, the view shows the model in orange.
 - Shapes that are in no part stay orange. With **Part colors** on, they get other colors.
 
 ## How to export
 
-When the model has named parts, the **Model** tab and the **Model** menu show one more export for each slicer:
+When the model has named parts, the **Export** card shows a **Multicolor 3MF** row with two buttons: **PrusaSlicer 2.9** and **OrcaSlicer**. The **Model** menu has the same exports:
 
 - **Export multicolor 3MF for PrusaSlicer 2.9**
 - **Export multicolor 3MF for OrcaSlicer**
 
 Select the slicer that you use. The two slicers read different data, so one file does not work in both.
+
+The multicolor 3MF contains all parts of the model as built. It does not use the plate of the [Optimize](Optimize) tab.
+
+## In the Optimize tab
+
+The parts of the `cocad_part` list are the colors of one object. In the [Optimize](Optimize) tab, they stay together as one print part with the name of the model. The orientation, the print fixes and the plate apply to this object as a whole. The **STL** and **3MF** buttons write this object without colors.
 
 ## In the slicer
 
@@ -36,7 +42,7 @@ The order of the parts in the `cocad_part` list sets the filament number.
 
 - **PrusaSlicer 3.0 alpha** is not supported. It loads the file as one object.
 - The tests used PrusaSlicer 2.9.7 and OrcaSlicer 2.4.2.
-- CoCAD renders each part in a separate OpenSCAD run. A model with 5 parts takes 5 renders.
+- CoCAD builds each part in a separate OpenSCAD run. A model with 5 parts takes 5 builds.
 
 ---
 

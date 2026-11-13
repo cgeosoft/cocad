@@ -37,7 +37,7 @@ If you connect an [AI assistant](AI-assistant) and usage analytics are on, the w
 
 - App start, when the assistant starts the window.
 - Model open, each time the assistant opens a model.
-- View change, when the assistant changes between the Model, Slice and Photo tabs.
+- View change, when the assistant changes between the Model, Optimize and Render tabs.
 
 The other actions of the assistant, such as an export or a photo, send no event. If error reports are on, the window reports a failure during an assistant action in the same way as other failures.
 

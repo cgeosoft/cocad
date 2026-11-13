@@ -33,7 +33,7 @@ If no set is selected, the disk button asks for a name and makes a new set.
 - When you open a model, CoCAD loads the set that you used last for that model. If there is no record, it loads the first set of the file.
 - If **Model defaults** was your last selection, the values stay at the defaults of the model.
 - CoCAD also remembers your last parameter values for each model. With **Model defaults**, it loads these values. With a set, it loads them only if you did not save your changes to the set. The set then shows as edited.
-- CoCAD also remembers the settings of the right panel for each model: the tab (Model, Slice or Photo), auto render, the print settings, the photo settings, part colors and explode.
+- CoCAD also remembers the settings of the right panel for each model: the tab (Model, Optimize or Render), auto build, the Optimize values, the print settings, the photo settings, part colors and explode.
 - A new sets file does not exist on disk until your first save.
 
 ## Auto save

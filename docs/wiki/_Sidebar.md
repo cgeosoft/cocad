@@ -10,11 +10,12 @@
 **Look at the model**
 
 - [Parts](Parts)
-- [Slice preview](Slice-preview)
-- [Photo render](Photo-render)
+- [Render](Render)
 
-**Make files**
+**Print**
 
+- [Optimize](Optimize)
+- [Prepare a model for printing](Prepare-a-model-for-printing)
 - [Export](Export)
 - [Multicolor prints](Multicolor-prints)
 

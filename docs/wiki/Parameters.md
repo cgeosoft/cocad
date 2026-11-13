@@ -16,20 +16,22 @@ The **Parameters** panel on the left shows all parameters of the open model.
 | Text box | A text, for example a label on the part |
 | Number boxes in a row | A value with more than one number, for example a position with X and Y |
 
-The parameters are in groups. Click the header of a group to close or open it. **Collapse** at the top closes all groups. **Expand** opens them again.
+The parameters are in groups. Click the header of a group to close or open it. **Collapse** at the top closes all groups. **Expand** opens them again. CoCAD remembers the closed groups for each model.
 
 If the author wrote a description for a parameter, the panel shows the description as the label.
 
 ## See the result
 
-When you change a value, CoCAD makes the model again. This is the "render". The status bar at the bottom shows the state and the time.
+When you change a value, CoCAD makes the model again. This is the "build". The status bar at the bottom shows the state and the time.
 
-A render of a large model can take a long time. In that case you can stop the automatic render:
+A build of a large model can take a long time. In that case you can stop the automatic build:
 
 1. Open the **Model** tab on the right.
-2. Turn off **Auto render**.
+2. Turn off **Auto build** in the **Build** card.
 3. Change all the values that you want.
-4. Click **Render**, or press `F5`.
+4. Click **Build**, or press `F5`.
+
+While **Auto build** is off, the status bar shows "Parameters changed. Press F5." after a change.
 
 ## Go back to the initial values
 
@@ -44,7 +46,7 @@ Your values stay while the model is open. To keep them for later, save them as a
 
 ## When a model has no parameters
 
-Some models have no parameters. You can still look at the model, export it, slice it and make a photo.
+Some models have no parameters. You can still look at the model, prepare it for printing, export it and make a photo.
 
 ---
 
