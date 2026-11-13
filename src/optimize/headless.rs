@@ -2,8 +2,8 @@
 //! `cocad slice`.
 //!
 //! 1. `inputs` builds the model and finds the parts as the app does: the
-//!    `cocad_part` list, else the module split, else the shells of the
-//!    mesh. The `%` parts are reference parts: they are not printed.
+//!    multicolor part list, else the part list, else the module split,
+//!    else the shells of the mesh. The `%` parts are reference parts: they are not printed.
 //! 2. `stored_state` reads the Optimize values that the app stored for the
 //!    model in `<config>/models.json`. It does not write the file.
 //! 3. `Options` holds the print options of the command line. They change
@@ -14,12 +14,13 @@ use super::check::Kind;
 use super::orient::{Choice, Orientation};
 use super::pipeline::{self, Cache, Input, Job, Outcome, State};
 use super::{Area, Layers, Limits, fixes, split};
-use crate::assembly::Assembly;
+use crate::assembly::{self, Assembly};
 use crate::csg_split;
 use crate::export;
 use crate::mesh::Mesh;
 use crate::openscad::{self, Config};
 use crate::params::{self, Param};
+use crate::part_param;
 use crate::parts;
 use anyhow::{Context, Result, bail};
 use serde_json::Value as Json;
@@ -33,8 +34,10 @@ use std::time::{Duration, Instant};
 /// Where the parts of a model come from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Found {
-    /// The `cocad_part` list: each part builds on its own.
+    /// A multicolor part list: each part builds on its own.
     List,
+    /// A part list: each value builds on its own.
+    Selector,
     /// The module split of the CSG tree.
     Modules,
     /// The shells of the built mesh.
@@ -44,7 +47,8 @@ pub enum Found {
 impl Found {
     pub fn label(self) -> &'static str {
         match self {
-            Found::List => "the cocad_part list",
+            Found::List => "the multicolor part list",
+            Found::Selector => "the part parameter",
             Found::Modules => "the module split",
             Found::Shells => "the shells of the mesh",
         }
@@ -65,8 +69,8 @@ pub struct Built {
     pub references: Vec<String>,
     /// Volume of the built mesh, for the overlap test of the pipeline.
     pub whole_volume: f32,
-    /// The model has a `cocad_part` list: its parts are the colors of one
-    /// object.
+    /// The model has a multicolor part list: its parts are the colors of
+    /// one object.
     pub multicolor: bool,
     /// The file name without the extension.
     pub model_name: String,
@@ -91,31 +95,6 @@ impl Built {
     }
 }
 
-/// The parts that the app finds after the build (see `App::color_parts`):
-/// `None` keeps the shells of the mesh.
-fn find_parts(
-    cfg: &Config,
-    file: &Path,
-    params: &[Param],
-    defines: &[String],
-    cancel: &Arc<AtomicBool>,
-) -> Result<Option<csg_split::Split>> {
-    if parts::needs_render(params) {
-        let parts = parts::render(cfg, file, params, cancel)?;
-        let references = csg_split::render_references(cfg, file, defines, cancel)?;
-        Ok(Some(csg_split::Split { parts, references }))
-    } else if parts::names(params).is_empty() {
-        csg_split::render(cfg, file, defines, cancel)
-    } else {
-        // One part of the list is shown: its shells are the parts.
-        let references = csg_split::render_references(cfg, file, defines, cancel)?;
-        Ok((!references.is_empty()).then(|| csg_split::Split {
-            parts: Vec::new(),
-            references,
-        }))
-    }
-}
-
 /// Builds `file` with the values of `params` and finds its printable parts
 /// with the same functions as the app. The main build and the parts job run
 /// at the same time. A failed main build is an error. A failed parts job
@@ -127,13 +106,12 @@ pub fn inputs(
     cancel: &Arc<AtomicBool>,
 ) -> Result<Built> {
     let defines = params::defines(params);
-    let list = parts::needs_render(params);
     // The parts job stops when the main build fails or `cancel` is set.
     let stop = Arc::new(AtomicBool::new(cancel.load(Ordering::Relaxed)));
     let (main, found) = std::thread::scope(|s| {
         let job = s.spawn(|| {
             let t = Instant::now();
-            let r = find_parts(cfg, file, params, &defines, &stop);
+            let r = csg_split::find_parts(cfg, file, params, &defines, &stop);
             (r, t.elapsed())
         });
         let main = openscad::render(cfg, file, &defines, cancel);
@@ -153,7 +131,12 @@ pub fn inputs(
     let (found, parts_elapsed) = found;
     let mut warnings = Vec::new();
     let split = match found {
-        Ok(s) => s,
+        Ok(s) => {
+            if let Some(s) = &s {
+                warnings.extend(s.notes.iter().cloned());
+            }
+            s
+        }
         Err(e) => {
             if cancel.load(Ordering::Relaxed) {
                 bail!("cancelled");
@@ -166,15 +149,23 @@ pub fn inputs(
     };
     let mesh = Arc::new(main.mesh);
     let (assembly, found) = match &split {
-        Some(s) => (
-            Assembly::from_parts(&mesh, &s.parts, !list, &s.references),
-            match (s.parts.is_empty(), list) {
-                (true, _) => Found::Shells,
-                (false, true) => Found::List,
-                (false, false) => Found::Modules,
-            },
+        Some(s) => {
+            let a = Assembly::from_split(&mesh, s);
+            // One shown value: its pieces give sources after the first.
+            let pieces = a.parts.iter().any(|p| !p.reference && p.source > 0);
+            let found = match (&s.kind, s.parts.is_empty()) {
+                (assembly::Kind::Shown(_), _) if pieces => Found::Selector,
+                (assembly::Kind::Shown(_), _) | (_, true) => Found::Shells,
+                (assembly::Kind::Colors, false) => Found::List,
+                (assembly::Kind::Labeled, false) => Found::Selector,
+                (assembly::Kind::Modules, false) => Found::Modules,
+            };
+            (a, found)
+        }
+        None => (
+            Assembly::shells(&mesh, part_param::shown_label(params).as_deref()),
+            Found::Shells,
         ),
-        None => (Assembly::shells(&mesh), Found::Shells),
     };
     let parts = (assembly.parts.iter())
         .filter(|p| !p.reference)
@@ -264,6 +255,9 @@ pub struct Options {
     /// choice for a hole above a bridge.
     pub bridges: Option<Option<fixes::HoleAbove>>,
     pub brim: bool,
+    pub ears: bool,
+    /// `--holes[=MM]`. `Some(None)`: on, with the stored value.
+    pub holes: Option<Option<f32>>,
     /// `--no-fixes`: all stored fixes off. The fix options still turn
     /// single fixes on.
     pub no_fixes: bool,
@@ -323,6 +317,13 @@ fn parse_chamfer(v: &str) -> Result<f32> {
     }
 }
 
+fn parse_hole_add(v: &str) -> Result<f32> {
+    match v.trim().parse::<f32>() {
+        Ok(mm) if (0.0..=1.0).contains(&mm) => Ok(mm),
+        _ => bail!("--holes needs a value from 0 to 1 mm, got {v}"),
+    }
+}
+
 fn parse_hole_above(v: &str) -> Result<fixes::HoleAbove> {
     fixes::HoleAbove::from_name(v)
         .with_context(|| format!("--bridges must be sacrificial or stepped, got {v}"))
@@ -359,6 +360,8 @@ impl Options {
             ("--bridges", v) => self.bridges = Some(v.map(parse_hole_above).transpose()?),
             ("--teardrops", None) => self.teardrops = true,
             ("--brim", None) => self.brim = true,
+            ("--ears", None) => self.ears = true,
+            ("--holes", v) => self.holes = Some(v.map(parse_hole_add).transpose()?),
             ("--no-fixes", None) => self.no_fixes = true,
             ("--as-built", None) => self.as_built = true,
             _ => return Ok(false),
@@ -376,6 +379,8 @@ impl Options {
             || self.teardrops
             || self.bridges.is_some()
             || self.brim
+            || self.ears
+            || self.holes.is_some()
             || self.no_fixes
     }
 
@@ -412,6 +417,8 @@ impl Options {
             f.bridges = false;
             f.chamfer = false;
             f.brim = false;
+            f.ears = false;
+            f.hole_size = false;
         }
         match self.chamfer {
             Some(Some(mm)) if mm <= 0.0 => f.chamfer = false,
@@ -433,6 +440,15 @@ impl Options {
         }
         if self.brim {
             f.brim = true;
+        }
+        if self.ears {
+            f.ears = true;
+        }
+        if let Some(add) = self.holes {
+            f.hole_size = true;
+            if let Some(mm) = add {
+                f.hole_add = mm;
+            }
         }
         if let Some(c) = self.orient {
             let names: Vec<String> = st.parts.keys().cloned().collect();
@@ -581,6 +597,7 @@ fn kind_label(k: Kind, n: usize) -> String {
     let (one, more) = match k {
         Kind::Overhang => ("overhang", "overhangs"),
         Kind::LongBridge => ("long bridge", "long bridges"),
+        Kind::ThinWall => ("thin wall", "thin walls"),
         Kind::Arc => ("arc in a bridge", "arcs in bridges"),
         Kind::SmallIsland => ("small bed island", "small bed islands"),
         Kind::TooLarge => ("part too large", "parts too large"),
@@ -770,6 +787,16 @@ fn fixes_line(st: &State, o: &Outcome) -> String {
     if f.brim {
         list.push(count(sum(|r| r.brims), "brim", "brims"));
     }
+    if f.ears {
+        list.push(count(sum(|r| r.ears), "mouse ear", "mouse ears"));
+    }
+    if f.hole_size {
+        list.push(format!(
+            "hole size +{} mm on {}",
+            f.hole_add,
+            count(sum(|r| r.holes), "hole", "holes")
+        ));
+    }
     format!("fixes       {}\n", list.join(", "))
 }
 
@@ -948,7 +975,7 @@ mod tests {
 
         let mut st = stored();
         parse(&["--orient", "model"]).unwrap().apply(&mut st);
-        assert_eq!(st.parts["Part 1"].orientation, Orientation::default());
+        assert_eq!(st.parts["Part 1"].orientation.choice, Choice::Model);
         // The other values of the part stay.
         assert!(!st.parts["Part 1"].include);
 
@@ -1188,5 +1215,72 @@ mod tests {
         assert!(b.multicolor);
         let names: Vec<&str> = b.parts.iter().map(|p| p.name.as_str()).collect();
         assert_eq!(names, ["base", "top"]);
+    }
+
+    #[test]
+    #[ignore = "needs openscad-nightly"]
+    fn inputs_of_a_part_selector_take_the_labels() {
+        let b = built(
+            "selector",
+            "part = \"all\"; // [all:All, base:Base plate, pins:Pin]\n\
+             if (part == \"all\" || part == \"base\") cube([20, 20, 2]);\n\
+             if (part == \"all\" || part == \"pins\") for (x = [30, 40]) translate([x, 0, 0]) cube(x / 10);\n\
+             if (part == \"all\") translate([0, 40, 0]) cube(1);\n\
+             if (part == \"all\") %translate([0, 60, 0]) cube(3);\n",
+        );
+        assert!(b.warnings.is_empty(), "{:?}", b.warnings);
+        assert_eq!(b.found, Found::Selector);
+        assert!(!b.multicolor);
+        let names: Vec<&str> = b.parts.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(names, ["Base plate", "Pin 1", "Pin 2", "Other"]);
+        assert_eq!(b.references, ["Reference"]);
+    }
+
+    #[test]
+    #[ignore = "needs openscad-nightly"]
+    fn a_failed_part_build_falls_back_to_the_module_split() {
+        let b = built(
+            "fallback",
+            "part = \"all\"; // [all, a, b]\n\
+             assert(part == \"all\", \"one part fails\");\n\
+             module a() cube(10);\nmodule b() translate([20, 0, 0]) cube(5);\na();\nb();\n",
+        );
+        assert_eq!(b.found, Found::Modules);
+        assert_eq!(b.warnings.len(), 1, "{:?}", b.warnings);
+        assert!(b.warnings[0].contains("module split"), "{:?}", b.warnings);
+    }
+
+    #[test]
+    #[ignore = "needs openscad-nightly"]
+    fn touching_pieces_of_one_value_divide_at_their_modules() {
+        let b = built(
+            "segments",
+            "part = \"all\"; // [all, segments:Segment, lid:Lid]\n\
+             module show(name) if (part == \"all\" || part == name) children();\n\
+             module segment(i) translate([i * 10, 0, 0]) cube(10);\n\
+             show(\"segments\") for (i = [0 : 2]) segment(i);\n\
+             show(\"lid\") translate([0, 0, 10]) cube([30, 10, 2]);\n",
+        );
+        assert!(b.warnings.is_empty(), "{:?}", b.warnings);
+        assert_eq!(b.found, Found::Selector);
+        let names: Vec<&str> = b.parts.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(names, ["Segment 1", "Segment 2", "Segment 3", "Lid"]);
+    }
+
+    #[test]
+    #[ignore = "needs openscad-nightly"]
+    fn one_selected_value_divides_at_its_modules() {
+        let b = built(
+            "one-value",
+            "part = \"segments\"; // [all, segments:Segment, lid:Lid]\n\
+             module show(name) if (part == \"all\" || part == name) children();\n\
+             module segment(i) translate([i * 10, 0, 0]) cube(10);\n\
+             show(\"segments\") for (i = [0 : 2]) segment(i);\n\
+             show(\"lid\") translate([0, 0, 10]) cube([30, 10, 2]);\n",
+        );
+        assert!(b.warnings.is_empty(), "{:?}", b.warnings);
+        assert_eq!(b.found, Found::Selector);
+        let names: Vec<&str> = b.parts.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(names, ["Segment 1", "Segment 2", "Segment 3"]);
     }
 }

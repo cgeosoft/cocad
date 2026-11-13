@@ -8,29 +8,31 @@ The **Render** tab makes a picture of the part that looks like a studio photo, w
 
 1. Click the **Render** tab on the right, or press `R`. Press `R` again to go back to the **Model** tab.
 2. Turn and move the view until you like it. The view dims the area outside the image frame, so you see what the photo will show.
-3. Let the view rest. The render starts. The image gets cleaner with time. The **Render** card at the bottom of the tab shows the number of samples.
-4. Click **Save PNG** in the **Render** card. The dialog opens in the folder of your last export.
+3. Click **Render** at the bottom of the tab. The render starts when the view rests. The image gets cleaner with time.
+4. Click **Save PNG** below **Render**. The dialog opens in the folder of your last export.
 
-When you move the view or change a setting, the render starts again.
+The tab does not start a render when you open it. When you move the view or change a setting, the render stops and the frame shows the 3D view again. Click **Render** again for a new render.
 
-You can save at any time. **Save PNG** writes the image at its full size, with the quality that it has at that moment.
+While the render runs, **Render** changes to **Stop**. You can save at any time. **Save PNG** writes the image at its full size, with the quality that it has at that moment. After **Stop**, you can still save the samples that are done.
 
-The **Render** card at the bottom of the tab does not close. It shows:
+The bar at the bottom of the tab shows:
 
-- The number of samples that are done, the number of samples that you set, and the size of the image in pixels.
+- The number of samples that are done and the number of samples that you set. At the right: "Waiting for the view to rest" before the render starts, the time of the render while it runs, "Done in" and the time at the end, or "Stopped".
 - A bar that shows the progress.
-- The time of the render. At the end, the card shows "Done in" and the time. Before the render starts, it shows "Waiting for the view to rest".
-- **Save PNG**.
+- **Render** (or **Stop**) and **Save PNG**. Before you build the model, **Render** is not available.
+
+The size of the image is in the header of the **Quality** card when the card is closed.
 
 ## Settings
 
 ### Material
 
-- **Color**: 8 color swatches, or a color picker for your own color.
-- **Finish**: **Matte**, **Satin** or **Gloss** plastic.
+- **Color**: a model with two or more parts has two choices.
+  - **One color**: all parts have the same color. Click one of the 8 color swatches, or click the color button for your own color.
+  - **Each part**: each part has its own color. This is the [Part colors](Parts#part-colors) switch of the **Model** tab. A list shows each part with its color. Click a row, or click a part in the view, to select that part. The swatches then set the color of the selected part. With no part selected, the swatches set the color of all parts. **Reset** gives a part its default color again. **Reset all** does this for all parts.
+  - A model that is one solid has the swatches only.
+- **Finish**: **Matte**, **Satin** or **Gloss** plastic. The finish is the same for all parts.
 - **Print layer lines**: adds fine lines on the sides, so that the part looks 3D printed.
-
-When [Part colors](Parts#part-colors) is on, each part has its own color in place of the material color. The finish and the layer lines stay.
 
 ### Scene
 

@@ -1,0 +1,31 @@
+# yaml-language-server: $schema=https://cocad.cgeosoft.com/schema/model-1.json
+cocad: 1
+title: Desk dock
+description: >-
+  A phone stand on a base plate, with three cable clips. The model has no
+  print code: use the Optimize tab to split the plate, turn the clips and add
+  bridges, teardrop holes and a brim.
+author: cgeosoft
+license: MIT
+url: https://github.com/cgeosoft/cocad/blob/main/examples/desk-dock.scad
+
+sets:
+  Phone dock:
+    description: The default dock. The plate is 260 mm long, so the Optimize tab proposes a split.
+  Short plate:
+    description: A 180 mm plate that fits most beds without a split.
+    values:
+      plate_l: 180
+      logo_size: 8
+  Upright, thick cables:
+    description: A steeper back support and larger cable holes.
+    values:
+      lean: 8
+      cable_d: 10
+      clip_hole: 9
+  Wide plate, no logo:
+    description: A wider plate with large round corners and no engraving.
+    values:
+      plate_w: 110
+      corner_r: 12
+      logo: false

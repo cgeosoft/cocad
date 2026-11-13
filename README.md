@@ -10,7 +10,7 @@ A fast desktop viewer for OpenSCAD models. Open a `.scad` file, change its Custo
 
 OpenSCAD does the geometry. CoCAD runs the `openscad` CLI in the background (the build), reads the mesh and does the rest. CoCAD needs an OpenSCAD development snapshot with the Manifold backend.
 
-The model file needs only the assembled model. The **Optimize** tab does the print preparation: it puts the parts on the bed, turns them, adds teardrop holes, bridge fixes, a bed chamfer and brims, and splits parts that are too large. Open **File > Examples > Desk dock** and follow the guide [Prepare a model for printing](https://github.com/cgeosoft/cocad/wiki/Prepare-a-model-for-printing).
+The model file needs only the assembled model. The **Optimize** tab does the print preparation: it puts the parts on the bed, turns them, adds teardrop holes, hole size and bridge fixes, a bed chamfer, brims and mouse ears, and splits parts that are too large. Open **File > Examples > Desk dock** and follow the guide [Prepare a model for printing](https://github.com/cgeosoft/cocad/wiki/Prepare-a-model-for-printing).
 
 **The full documentation is in the [wiki](https://github.com/cgeosoft/cocad/wiki).**
 
@@ -19,7 +19,7 @@ The model file needs only the assembled model. The **Optimize** tab does the pri
 | Feature | Wiki page |
 |---|---|
 | Sliders, lists and switches for the Customizer parameters | [Change the parameters](https://github.com/cgeosoft/cocad/wiki/Parameters) |
-| Named sets of values in a `.json` file that OpenSCAD also reads | [Parameter sets](https://github.com/cgeosoft/cocad/wiki/Parameter-sets) |
+| Named sets of values in a `.yml` file next to the model, with the title and the part names | [Parameter sets](https://github.com/cgeosoft/cocad/wiki/Parameter-sets) |
 | Part colors, select, focus, explode, section cut, and `%` reference parts that are not printed | [Parts](https://github.com/cgeosoft/cocad/wiki/Parts) |
 | Print plates for your printer: same parts with copies, more plates, custom orientation, print fixes, a print check and a split with flat, pin or dovetail joints | [Optimize](https://github.com/cgeosoft/cocad/wiki/Optimize) |
 | Print layers of the plate with a time, length and weight estimate | [Optimize](https://github.com/cgeosoft/cocad/wiki/Optimize#layers) |

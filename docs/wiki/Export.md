@@ -2,12 +2,12 @@
 
 Export writes a file that other programs can read: a slicer for your 3D printer, or a CAD program.
 
-![The menu of the Export card with two plates](https://raw.githubusercontent.com/cgeosoft/cocad/main/assets/guide/app-7-two-plates.jpg)
+![The export menu with two plates](https://raw.githubusercontent.com/cgeosoft/cocad/main/assets/guide/app-7-two-plates.jpg)
 
 ## How to export
 
-1. Open the **Optimize** tab. The **Export** card is at the bottom of the right panel.
-2. Read the line above the button. It tells what the file will contain, for example "Plate: 4 parts, 6 copies. Bed chamfer, 3 teardrops."
+1. Open the **Optimize** tab. **Export 3MF** is at the bottom of the right panel.
+2. Hold the mouse on **Export 3MF**. The text tells what the file will contain, for example "Plate: 4 parts, 6 copies. Bed chamfer, 3 teardrops."
 3. Click **Export 3MF** to write the current plate as a 3MF file. For a different file, click the arrow at the right of **Export 3MF**. A menu opens above the button. Click an item in the menu.
 4. Select a place and a name for the file. The proposed name is the model name. When a parameter set is active, the set name is added, for example `box-big.stl`. When the parts are on two or more plates, the plate number is added, for example `box-big-plate2.stl`. The dialog opens in the folder of your last export. Before your first export, it opens in the folder of the model.
 

@@ -19,7 +19,7 @@ work=$(mktemp -d)
 models=$work/models
 export XDG_CONFIG_HOME=$work/config XDG_DATA_HOME=$work/data
 mkdir -p "$models" "$XDG_CONFIG_HOME/cocad" "$out"
-cp examples/*.scad "$models/"
+cp examples/*.scad examples/*.yml "$models/"
 # The tour must not cover the app in its own screenshots.
 touch "$XDG_CONFIG_HOME/cocad/tour_seen"
 echo 'theme = dark' > "$XDG_CONFIG_HOME/cocad/config"
@@ -70,8 +70,23 @@ shot() {
     echo "$1.jpg"
 }
 
-# Start view with the recent models.
+# Thumbnails of the recent models: open each model once. The last model gets
+# its thumbnail after its first build.
+start "$models/honeycomb-tray.scad"
+for m in knob gear vase; do
+    mcp open_model "{\"path\":\"$models/$m.scad\",\"wait\":true}"
+done
+sleep 3
+quit
+# The opens changed the order of the recent list. Write it again.
+for m in vase gear knob honeycomb-tray; do
+    echo "$models/$m.scad"
+done > "$XDG_CONFIG_HOME/cocad/recent"
+
+# Start page: new model, open, agent card, and the Recent tab.
 start
+# The pointer must not show a tooltip in the shot.
+xdotool mousemove $((width - 10)) $((height - 60))
 shot 1-welcome
 quit
 
@@ -89,14 +104,14 @@ mcp set_view '{"fit":true}'
 shot 3-sets
 quit
 
-# Export: the Export card of the Optimize tab, with the menu of the arrow
-# open. The arrow is the narrow button at the right of Export 3MF.
+# Export: Export 3MF at the bottom of the Optimize tab, with the menu of
+# the arrow open. The arrow is the narrow button at the right of Export 3MF.
 start --optimize "$models/lid-box.scad"
 mcp set_view '{"view":"iso","fit":true}'
 sleep 3
 xdotool mousemove 565 360 click 4 click 4 click 4
 sleep 1
-xdotool mousemove $((width - 54)) $((height - 80)) click 1
+xdotool mousemove $((width - 39)) $((height - 60)) click 1
 # Move the pointer off the buttons, so that no tooltip shows. The menu stays
 # open. Then put it back in the middle for the next shots.
 xdotool mousemove 600 17
@@ -121,6 +136,9 @@ shot 6-slice 3
 # Photo render.
 quit
 start --render "$models/gear.scad"
+# The Render tab starts no render by itself: start it as the Render button
+# does. The mode is also set, because the model can have a stored tab.
+mcp set_view '{"mode":"render","render":true}'
 shot 7-photo 60
 quit
 
@@ -133,7 +151,7 @@ shot 8-agent
 # Settings on the MCP server page (the fifth page in the list).
 xdotool key ctrl+comma
 sleep 1
-xdotool mousemove 320 326 click 1
+xdotool mousemove 300 334 click 1
 shot 9-connect
 xdotool key Escape
 sleep 0.5

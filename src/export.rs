@@ -798,7 +798,10 @@ mod tests {
         std::io::Read::read_to_string(&mut zip.by_name("3D/3dmodel.model").unwrap(), &mut text)
             .unwrap();
         assert_eq!(text.matches("<item ").count(), 2);
-        assert!(text.contains("transform=\"1 0 0 0 1 0 0 0 1 20 30 0\""), "{text}");
+        assert!(
+            text.contains("transform=\"1 0 0 0 1 0 0 0 1 20 30 0\""),
+            "{text}"
+        );
         assert!(text.contains("name=\"Part 1\""));
     }
 

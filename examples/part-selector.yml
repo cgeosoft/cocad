@@ -1,0 +1,34 @@
+# yaml-language-server: $schema=https://cocad.cgeosoft.com/schema/model-1.json
+cocad: 1
+title: Part selector
+description: >-
+  A box with a lid and four feet. The part parameter selects one part, also in
+  plain OpenSCAD. CoCAD builds each part on its own and takes the part names
+  from part-selector.yml.
+author: cgeosoft
+license: MIT
+url: https://github.com/cgeosoft/cocad/blob/main/examples/part-selector.scad
+
+parts:
+  - id: box
+    name: Box
+  - id: lid
+    name: Lid
+  - id: feet
+    name: Foot
+
+sets:
+  Small box:
+    description: The default box with all parts.
+  Card box:
+    description: A box for playing cards, with a thicker lid and larger feet.
+    values:
+      width: 65
+      depth: 80
+      height: 30
+      lid_t: 4
+      foot_d: 10
+  Lid only:
+    description: A set can also set the part parameter. This set shows only the lid.
+    values:
+      part: lid

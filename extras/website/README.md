@@ -22,6 +22,7 @@ The look follows the Portfolio website (`portfolio/extras/website`). The colors 
 | `public/privacy/index.html` | Privacy Notice for the app and the site |
 | `public/llms.txt`, `robots.txt`, `sitemap.xml` | Files for crawlers and LLMs |
 | `public/assets/fonts/` | Self-hosted fonts (Latin subset) with their OFL licenses |
+| `public/schema/model-1.json` | JSON Schema of the model definition `<model>.yml`, version 1. `src/definition.rs` has the URL. A new version gets a new file |
 | `public/_headers` | Security and cache headers |
 | `wrangler.toml` | Cloudflare Pages project |
 

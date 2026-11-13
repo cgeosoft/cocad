@@ -10,7 +10,7 @@ These functions change only what you see. They do not change the files that you 
 
 The **Parts** card is in the **Model** tab and in the **Render** tab. It shows the number of parts. When the model has [reference parts](#reference-parts), it also shows their number, for example "5 parts, 3 not printed".
 
-While CoCAD looks for the parts, the card shows "Finding the parts…". The parts have the names "Part 1", "Part 2" and so on, unless the model gives them names.
+While CoCAD looks for the parts, the card shows "Finding the parts…" or "Building the parts…". The parts have the names "Part 1", "Part 2" and so on, unless the model gives them names. A model with a `part` list, for example `part = "all"; // [all:All, lid:Lid]`, gives each part the name from the list. See [Write models for CoCAD](Write-models-for-CoCAD#names-for-the-parts).
 
 ## Part colors
 
@@ -19,7 +19,7 @@ While CoCAD looks for the parts, the card shows "Finding the parts…". The part
 - A color change turns on **Part colors**.
 - The colors stay when the model builds again. When you open a different model, CoCAD clears them.
 
-The [photo](Render) also uses the part colors when **Part colors** is on.
+The [photo](Render) also uses the part colors when **Part colors** is on. In the **Render** tab, **Each part** in the **Material** card is the same switch, with the list of part colors in the card.
 
 ## Select a part
 
@@ -46,7 +46,7 @@ The same menu has **Change color…**. It opens a color window for this one part
 
 ## Explode
 
-Explode moves the parts away from each other, as in an assembly drawing. The model must have two or more parts.
+Explode moves the parts away from each other, as in an assembly drawing. The model must have two or more parts. A model with one part has no **Explode** card.
 
 1. Find the **Explode** card in the **Model** tab or the **Render** tab.
 2. Turn on **Explode**, or press `E`.
@@ -67,17 +67,19 @@ Details:
 
 Section cuts the model open, so that you can see the inside. You can cut across the X, Y and Z axes.
 
-1. Find the **Section** card in the **Model** tab.
-2. Turn on **Cut X**, **Cut Y** or **Cut Z**.
-3. Move the **Position** slider. A blue rectangle shows where the cut is.
-4. Select the side to keep, for example **Keep +X** or **Keep −X**.
+1. Find the **Section** bar at the top right of the 3D view.
+2. Click **X**, **Y** or **Z** to turn on a cut. A row for the cut shows below.
+3. Move the slider of the row, or type the position in mm. A blue rectangle shows where the cut is.
+4. Click the side button at the end of the row, for example **+X**, to keep the other side (**−X**).
 
 Details:
 
 - With two or three cuts on, you see only the space that all cuts keep. For example, cuts on X and Y keep one quarter of the model.
 - The cut faces show in the color of the part, a little darker.
-- **Reset** turns off all cuts.
-- The photo shows the cut. The **Optimize** tab and the export do not use it.
+- **Reset** turns off all cuts and moves them to the center. It shows when a cut is on.
+- The cuts stay when you change the tab. The **Model** and **Render** tabs cut the model. The photo shows the cut.
+- The **Optimize** tab cuts the plate, across the axes of the bed. The cuts and the sides to keep are the same as in the other tabs. The plate has its own positions. At first, they are at the center of the plate. The **Layers** view shows the cut too.
+- No export uses the cut. **Export 3MF** writes the full parts.
 
 ## Reference parts
 
@@ -99,6 +101,8 @@ To see an example, open **File > Examples > Reference part** or **File > Example
 | Explode distance | Stays | Goes back to the default |
 | Section cuts and positions | Stay | Positions go back to the center |
 
+When you change the tab, all of these stay.
+
 ---
 
-**For technical readers.** CoCAD finds the parts from a `cocad_part` list, from the module calls of the model, or from the solids of the mesh. A part that is not closed can show no cut face or a wrong cut face. The cut faces need a stencil buffer in the OpenGL driver. See [How CoCAD finds the parts](How-CoCAD-finds-the-parts).
+**For technical readers.** CoCAD finds the parts from the part list of the [model definition](Model-definition), from the module calls of the model, or from the solids of the mesh. A part that is not closed can show no cut face or a wrong cut face. The cut faces need a stencil buffer in the OpenGL driver. See [How CoCAD finds the parts](How-CoCAD-finds-the-parts).

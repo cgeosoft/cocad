@@ -2,6 +2,8 @@
 
 Status: Implemented in 0.7.0. The rest of this page is the design record of 2026-11-13. The user documentation is in `docs/wiki/Optimize.md` and `docs/wiki/Prepare-a-model-for-printing.md`.
 
+Features 10 to 12 came after 0.7.1. Features 10 (hole size), 11 (mouse ears) and 12 (the thin wall check) are implemented. See [Proposal: features 10 to 12](#proposal-features-10-to-12).
+
 ## Differences from this design
 
 What 0.7.0 does not do, or does in a different way:
@@ -46,7 +48,7 @@ Today the models in `scad-models` do the print preparation in OpenSCAD. This tab
 | # | Feature | Short description |
 |---|---|---|
 | 1 | Export card at the bottom | One Export card, fixed at the bottom of the right panel, in all tabs |
-| 2 | Orientation | Off by default. With custom orientation on, CoCAD puts a part on its best face (Auto), or the user selects the face |
+| 2 | Orientation | On by default: CoCAD puts a part on its best face (Auto). The user can select the face, or turn custom orientation off to keep the model rotation |
 | 3 | Teardrop holes | Round holes with a horizontal axis get a 45 degree point at the top |
 | 4 | Bridges | Bridged ceilings start on straight edges. A hole above a bridge starts on a sacrificial layer or a stepped bridge |
 | 4.1 | Brim on small islands | A one-layer brim on small first-layer islands, with a gap to the rest of the part |
@@ -61,10 +63,10 @@ Today the models in `scad-models` do the print preparation in OpenSCAD. This tab
 CoCAD does these steps in this order. Each step uses the result of the step before it.
 
 1. **Build.** OpenSCAD makes the model mesh, as today (this step was called Render).
-2. **Parts.** CoCAD finds the parts, as today: the `cocad_part` list, the module split, or the solids of the mesh.
+2. **Parts.** CoCAD finds the parts, as today: the multicolor part list, the part list, the module split, or the solids of the mesh.
 3. **Print parts.** CoCAD joins parts that overlap in volume, finds parts with the same shape, and applies the part selection (feature 6).
 4. **Split** (feature 9). When the user accepts it, a part that does not fit the print area (feature 8) is cut into pieces, with joints. Each piece is a print part from here on.
-5. **Orientation** (feature 2). Each print part keeps its model rotation, or, with custom orientation on, gets the Auto rotation or the face that the user selected. Its lowest point goes to z = 0.
+5. **Orientation** (feature 2). Each print part gets the Auto rotation or the face that the user selected, or, with custom orientation off, keeps its model rotation. Its lowest point goes to z = 0.
 6. **Analysis.** In print position, CoCAD finds the horizontal holes, the bridged ceilings and the bed islands of each part.
 7. **Fixes** (features 3, 4, 5 and 4.1, in this order). CoCAD changes the geometry of each part, only for the fixes that the user turned on. All fixes are off by default. The brim comes last, because the bed chamfer must not cut it. The fixes also apply to the joints of step 4: a horizontal pin hole gets a teardrop.
 8. **Plate layout.** CoCAD puts the parts on the bed, with a gap.
@@ -125,7 +127,7 @@ Now: the Export card is the second card of the Model tab. It scrolls with the ot
 Proposal:
 
 - One Export card in the right panel, below the tab content, in all three tabs. It stays at the bottom. The other cards scroll above it.
-- The same buttons as today: STL, 3MF, STEP, and the multicolor 3MF row when the model has a `cocad_part` list.
+- The same buttons as today: STL, 3MF, STEP, and the multicolor 3MF row when the model has a multicolor part list.
 - One line above the buttons tells what the file will contain, for example "Plate: 7 parts, 9 objects. Bed chamfer, 4 teardrops." or "Model as built."
 - egui: call `egui::TopBottomPanel::bottom("export").show_inside(ui, ...)` in the right `SidePanel`, before the tab content. The tab content then gets the remaining height.
 
@@ -139,7 +141,7 @@ What the export contains (decision, owner):
 
 ## Feature 2: Orientation
 
-The model gives each part in its position in use. By default, CoCAD keeps this rotation: the part only goes down to z = 0. When the user turns on **Custom orientation** for a part, CoCAD can find the print position (Auto), or the user selects the face that goes on the bed. See User control below.
+The model gives each part in its position in use. By default, CoCAD finds the print position (Auto). The user can select the face that goes on the bed, or turn off **Custom orientation** to keep the model rotation: the part then only goes down to z = 0. See User control below.
 
 ### Auto: the method
 
@@ -173,11 +175,11 @@ After the bed face, CoCAD turns the part about z:
 
 ### User control
 
-Decision (owner): custom orientation is an option, off by default.
+Decision (owner): custom orientation is on by default, with Auto. Since 0.7.0 a model gives only the assembled model, so the model rotation is the position in use. A panel of a case frame then stands on its edge. Until 0.7.1, custom orientation was off by default. The stored values of 0.7 have no key for the model rotation: these parts get Auto.
 
 For the selected part, the Orientation card has:
 
-- **Custom orientation**: a switch, off by default. Off: the part keeps its model rotation.
+- **Custom orientation**: a switch, on by default. Off: the part keeps its model rotation.
 - With the switch on:
   - **Auto**: CoCAD puts the part on its best face (the method above). This is the first value when the user turns the switch on.
   - **Select face**: a click on a face in the 3D view turns the part so that this face is on the bed.
@@ -276,7 +278,7 @@ This replaces the `part` dropdown of the scad-models models.
 
 - The parts that CoCAD finds today are the start.
 - Two parts that **overlap in volume** cannot be two separate printed pieces. CoCAD joins them into one print part. Two parts that only touch (a lid on a box) stay separate. Test: the volume of the whole model is less than the sum of the part volumes. Then CoCAD finds the pairs that overlap.
-- The parts of a `cocad_part` list are the colors of one print object. They stay together as one object.
+- The parts of a multicolor part list are the colors of one print object. They stay together as one object.
 - The user can uncheck a part for this print, for example a part that is already printed. CoCAD stores this per model.
 
 ### Parts that are not printed: the `%` mark
@@ -465,6 +467,167 @@ CoCAD stores the cuts per model and per part in `models.json`: the axis, the pos
 
 After this, `book-cover` shows the whole board, and CoCAD makes the pieces. The lap joint of `open-case-frame` has screws and nut pockets in places that the model chooses. It can stay in the model until the lap joint in CoCAD can do the same.
 
+## Proposal: features 10 to 12
+
+Status: features 10, 11 and 12 are implemented, after 0.7.1. Each feature section has its status and the differences from the proposal. These features come after 0.7.1. They use the engine of the other fixes (option A) and the analysis code that is in `src/optimize/`.
+
+| # | Feature | Short description | Uses |
+|---|---|---|---|
+| 10 | Hole size | Round holes with a vertical axis get the diameter of the model, plus a set value | `teardrop::rounds()` |
+| 11 | Mouse ears | A one-layer disk on each sharp bed corner of a large part | `brim::islands()` |
+| 12 | Thin wall check | A new line in the Check card for walls thinner than the line width | `check.rs`, `ray_triangle` |
+
+The pipeline does not change. Features 10 and 11 are fixes of step 7. Feature 12 is part of the Check, which runs after the fixes.
+
+## Feature 10: Hole size
+
+Status: implemented on 2026-11-13 in `src/optimize/holes.rs`, after 0.7.1. Not in a release. Differences from the text below:
+
+- A hole with six faces can be a pocket for a nut. Its flat faces only move out by one half of **Add to diameter**. They do not go to the circle. With the value 0, such a hole does not change. OpenSCAD also makes a round hole of about 3.2 to 3.8 mm with six faces at its default resolution. Such a hole gets the same small change.
+- `bridges.rs` does not read the plan of this fix. When the two fixes are on, `fixes::apply` runs OpenSCAD one more time: first the hole size, then the other fixes on the result. The bridge fix then finds the new holes in the mesh.
+- The end of a hole is closed when rays near its wall find a face there. A counterbore with a smaller hole in its ceiling is closed at the ceiling, so it does not get deeper.
+- The wall check casts rays from the axis out through the corners of the new outline. The first face is the wall of the hole, the second is the other side of the wall.
+- The pipeline finds the pin holes of a split by their diameter (`Settings::hole_keep`). A hole of the model with the same diameter in a piece of that split is also not changed.
+- A hole that the model already made larger gets larger again.
+- The CLI switch is `--holes[=MM]`.
+- There is no example model and no picture in the guide.
+
+A "vertical hole" in this section is a round hole with its axis perpendicular to the bed. Each layer prints its outline as a circle.
+
+Two things make such a hole smaller than its diameter in the model:
+
+- OpenSCAD makes a round hole as a prism of `$fn` flat faces, with the corners on the circle. The flat faces are inside the circle. For a hole of radius r with n faces, the distance from the axis to a flat face is r·cos(180°/n). A hole of 4 mm with 16 faces has 3.92 mm between opposite flat faces.
+- The printer makes holes smaller than the model. The amount depends on the printer, the material and the settings. See Prior art.
+
+What CoCAD does: it cuts each vertical hole again, with the flat faces on the circle of the model plus a set value.
+
+### Find the holes
+
+`teardrop::rounds()` finds round surfaces from their corner lines. Today it keeps only the corner lines near the bed plane (`MAX_TILT_DEG`). For this feature it gets a second filter: corner lines near the z axis, with the same limit of 10 degrees.
+
+CoCAD keeps a round surface when:
+
+- It is a hole: the faces point to the center. A pin or a boss is not changed.
+- Its axis is within 10 degrees of the z axis.
+- The faces go all around the circle. An open arc, for example a round corner of a pocket, is not a hole.
+- Its diameter is in the limits (1 to 40 mm, the limits of the teardrop fix, to tune).
+
+Coaxial holes with different radii (a counterbore) each get their own cut.
+
+### Change the geometry
+
+- CoCAD cuts a prism along the hole. The prism has the same number of faces as the hole, at the same angles. The distance from the axis to each flat face is r + a/2, where a is the value **Add to diameter**. The corner radius is (r + a/2) / cos(180°/n).
+- The prism has the length of the hole. Where the hole opens to a face, the prism goes 0.02 mm past it (`OVERLAP`). At the closed end of a blind hole, the prism stops at the end face, so that the hole does not get deeper.
+- Before the cut, CoCAD casts rays out from the new surface. If the wall to the outside or to the next cavity is thinner than the minimum wall (`Limits::min_wall`), CoCAD does not change this hole. The row shows it as skipped, with the reason "wall too thin".
+- The model keeps its number of faces. CoCAD does not decrease the faces of small holes, as the polyholes of nophead do.
+
+### With the other fixes
+
+- **Teardrop holes** change holes with a horizontal axis. A hole is in one of the two groups, not in both.
+- **Bridges**: the slot and the square of a stepped bridge, the sacrificial layer and the cone of a blind hole use the new diameter. The plans of all fixes come from the same mesh, so `bridges.rs` must get the new radius of each hole from the plan of this fix.
+- **Bed chamfer** comes after this fix. It makes its reference outline from the changed part, so it needs no change.
+- **Split**: the pin holes of a pins joint are not changed. The **Clearance** of the split sets their fit.
+
+### Values and the slicer
+
+| Value | Range | Default |
+|---|---|---|
+| **Add to diameter** | 0 to 1 mm | 0.2 mm |
+
+With 0, the fix only moves the flat faces out to the circle.
+
+The row of the Print fixes card is **Hole size**, with the number of holes, for example "6 holes". The fix is off by default, as all fixes.
+
+OrcaSlicer has "X-Y hole compensation" and a polyholes option that do the same in the slicer. With the fix on, the card shows "Set the X-Y hole compensation of the slicer to 0." This is the same rule as for the bed chamfer and the elephant foot compensation.
+
+### Storage and other interfaces
+
+- `fixes::Settings`: `hole_size: bool` and `hole_add: f32`. `fixes::Report`: `holes: usize`.
+- `models.json`, `set_optimize` in `src/mcp.rs` and the switches of `cocad export` and `cocad slice` in `src/main.rs` get the two values, as for the other fixes.
+
+## Feature 11: Mouse ears
+
+Status: implemented on 2026-11-13 in `src/optimize/ears.rs`, after 0.7.1. Not in a release. Differences from the text below:
+
+- The disks are not cut back where the part goes out over them above the first layer. The brim also does not do this.
+- The disks do not go into the holes of their island, so that an ear does not close a screw hole near a corner.
+- With the brim fix on, a disk keeps the gap also from the brim of a small island.
+- The CLI switch is `--ears`. It has no value: the diameter and the minimum size come from the stored values or the defaults.
+- There is no example model and no picture in the guide.
+
+A large flat part can lift from the bed at its corners when the plastic cools (warping). A mouse ear is a thin disk on a corner. It gives the corner more area on the bed. The user cuts the disks off after the print.
+
+The brim of feature 4.1 holds small islands. Mouse ears hold the corners of large islands. An island gets one of the two, not both.
+
+### Find the corners
+
+1. `brim::islands()` gives the islands of the first layer. Take the islands that are not small (not thinner than 3 mm and not smaller than 25 mm²).
+2. Keep an island when the long side of its smallest rectangle (`check::min_rect()`) is at least **Min size** (100 mm by default, to tune). A short part has little force at its corners.
+3. Go around the outer loop of the island. A vertex is a sharp corner when the outline turns out (a convex corner) by more than 45 degrees. A vertex of an arc turns by less than 40 degrees (`check::is_arc()`), so a round corner gets no ear.
+4. Corners of holes get no ear.
+5. When two corners are closer than one ear diameter, they get one ear at the middle point between them.
+
+### Change the geometry
+
+- Each corner gets a disk with its center on the corner. The disk is one first layer high and has the diameter **Diameter** (15 mm by default). The disk overlaps the corner, so it is joined to the part.
+- The disk keeps the **Gap** of the brim (`brim_gap`, 1 mm) from the other islands of the same part, as the brim does.
+- The disk stays inside the print area. The plate layout gives each part with ears more room: `brim::brim_out()` gets the ear radius.
+- The disks are `late` statements of the plan. They come after the bed chamfer, so that the chamfer does not cut them. The chamfer moves the bed edge in by 0.4 mm by default. The disk has its center on the corner of the model, so it stays joined.
+- When the part above the first layer goes out over a disk at less than two layers, the disk would fuse with it. CoCAD then cuts the disk back to the outline of the part at that height plus the gap. (Not done, see the status.)
+
+### Values
+
+| Value | Range | Default |
+|---|---|---|
+| **Diameter** | 5 to 30 mm | 15 mm |
+| **Min size** | 20 to 300 mm | 100 mm |
+
+The row of the Print fixes card is **Mouse ears**, with the number of ears, for example "4 ears". The fix is off by default.
+
+OrcaSlicer has the brim type "Mouse ear" (see Prior art, feature 4.1). The CoCAD ears are in the mesh, so they are the same in each slicer. With the fix on and a slicer brim on, the part gets the two.
+
+### Storage and other interfaces
+
+- `fixes::Settings`: `ears: bool`, `ear_d: f32` and `ear_min: f32`. `fixes::Report`: `ears: usize`.
+- A new module `src/optimize/ears.rs` with `plan()`, as `brim.rs`.
+- `models.json`, `set_optimize` and the CLI switches, as for the other fixes.
+
+## Feature 12: Thin wall check
+
+Status: implemented on 2026-11-13 in `check::thin_walls()`, after 0.7.1. Not in a release.
+
+A wall that is thinner than the line width of the Print settings (0.45 mm by default) is narrower than one printed line. The slicer cannot print it as it is in the model. The Check card shows such a wall, so that the user sees it before the print.
+
+There is no fix. Only the model can make the wall thicker.
+
+### Find the thin walls
+
+The check runs on the part in print position, after the fixes.
+
+1. Take each triangle that is near vertical: the z part of its normal is between -0.5 and 0.5. Only the thickness in the bed plane depends on the line width.
+2. Cast a ray from the center of the triangle into the part, against its normal (`ray_triangle`). The distance to the first hit is the thickness at this place.
+3. The place is thin when the thickness is less than the line width, and the face that the ray hits is almost parallel to the first face (the normals are opposite within 25 degrees). The second test removes the sharp edge of a chamfer or a wedge, where the thickness goes to 0 but the part is not a wall.
+4. A thickness below 0.1 mm (`SLIVER_MM`) is a mesh sliver, not a wall. The bed chamfer can leave such a sliver at the tip of a cusp. The check does not list it.
+5. Join the thin triangles that share a vertex into places. The two sides of one wall are one place. Ignore a place smaller than `SLIVER_MM2`.
+
+The ray test of `teardrop.rs` (`hits()`) tests each triangle of the mesh. This check casts one ray for each near-vertical triangle, so it uses a grid in x and y (`WallGrid`, at most 128 × 128 cells) that gives the triangles near a ray. A ray goes only one line width, so it touches few cells. Without the grid the time grows with the square of the triangle count.
+
+### In the Check card
+
+- A new `Kind::ThinWall`. Its rank is after `Overhang` and before `Arc`.
+- The line shows the smallest thickness, the length and the height of the place, for example "Thin wall 0.30 mm, 16.0 x 8.0 mm, at z 2.00 to 10.00".
+- A click selects the part and shows the faces, as for the other problems.
+- The limit is the **Line width** of the Print settings. There is no new value. `Layers` carries it as `line_width`.
+
+Not in this feature: a floor or a ceiling that is thinner than one layer, and a hole that is too small to print. They can be later lines of the Check.
+
+## Order of work for features 10 to 12
+
+1. Thin wall check (feature 12). It changes no geometry and needs no new stored value. Done.
+2. Mouse ears (feature 11). It is close to `brim.rs`. Done.
+3. Hole size (feature 10). It changes `teardrop::rounds()` and `fixes::apply`. Done.
+4. For each fix: one example model in `examples/`, the row in `docs/wiki/Optimize.md`, a step with pictures in `docs/wiki/Prepare-a-model-for-printing.md`, the `set_optimize` values in `docs/wiki/MCP-reference.md`, and the tour (rules 5 and 6).
+
 ## Optimize tab layout
 
 From top to bottom:
@@ -488,7 +651,7 @@ The 3D view of the Optimize tab shows the bed with a grid and the parts in print
 - Default print area: global, in `<config>/config` (feature 8).
 - Print area of a model: per model in `models.json` (feature 8).
 - Cuts and joints: per model and per part, in `models.json` (feature 9).
-- Optimize tab values: per model in `models.json`, as the slice settings today. New keys: part selection, copies, the custom orientation switch and choice of each part, the fix switches and values. A new model starts with custom orientation off and all fixes off.
+- Optimize tab values: per model in `models.json`, as the slice settings today. New keys: part selection, copies, the custom orientation switch and choice of each part, the fix switches and values. A new model starts with Auto orientation and all fixes off.
 - Card open state: global (feature 7).
 - `models.json` today stores `"mode": "slice"` or `"photo"`. Read them as `"optimize"` and `"render"`.
 
@@ -603,6 +766,25 @@ Not confirmed, so not in the first list: the Bambu Studio profiles give X1C and 
 - The CoCAD proposal is a small part of Chopper: one axis, parallel cuts, a cost for the section and the features it cuts. A Chopper search can come later.
 - **Clearance.** The Prusa guide says that printers are accurate to at least 0.2 mm, and suggests at least 0.3 mm for moving parts. There is no single value. [Prusa help](https://help.prusa3d.com/article/modeling-with-3d-printing-in-mind_164135). The slicers use 0.1 mm. For a glued joint, 0.2 mm total (0.1 mm on each side, as `book-cover`) is a good default. The user can change it.
 
+### Hole size (feature 10)
+
+Checked on 2026-11-13 with a web search. The pages were not read in full.
+
+- **Polyholes** (nophead, in NopSCADlib). The polygon of a vertical hole gets its flat faces on the circle, and a small hole gets fewer faces. [softsolder: small hole calibration](https://softsolder.com/2011/11/25/thing-o-matic-small-hole-calibration/) reports that small holes also needed 0.2 mm more on that printer.
+- **OrcaSlicer** has "X-Y hole compensation" (0 by default; the value applies to the radius) and a polyholes option. Both change the sliced layers, not the mesh. [Orca wiki: precision](https://www.orcaslicer.com/wiki/print_settings/quality/quality_settings_precision)
+- A guide of Sovol refers to FDM guidelines of Oakland University that tell to model holes about 0.2 mm larger. [Sovol](https://www.sovol3d.com/blogs/news/3d-printing-bearing-housings-how-to-design-and-fit-bearings-in-fdm-parts). There is no single value. The default of 0.2 mm is a start, and the user sets the value for the printer.
+
+### Mouse ears (feature 11)
+
+- **OrcaSlicer** has the brim type "Mouse ear" (see feature 4.1 above).
+- FDM design guides tell to add small disks at the corners of a part in the design, and to make the bed corners round. [Makerverse: FDM design guide](https://www.makerverse.com/resources/the-fused-deposition-modeling-fdm-design-guide/)
+
+### Not chosen on 2026-11-13
+
+- **Crush ribs** for press fits and **holes for heat-set inserts**. CoCAD cannot tell from the mesh which hole is a press fit or an insert hole. The model must do this. [Hackaday: crush ribs](https://hackaday.com/2020/10/15/adding-crush-ribs-to-3d-printed-parts-for-a-better-press-fit)
+- **Thin slits that make the slicer add walls around a screw hole.** The result depends on the slicer. [Prusa forum](https://forum.prusa3d.com/forum/prusaslicer/tricking-slicer-to-make-100-fill-in-certain-areas)
+- Later candidates: a clearance between parts that touch in the model, a 45 degree roof on horizontal slots, supports in the mesh that break away, and piece numbers on the cut faces of a split.
+
 ### Mesh booleans in Rust (option B)
 
 | Crate | Version (date) | Build | License | Note |
@@ -638,6 +820,16 @@ The owner answered the first open questions on 2026-11-13:
 | 9 | Joints in the first version | Flat, pins and dovetail. The user can change the joint and its values. |
 | 10 | Printed pins | Correct: they are new print parts on the plate. |
 | | Engine | OpenSCAD pass (option A). CoCAD requires an OpenSCAD nightly. |
+
+For features 10 to 12, the owner accepted the defaults of the proposal on 2026-11-13:
+
+| # | Question | Decision |
+|---|---|---|
+| 11 | Hole size: default of **Add to diameter** | 0.2 mm. |
+| 12 | Hole size: pin holes of a split | Not changed. The **Clearance** of the split sets their fit. |
+| 13 | Hole size: pins and bosses | Not changed. Only holes change. |
+| 14 | Mouse ears: defaults | Diameter 15 mm, **Min size** 100 mm. To tune after test prints. |
+| 15 | Thin wall check: limit | One line width. |
 
 ## Open questions
 

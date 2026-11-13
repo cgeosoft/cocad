@@ -359,6 +359,21 @@ pub(crate) fn tools() -> Json {
             })
         ),
         tool(
+            "new_model",
+            "Write a new .scad file and open it in the window. Starts CoCAD when it is not running. The file must not exist. Without source, the file gets a small model with four parameters. Edit the file later and call build to see the change.",
+            false,
+            false,
+            json!({
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string", "description": "Absolute path of the new .scad file" },
+                    "source": { "type": "string", "description": "OpenSCAD source of the new model" },
+                    "wait": wait,
+                },
+                "required": ["path"],
+            })
+        ),
+        tool(
             "set_params",
             "Change Customizer parameters in the window. The change is all or nothing: one bad value rejects the call. Returns the state after the build.",
             false,
@@ -412,7 +427,7 @@ pub(crate) fn tools() -> Json {
         ),
         tool(
             "save_parameter_set",
-            "Save the current values as a named set in the sets file of the model.",
+            "Save the current values as a named set in the definition of the model (<model>.yml next to the .scad file).",
             false,
             true,
             json!({
@@ -426,7 +441,7 @@ pub(crate) fn tools() -> Json {
         ),
         tool(
             "export_model",
-            "Save the model. The file extension sets the format. .stl and .3mf write a print plate of the Optimize tab, as the window does: the print parts in print orientation, with the print fixes that are on, in the plate layout. A .3mf has one object for each print part and one build item for each copy. .step writes the model as built (with only set in the Optimize state: that part). With slicer, builds each cocad_part part and writes a multicolor .3mf for that slicer. Prepares the plates when they are not ready. Waits for a running build. Fails when the last build failed.",
+            "Save the model. The file extension sets the format. .stl and .3mf write a print plate of the Optimize tab, as the window does: the print parts in print orientation, with the print fixes that are on, in the plate layout. A .3mf has one object for each print part and one build item for each copy. .step writes the model as built (with only set in the Optimize state: that part). With slicer, builds each part of the multicolor part list and writes a multicolor .3mf for that slicer. Prepares the plates when they are not ready. Waits for a running build. Fails when the last build failed.",
             false,
             true,
             json!({
@@ -478,6 +493,11 @@ pub(crate) fn tools() -> Json {
                             "brim": { "type": "boolean", "description": "A one-layer brim on small bed islands" },
                             "brim_w": { "type": "number", "description": "Brim width in mm" },
                             "brim_gap": { "type": "number", "description": "Gap between the brim and the rest of the part in mm" },
+                            "hole_size": { "type": "boolean", "description": "Hole size: round holes with a vertical axis get the diameter of the model plus hole_add" },
+                            "hole_add": { "type": "number", "description": "The hole size fix adds this to the diameter in mm, 0 to 1" },
+                            "ears": { "type": "boolean", "description": "Mouse ears: a one-layer disk on each sharp bed corner of a large part" },
+                            "ear_d": { "type": "number", "description": "Mouse ear diameter in mm, 5 to 30" },
+                            "ear_min": { "type": "number", "description": "A part gets mouse ears when its long side on the bed is this or more, in mm, 20 to 300" },
                         },
                     },
                     "parts": {
@@ -528,12 +548,13 @@ pub(crate) fn tools() -> Json {
                     "wireframe": { "type": "boolean" },
                     "grid": { "type": "boolean" },
                     "layer": { "type": "integer", "description": "Slice layer of the Optimize tab, from 1" },
+                    "render": { "type": "boolean", "description": "true starts the path-traced render of the Render tab, as the Render button does. The tab does not start it by itself. false stops it. It needs the Render tab. The render stops when the view or a render setting changes. To save an image, use save_photo." },
                     "part_colors": { "type": "boolean", "description": "Show each part in a different color. The 3D view, the photo and the images use the part colors." },
                     "explode": { "type": "number", "description": "Move the parts apart by this distance in mm. The part farthest from the model center moves this far. 0 turns the explode off. The Optimize tab shows no explode." },
                     "explode_axis": { "type": "string", "enum": ["all", "x", "y", "z"], "description": "Explode direction: all moves each part away from the model center, x, y or z moves the parts along that axis only. Turns the explode on." },
                     "section": {
                         "type": "object",
-                        "description": "Section cut: cut the model across x, y or z and keep one side, for example {\"x\": {\"at\": 12.5, \"keep\": \"+\"}}. The object replaces all cuts: a missing or null axis has no cut, and {} turns all cuts off. Two or three cuts together keep only the space that all of them keep. The cut moves with each part in the explode. The 3D view, the photo and the images show the cut. The Optimize tab and the export do not.",
+                        "description": "Section cut: cut the model across x, y or z and keep one side, for example {\"x\": {\"at\": 12.5, \"keep\": \"+\"}}. The object replaces all cuts: a missing or null axis has no cut, and {} turns all cuts off. Two or three cuts together keep only the space that all of them keep. The cut moves with each part in the explode. The cuts and the sides to keep stay in all tabs. In the Optimize tab, the cuts go across the plate: at is a position on the bed (default: the center of the plate), and the plate has its own positions. get_state shows the positions of the current tab. The 3D view, the layers, the photo and the images show the cut. The photo and the images show the cut of the model. The export does not use the cut.",
                         "properties": {
                             "x": { "type": ["object", "null"], "properties": { "at": { "type": "number", "description": "Position on the axis in mm. Default: the model center." }, "keep": { "type": "string", "enum": ["+", "-"], "description": "+ keeps the side above the position, - the side below. Default +." } } },
                             "y": { "type": ["object", "null"], "properties": { "at": { "type": "number", "description": "Position on the axis in mm. Default: the model center." }, "keep": { "type": "string", "enum": ["+", "-"], "description": "+ keeps the side above the position, - the side below. Default +." } } },
@@ -618,7 +639,7 @@ impl Bridge {
                 self.selected = Some(id);
                 self.list_windows()
             }
-            "open_model" => {
+            "open_model" | "new_model" => {
                 let window = match self.window() {
                     Ok(w) => w,
                     Err(_) => launch()?,

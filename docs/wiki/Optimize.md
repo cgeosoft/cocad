@@ -1,6 +1,6 @@
 # Optimize
 
-The **Optimize** tab prepares the parts of a model for a 3D printer. It puts the parts on the bed of your printer, turns them, changes the shape where a printer has problems, and shows the print layers. The **Export** card at the bottom of the tab writes the result as a 3MF or an STL file.
+The **Optimize** tab prepares the parts of a model for a 3D printer. It puts the parts on the bed of your printer, turns them, changes the shape where a printer has problems, and shows the print layers. **Export 3MF** at the bottom of the tab writes the result as a 3MF file. Its menu also writes STL files.
 
 ![The Optimize tab with the desk dock](https://raw.githubusercontent.com/cgeosoft/cocad/main/assets/guide/app-3-fixes.jpg)
 
@@ -10,7 +10,7 @@ For a full example with pictures of each change, see [Prepare a model for printi
 
 ## Open the tab
 
-Click **Optimize** on the right, or press `O`. Press `O` again to go back to the **Model** tab. The tab name shows the key letter underlined.
+Click **Optimize** on the right, or press `O`. Press `O` again to go back to the **Model** tab. Point to the tab name to see its key.
 
 When you open the tab, CoCAD prepares the plate. The **Plate** card shows "Preparing the plate…" and the time. For the print fixes and the splits, CoCAD runs OpenSCAD in the background, so this can take some seconds. CoCAD keeps the results of these slow steps. When you change one value, CoCAD makes again only the parts that the change touches. The last line of the tab shows the time of the last run, for example "Prepared in 240 ms".
 
@@ -20,7 +20,7 @@ The rows of the **Plate** card are the print parts. CoCAD makes them from the [p
 
 - Parts with the same shape are one row with a count, for example "Part 3 ×3". The plate gets one copy for each count.
 - Parts that overlap in volume cannot be separate printed pieces. CoCAD joins them into one print part with the name "Part 1 + Part 2". Parts that only touch, for example a lid on a box, stay separate.
-- The parts of a `cocad_part` list are the colors of one object. They are one print part with the name of the model. See [Multicolor prints](Multicolor-prints).
+- The parts of a multicolor model are the colors of one object. They are one print part with the name of the model. See [Multicolor prints](Multicolor-prints).
 - Each piece of a [split](#split-a-part-that-is-too-large) part is a print part, for example "Part 1 1/2".
 - Reference parts (the parts with a `%` mark in the model) are never print parts. See [Parts](Parts#reference-parts).
 
@@ -37,13 +37,15 @@ The label next to the buttons shows the plate, for example "Plate 1 of 2". The *
 
 In the **Plate** view, click a part to select it. The **Plate** card marks its row, and the **Orientation** card shows its values. Click the background to clear the selection.
 
-The Optimize tab shows no explode, no section cut and no reference parts. **Fit** and the `F` key show the full bed.
+The Optimize tab shows no explode and no reference parts. **Fit** and the `F` key show the full bed.
+
+The **Section** bar at the top right of the 3D view cuts the plate across the axes of the bed. The cuts that you turn on in the other tabs stay on. The plate has its own positions, at first the center of the plate. The **Layers** view shows the cut too. **Export 3MF** does not use the cut. See [Section](Parts#section).
 
 ## The cards
 
-The tab has these cards, from top to bottom: **Plate**, **Orientation**, **Print fixes**, **Check**, **Layers**, **Printer** and **Print settings**. The **Export** card is below them, at the bottom of the tab. See [Export](Export).
+The tab has these cards, from top to bottom: **Plate**, **Orientation**, **Print fixes**, **Check**, **Layers**, **Printer** and **Print settings**. **Export 3MF** is below them, at the bottom of the tab. See [Export](Export).
 
-Click the header of a card to close it or to open it. A closed card shows a short value in its header, for example the print time in the **Layers** card. **Collapse** at the top of the tab closes all cards. **Expand** opens them again. CoCAD remembers which cards are closed. The **Export** card does not close.
+Click the header of a card to close it or to open it. A closed card shows a short value in its header, for example the print time in the **Layers** card. CoCAD remembers which cards are closed. The **Export** card does not close.
 
 ### Plate
 
@@ -60,7 +62,7 @@ Click the header of a card to close it or to open it. A closed card shows a shor
 | **Fits** | The part fits the print area. The Check found no problems. |
 | **3 problems** | The **Check** card lists problems of this part. |
 | **On plate 2** | The part is on a different plate. |
-| **Too large for the print area** | The part does not fit. A **Split** section shows below the row. |
+| **Too large** | The part does not fit the print area. A **Split** section shows below the row. |
 | **Not printed** | You cleared the check box. |
 | **Not on the plates** | The dropdown shows a different part, or the copies are 0. |
 
@@ -93,14 +95,14 @@ After the split, each piece is a print part, for example "Part 1 1/2" and "Part 
 
 When a cut face has no room for pins or tabs, that cut is a flat cut. The **Plate** card tells you, for example "the cut at 130.0 mm has no room for pins. It is a flat cut."
 
-When no cuts make the part fit, the section says so. Turn the part with a [custom orientation](#orientation), or use a larger print area. When the part fits on a different side, the **Plate** card tells you to turn on **Custom orientation**.
+When no cuts make the part fit, the section says so. Turn the part with a [custom orientation](#orientation), or use a larger print area. When the part fits on a different side, the **Plate** card tells you so. Then click **Select face** in the **Orientation** card and click that side.
 
 ### Orientation
 
 Select a part first, in the **Plate** card or in the 3D view.
 
-- **Custom orientation**: off by default. When it is off, the part keeps the rotation of the model. CoCAD only moves its lowest point down to the bed.
-- When you turn it on, two choices show:
+- **Custom orientation**: on by default, with **Auto**. When you turn it off, the part keeps the rotation of the model. CoCAD then only moves its lowest point down to the bed.
+- When it is on, two choices show:
   - **Auto**: CoCAD puts the part on its best face. It compares the flat faces of the outer shape of the part. It prefers less overhang, more area on the bed and a lower part. When the rotation of the model is almost as good, the part keeps it.
   - **Select face**: click a face of the selected part in the 3D view. That face goes on the bed.
 - **Turn 90°** turns the part by 90 degrees on the bed.
@@ -118,11 +120,25 @@ The print fixes change the shape of the print parts, so that they print better. 
 | Fix | What it does | Values |
 |---|---|---|
 | **Teardrop holes** | A round hole with a horizontal axis gets a 45 degree point at the top. The top of the hole then needs no support. | |
+| **Hole size** | A round hole with a vertical axis prints smaller than in the model. The hole gets the diameter of the model, plus a value. | **Add to diameter**: 0 to 1 mm, 0.2 mm by default |
 | **Bridges** | A bridged ceiling over a round hole starts on straight edges. A blind hole that goes up gets a 45 degree cone at its end. | **Hole above**: **Sacrificial** or **Stepped**. **Sacrificial layers**: 1 to 10, 2 by default. |
 | **Bed chamfer** | The edges on the bed get a 45 degree chamfer, in whole layers. The chamfer hides the elephant foot of the first layers. | **Size**: 0.1 to 2 mm, 0.4 mm by default |
 | **Brim on small islands** | A small area of the first layer gets a brim of one layer, so that it stays on the bed. | **Width**: 1 to 20 mm, 5 mm by default. **Gap**: 0.2 to 5 mm, 1 mm by default |
+| **Mouse ears** | Each sharp corner of a large area of the first layer gets a disk of one layer. The disk holds the corner on the bed, so that the part does not lift there. | **Diameter**: 5 to 30 mm, 15 mm by default. **Min size**: 20 to 300 mm, 100 mm by default |
 
 With the bed chamfer on, the card shows "Set the elephant foot compensation of the slicer to 0." Without this, the bed edges get two corrections.
+
+**Hole size** changes round holes from 1 to 40 mm in diameter. OpenSCAD makes a round hole from flat faces, with the corners on the circle. The flat faces are inside the circle, so the hole is smaller than its diameter. The fix moves the flat faces out to the circle, and then adds the value. With 0, it only moves the faces. Some rules:
+
+- A hole with six faces can be a pocket for a nut. Its faces only move out by the value.
+- A blind hole does not get deeper.
+- When the wall around a hole is too thin, CoCAD does not change the hole. The row shows it as skipped.
+- Pins and other round shapes that point out are not changed.
+- The pin holes of a split are not changed. The **Clearance** of the split sets their fit.
+
+With the fix on, the card shows "Set the X-Y hole compensation of the slicer to 0." Without this, the holes get two corrections. The correct value depends on your printer and material. Print a test part with a hole, measure it, and set the value.
+
+**Mouse ears** are for large flat parts. An area of the first layer gets ears when its long side is **Min size** or more. Round corners, inside corners and the corners of holes get no ear. Two corners that are nearer than one diameter get one ear between them. The ears do not go into the holes of the part, and they stay inside the print area. A small area gets no ears: **Brim on small islands** holds it. After the print, cut the ears off.
 
 The [guide](Prepare-a-model-for-printing#4-turn-on-the-print-fixes) shows each fix before and after, and tells when to use it.
 
@@ -136,6 +152,7 @@ The **Check** card lists the problems that stay after the fixes. It shows the pr
 |---|---|
 | **Overhang** | Faces that point down and are steeper than the overhang limit. They need support. |
 | **Long bridge** | A flat ceiling that is longer than the bridge limit. |
+| **Thin wall** | A wall that is thinner than the **Line width** of the print settings. The printer cannot make it with one line. Make the wall thicker in the model. |
 | **Arc in a bridge** | A flat ceiling with a round outline. Turn on **Bridges**. |
 | **Small island** | A small area of the first layer: thinner than 3 mm, or smaller than 25 mm². Turn on **Brim on small islands**. |
 | **Too large** | The part does not fit the print area. |

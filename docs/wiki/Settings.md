@@ -2,7 +2,7 @@
 
 Open the settings with **File > Settings** or Ctrl+, (Ctrl and the comma key).
 
-The window has one page for each topic. Change what you want, then click **Save**. **Cancel** or Esc closes the window without a change.
+The window has one page for each topic. The list of pages is at the left. Change what you want, then click **Save**. **Cancel** or Esc closes the window without a change.
 
 ![The menu and the settings](https://raw.githubusercontent.com/cgeosoft/cocad/main/assets/tour/10-menu.jpg)
 

@@ -98,6 +98,16 @@ impl Selection {
         find(parts, self.part.as_deref()).map(|i| &parts[i])
     }
 
+    /// The name of the selected part.
+    pub fn part(&self) -> Option<&str> {
+        self.part.as_deref()
+    }
+
+    /// Selects the part with this name, or no part.
+    pub fn select(&mut self, name: Option<String>) {
+        self.part = name;
+    }
+
     /// True when the part with this name has the focus.
     pub fn has_focus(&self, name: &str) -> bool {
         self.focus.as_deref() == Some(name)

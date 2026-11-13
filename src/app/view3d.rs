@@ -27,7 +27,7 @@ pub(super) struct View3d {
     /// Show each part in its own color.
     pub part_colors: bool,
     /// Colors that the user selected, by part name. A new render keeps the
-    /// names ("Part 2", or a name from the `cocad_part` list), so the colors
+    /// names ("Part 2", or a name from the part list), so the colors
     /// stay. Opening another model clears them.
     pub custom: HashMap<String, [u8; 3]>,
     /// The part colors window is open.
@@ -188,7 +188,7 @@ impl View3d {
     /// A point p stays when `plane.truncate().dot(p) + plane.w >= 0.0` for
     /// each plane.
     pub fn clip_planes(&self) -> Vec<glam::Vec4> {
-        self.section.planes()
+        self.section.planes(super::section::Space::Model)
     }
 
     /// Forgets the colors, the explode distance and the selection of the
@@ -369,7 +369,7 @@ impl App {
         let styles = self.view3d.styles(&a.parts, true);
         let offsets = App::offsets(&styles);
         let moved = offsets.iter().any(|o| *o != Vec3::ZERO);
-        let planes = self.view3d.section.planes();
+        let planes = self.view3d.clip_planes();
         if !self.view3d.part_colors && !moved && planes.is_empty() {
             return 0;
         }
@@ -436,28 +436,34 @@ impl App {
         if refs > 0 {
             count.push_str(&format!(", {refs} not printed"));
         }
+        let how = if n == 1 {
+            "The model is one solid."
+        } else if a.kind == crate::assembly::Kind::Colors {
+            "The parts of the multicolor part list."
+        } else if a.kind == crate::assembly::Kind::Labeled {
+            "The parts of the part list. Each solid is one part."
+        } else if a.parts.iter().any(|p| p.source > 0 && !p.reference) {
+            // The module split gives one source for each module.
+            "Each solid of each module is one part."
+        } else {
+            "Each separate solid is one part."
+        };
+        let mut info = format!("{count}. {how}");
+        if refs > 0 {
+            info.push_str(
+                " The parts with a % mark in the model show in gray. They are not printed or \
+                 exported.",
+            );
+        }
+        info.push_str(
+            "\n\nPart colors gives each part its own color. Colors… sets the color of each part.",
+        );
         ui::card(ui, |ui| {
-            if !self.card_head(ui, "Parts", &count) {
+            if !self.card_head_info(ui, "Parts", &count, &info) {
                 return;
             }
-            let note = if let Some(job) = &self.parts_job {
-                job.note
-            } else if n == 1 {
-                "The model is one solid."
-            } else if crate::parts::needs_render(&self.params) {
-                "The parts of the cocad_part list."
-            } else if a.parts.iter().any(|p| p.source > 0 && !p.reference) {
-                // The module split gives one source for each module.
-                "Each solid of each module is one part."
-            } else {
-                "Each separate solid is one part."
-            };
-            ui.label(ui::dim(format!("{count}. {note}")));
-            if refs > 0 {
-                ui.label(ui::dim(
-                    "The parts with a % mark in the model show in gray. They are not printed or \
-                     exported.",
-                ));
+            if let Some(job) = &self.parts_job {
+                ui.label(ui::dim(job.note));
             }
             if let Some(p) = self.view3d.sel.selected(&a.parts) {
                 ui.add_space(4.0);
@@ -476,22 +482,22 @@ impl App {
                 ui.label(ui::dim(format!("{size} · {}", volume(p.volume))));
             }
             ui.add_space(2.0);
+            // The switch and the color window on one row.
             ui.horizontal(|ui| {
                 ui.label("Part colors");
+                ui::toggle(ui, &mut self.view3d.part_colors)
+                    .on_hover_text("Show each part in its own color");
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui::toggle(ui, &mut self.view3d.part_colors)
-                        .on_hover_text("Show each part in its own color");
+                    let colors = egui::Button::new("Colors…").min_size(Vec2::new(110.0, 30.0));
+                    if ui
+                        .add(colors)
+                        .on_hover_text("Select a color for each part")
+                        .clicked()
+                    {
+                        self.view3d.colors_open = true;
+                    }
                 });
             });
-            let colors =
-                egui::Button::new("Colors…").min_size(Vec2::new(ui.available_width(), 34.0));
-            if ui
-                .add(colors)
-                .on_hover_text("Select a color for each part")
-                .clicked()
-            {
-                self.view3d.colors_open = true;
-            }
         });
         ui.add_space(4.0);
     }
@@ -500,7 +506,8 @@ impl App {
     /// and the Render tabs show it. A change of the distance or the direction
     /// turns the explode on.
     pub(super) fn explode_card(&mut self, ui: &mut egui::Ui) {
-        let Some(a) = self.assembly.clone().filter(|a| !a.parts.is_empty()) else {
+        // One part has nothing to move: no card.
+        let Some(a) = self.assembly.clone().filter(|a| a.parts.len() > 1) else {
             return;
         };
         let note = if !self.view3d.explode || a.parts.len() < 2 {
@@ -510,16 +517,12 @@ impl App {
             format!("{d:.0} mm, {}", self.view3d.explode_axis.label())
         };
         ui::card(ui, |ui| {
-            if !self.card_head(ui, "Explode", &note) {
+            let info = "Moves the parts away from the center. A change of the distance or the \
+                        direction turns the explode on. Press E to turn it on or off.";
+            if !self.card_head_info(ui, "Explode", &note, info) {
                 return;
             }
             let v = &mut self.view3d;
-            if a.parts.len() < 2 {
-                ui.label(ui::dim("Explode needs two or more parts."));
-                return;
-            }
-            ui.label(ui::dim("Moves the parts away from the center."));
-            ui.add_space(2.0);
             ui.horizontal(|ui| {
                 ui.label("Explode");
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -577,32 +580,34 @@ impl App {
                     .max_height(height)
                     .auto_shrink([false, true])
                     .show_rows(ui, row_height, rows.len(), |ui, range| {
-                        for &i in &rows[range] {
-                            let p = &a.parts[i];
-                            let row = Vec2::new(ui.available_width(), row_height);
-                            let ltr = egui::Layout::left_to_right(egui::Align::Center);
-                            ui.allocate_ui_with_layout(row, ltr, |ui| {
-                                ui.spacing_mut().interact_size = Vec2::new(36.0, 22.0);
-                                let mut color = v.color_on(i, p);
-                                if ui.color_edit_button_srgb(&mut color).changed() {
-                                    v.set_color(p, color);
-                                }
-                                ui.add_space(4.0);
-                                ui.label(&p.name);
-                                let rtl = egui::Layout::right_to_left(egui::Align::Center);
-                                ui.with_layout(rtl, |ui| {
-                                    let reset = ui::ghost("Reset", false);
-                                    if ui
-                                        .add_enabled(v.has_custom(p), reset)
-                                        .on_hover_text("Use the default color")
-                                        .clicked()
-                                    {
-                                        v.reset_color(p);
+                        ui::bar_room(ui, |ui| {
+                            for &i in &rows[range] {
+                                let p = &a.parts[i];
+                                let row = Vec2::new(ui.available_width(), row_height);
+                                let ltr = egui::Layout::left_to_right(egui::Align::Center);
+                                ui.allocate_ui_with_layout(row, ltr, |ui| {
+                                    ui.spacing_mut().interact_size = Vec2::new(36.0, 22.0);
+                                    let mut color = v.color_on(i, p);
+                                    if ui.color_edit_button_srgb(&mut color).changed() {
+                                        v.set_color(p, color);
                                     }
-                                    ui.label(ui::dim(volume(p.volume)));
+                                    ui.add_space(4.0);
+                                    ui.label(&p.name);
+                                    let rtl = egui::Layout::right_to_left(egui::Align::Center);
+                                    ui.with_layout(rtl, |ui| {
+                                        let reset = ui::ghost("Reset", false);
+                                        if ui
+                                            .add_enabled(v.has_custom(p), reset)
+                                            .on_hover_text("Use the default color")
+                                            .clicked()
+                                        {
+                                            v.reset_color(p);
+                                        }
+                                        ui.label(ui::dim(volume(p.volume)));
+                                    });
                                 });
-                            });
-                        }
+                            }
+                        });
                     });
                 ui.add_space(12.0);
                 let row = Vec2::new(ui.available_width(), 34.0);

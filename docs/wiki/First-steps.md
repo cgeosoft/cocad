@@ -1,6 +1,6 @@
 # First steps
 
-This page shows how to open a model and how to look at it.
+This page shows how to start a model, how to open a model and how to look at it.
 
 ## The welcome tour
 
@@ -8,14 +8,39 @@ At the first start, a welcome tour shows the main features one step at a time. C
 
 To see the tour again, use **Help > Welcome tour**.
 
+## The start page
+
+![The start page](https://raw.githubusercontent.com/cgeosoft/cocad/main/assets/tour/1-welcome.jpg)
+
+When no model is open, the window shows the start page. The start page has:
+
+- **New model…**: make a new model.
+- **Open model…**: open a `.scad` file.
+- **Work with an agent**: the state of the MCP server, and the steps to connect an AI assistant. See [AI assistant](AI-assistant).
+- A card with two tabs:
+  - **Recent**: the last 8 models that you opened. Each row shows a picture of the model, its title and its description. A model with no title shows its file name. A model with no description shows its folder.
+  - **Examples**: the sample models, each with a picture.
+
+The title and the description come from the `title` and `description` fields of the [model definition](Model-definition), the `.yml` file next to the model. The picture is the Iso view of the model. CoCAD makes it again when the model opens (after the first build) and when it closes, so the picture shows your last values.
+
+When you have no recent models, for example at the first start, the card shows **Examples**. Otherwise it shows **Recent**.
+
+## Make a new model
+
+1. Press Ctrl+N, or click **New model…** on the start page, or use **File > New model…**.
+2. Type a file name and select a folder.
+3. CoCAD writes the file and opens it.
+
+The new model is a box with four parameters: width, depth, height and corner radius. Change the file in a text editor, or let an AI assistant write it. CoCAD builds the model again when the file changes on disk.
+
 ## Open a model
 
 A model is a file with the extension `.scad`. You can open it in four ways:
 
 - Press Ctrl+O, or use **File > Open…**, and select the file.
 - Drop the file on the CoCAD window.
-- Select a model in the list of recent models. The **File** menu shows the last 10 models. The window shows the same list when no model is open.
-- Use **File > Examples** to open a sample model.
+- Select a model in the list of recent models. The **File** menu shows the last 10 models. The **Recent** tab of the start page shows the last 8 models.
+- Use **File > Examples**, or the **Examples** tab of the start page, to open a sample model.
 
 If you have no model, start with an example. **File > Examples > Gear** is a good first model. **File > Examples > Desk dock** shows the print preparation. See [Prepare a model for printing](Prepare-a-model-for-printing).
 
@@ -23,7 +48,7 @@ If you have no model, start with an example. **File > Examples > Gear** is a goo
 
 ## The window
 
-![The CoCAD window](https://raw.githubusercontent.com/cgeosoft/cocad/main/assets/tour/1-welcome.jpg)
+![The CoCAD window](https://raw.githubusercontent.com/cgeosoft/cocad/main/assets/tour/2-customizer.jpg)
 
 | Area | Position | Content |
 |---|---|---|
@@ -39,9 +64,9 @@ The three tabs of the sidebar change what the 3D view shows:
 - **Optimize**: the parts on the bed of your printer, and the print layers. Press `O`. See [Optimize](Optimize).
 - **Render**: a [photo](Render) of the part. Press `R`.
 
-The tab names show the key letter underlined. Press the same key again to go back to the **Model** tab.
+Point to a tab name to see its key. Press the same key again to go back to the **Model** tab.
 
-Each tab has cards. Click the header of a card to close it or to open it. **Collapse** at the top of the tab closes all cards, and **Expand** opens them again. The **Optimize** tab has the **Export** card at the bottom, and the **Render** tab has the **Render** card at the bottom. These two cards do not close. The **Model** menu also has the export commands. See [Export](Export).
+Each tab has cards. Click the header of a card to close it or to open it. Some cards have an **i** icon after the name. Put the mouse on the icon to read what the card does. The **Optimize** tab has **Export 3MF** at the bottom, and the **Render** tab has **Render** and **Save PNG** at the bottom. These bars do not close. The **Model** menu also has the export commands. See [Export](Export).
 
 ## Move the view
 

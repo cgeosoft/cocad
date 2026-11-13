@@ -18,7 +18,8 @@ The names before 0.7, `--slice` and `--photo`, also work.
 
 | Command | Action |
 |---|---|
-| `cocad params FILE.scad` | List the Customizer parameters |
+| `cocad params FILE.scad` | List the Customizer parameters. A part list shows the part names of the [model definition](Model-definition). |
+| `cocad sets FILE.scad` | List the [parameter sets](Parameter-sets) of `FILE.yml`. With `--json`, write them in the format of the OpenSCAD Customizer, for `openscad -p`. |
 | `cocad export FILE.scad -o OUT` | Build and write `OUT`. The extension sets the format: `.stl`, `.3mf` or `.step`. STL and 3MF get the print plate, STEP gets the model as built. |
 | `cocad slice FILE.scad` | Slice the plates and show the estimates |
 | `cocad photo FILE.scad -o OUT.png` | Make a path traced photo from the iso view |
@@ -33,7 +34,8 @@ The names before 0.7, `--slice` and `--photo`, also work.
 ```bash
 cocad params model.scad
 cocad export model.scad -o model.3mf -D width=80 -D 'shape="square"'
-cocad export model.scad -o big.stl -P big           # saved set 'big' from model.json
+cocad export model.scad -o big.stl -P big           # saved set 'big' from model.yml
+cocad sets model.scad --json > sets.json            # the sets for openscad -p sets.json -P big
 cocad export model.scad -o box.3mf --chamfer --teardrops --bridges=stepped --brim
 cocad export model.scad -o box.stl --bed 250x210x220 --plate all   # box-plate1.stl, box-plate2.stl, ...
 cocad export model.scad -o lid.stl --part Lid --orient auto
@@ -48,7 +50,7 @@ cocad photo model.scad -o model.png --size 1600x1200 --samples 256 --color eb6f4
 | Option | Action |
 |---|---|
 | `-P SET` | Apply a saved [parameter set](Parameter-sets) |
-| `-p FILE` | Read the sets from `FILE`. Without `-p`, the command uses the sets file that the app remembers for the model, else `<model>.json`. |
+| `-p FILE` | Read the sets from `FILE`: a [model definition](Model-definition) (`.yml`) or a `.json` file of the OpenSCAD Customizer. Without `-p`, the command uses `<model>.yml`, else `<model>.json`. |
 | `-D name=value` | Set one parameter. You can use it more than once. These values apply after the set. |
 
 ## Print options of `export` and `slice`
@@ -65,6 +67,8 @@ cocad photo model.scad -o model.png --size 1600x1200 --samples 256 --color eb6f4
 | `--teardrops` | Teardrop holes |
 | `--bridges` or `--bridges=sacrificial` or `--bridges=stepped` | Bridge fixes, with the fix for a hole above a bridge |
 | `--brim` | Brim on small bed islands |
+| `--ears` | Mouse ears on the sharp bed corners of large parts |
+| `--holes` or `--holes=MM` | Hole size: vertical round holes get their diameter plus MM. 0.2 mm by default. |
 | `--no-fixes` | All stored fixes off. The fix options above still turn a fix on. |
 | `--as-built` | The model as built, without the print preparation, as before 0.7. With `--part NAME`, only that part, in its place in the model. |
 

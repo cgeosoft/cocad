@@ -19,6 +19,7 @@ glam = "0.29"
 png = "0.17"
 rfd = { version = "0.15", default-features = false, features = ["gtk3"] }
 serde_json = { version = "1", features = ["preserve_order"] }
+serde_yaml_ng = "0.10"
 zip = { version = "9", default-features = false, features = ["deflate"] }
 zune-core = "0.5"
 zune-jpeg = "0.5"

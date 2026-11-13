@@ -296,6 +296,8 @@ pub(super) struct FixCounts {
     pub teardrops: usize,
     pub bridges: usize,
     pub brims: usize,
+    pub ears: usize,
+    pub holes: usize,
     /// Parts with a bed chamfer.
     pub chamfers: usize,
     /// "part: place" for each place that a fix did not change.
@@ -312,6 +314,8 @@ pub(super) fn fix_counts(o: &pipeline::Outcome, plate: usize) -> FixCounts {
         c.teardrops += r.teardrops;
         c.bridges += r.bridges;
         c.brims += r.brims;
+        c.ears += r.ears;
+        c.holes += r.holes;
         c.chamfers += usize::from(r.chamfer);
         c.skipped
             .extend(r.skipped.iter().map(|s| format!("{}: {s}", p.name)));
@@ -323,7 +327,7 @@ fn plural(n: usize, one: &str, many: &str) -> String {
     format!("{n} {}", if n == 1 { one } else { many })
 }
 
-/// The line above the export buttons for `plate` of `o`, for example
+/// The text about the export of `plate` of `o`, for example
 /// "Plate 1 of 2: 5 parts, 7 copies. Bed chamfer, 4 teardrops." A plate
 /// with no part gives "Model as built.": only STEP can export.
 pub(super) fn summary(o: &pipeline::Outcome, plate: usize) -> String {
@@ -355,6 +359,12 @@ pub(super) fn summary(o: &pipeline::Outcome, plate: usize) -> String {
     }
     if c.brims > 0 {
         fixes.push(plural(c.brims, "brim", "brims"));
+    }
+    if c.ears > 0 {
+        fixes.push(plural(c.ears, "mouse ear", "mouse ears"));
+    }
+    if c.holes > 0 {
+        fixes.push(plural(c.holes, "hole size fix", "hole size fixes"));
     }
     if !fixes.is_empty() {
         s.push(' ');
@@ -496,7 +506,7 @@ fn plate_assembly(
             name: name.clone(),
             color: None,
             mesh,
-            split_shells: false,
+            shells: crate::assembly::Shells::Whole,
             reference: false,
         })
         .collect();
@@ -510,6 +520,7 @@ fn kind_label(k: check::Kind) -> (&'static str, &'static str) {
     match k {
         check::Kind::Overhang => ("Overhang", "overhang"),
         check::Kind::LongBridge => ("Long bridge", "long_bridge"),
+        check::Kind::ThinWall => ("Thin wall", "thin_wall"),
         check::Kind::Arc => ("Arc in a bridge", "arc"),
         check::Kind::SmallIsland => ("Small island", "small_island"),
         check::Kind::TooLarge => ("Too large", "too_large"),
@@ -589,6 +600,7 @@ impl App {
         Layers {
             first: self.settings.first_layer,
             height: self.settings.layer_height,
+            line_width: self.settings.line_width,
         }
     }
 
@@ -606,7 +618,7 @@ impl App {
             assembly: self.assembly.clone()?,
             assembly_rev: self.assembly_rev,
             mesh: self.mesh.clone()?,
-            // The parts of a cocad_part list are the colors of one object
+            // The parts of a multicolor part list are the colors of one object
             // when the model shows all of them.
             multicolor: !names.is_empty() && crate::parts::needs_render(&self.params),
             model_name: self.stem(),
@@ -768,7 +780,7 @@ impl App {
         ))
     }
 
-    /// The line above the export buttons.
+    /// The text about the export: the hover text of Export 3MF.
     pub(crate) fn export_summary(&self) -> String {
         if self.parts_job.is_some() {
             return "Finding the parts…".to_string();
@@ -879,7 +891,10 @@ impl App {
             1.0 - (pos.y - rect.top()) / rect.height().max(1.0) * 2.0,
         );
         let (origin, dir) = self.cam.ray(aspect, ndc);
-        let Some((ap, tri, _)) = plate.assembly.pick_triangle(origin, dir, &[], &[], &[]) else {
+        // A click goes through the side that the Section bar removes.
+        let planes = self.view3d.section.planes(super::section::Space::Plate);
+        let Some((ap, tri, _)) = plate.assembly.pick_triangle(origin, dir, &[], &planes, &[])
+        else {
             self.opt.selected = None;
             self.opt.issue = None;
             return;
@@ -915,7 +930,8 @@ impl App {
     }
 
     /// The view switch and the plate number at the top left of the 3D view.
-    pub(super) fn plate_overlay(&mut self, ui: &mut egui::Ui, rect: egui::Rect) {
+    /// Returns the rectangle that they use.
+    pub(super) fn plate_overlay(&mut self, ui: &mut egui::Ui, rect: egui::Rect) -> egui::Rect {
         let m = 16.0;
         let area = egui::Rect::from_min_size(
             rect.left_top() + Vec2::new(m, m),
@@ -960,37 +976,36 @@ impl App {
                         });
                 }
             },
-        );
+        )
+        .response
+        .rect
     }
 
     // ------------------------------------------------------------- cards ----
 
     /// The Optimize tab.
     pub(super) fn optimize_panel(&mut self, ui: &mut egui::Ui) {
-        self.panel_head(ui, "Prepare the parts for the printer.");
         let before = (self.settings, self.opt.limits);
-        egui::ScrollArea::vertical()
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                self.plate_card(ui);
-                self.orientation_card(ui);
-                self.fixes_card(ui);
-                self.check_card(ui);
-                self.layers_card(ui);
-                self.printer_card(ui);
-                self.print_settings_card(ui);
-                if let Some(t) = self.opt.time {
-                    ui.add_space(4.0);
-                    ui.label(ui::dim(format!(
-                        "Prepared in {}",
-                        if t.as_secs_f32() < 1.0 {
-                            format!("{} ms", t.as_millis())
-                        } else {
-                            format!("{:.1} s", t.as_secs_f32())
-                        }
-                    )));
-                }
-            });
+        ui::scroll(ui, ui::PANEL_PAD, |ui| {
+            self.plate_card(ui);
+            self.orientation_card(ui);
+            self.fixes_card(ui);
+            self.check_card(ui);
+            self.layers_card(ui);
+            self.printer_card(ui);
+            self.print_settings_card(ui);
+            if let Some(t) = self.opt.time {
+                ui.add_space(4.0);
+                ui.label(ui::dim(format!(
+                    "Prepared in {}",
+                    if t.as_secs_f32() < 1.0 {
+                        format!("{} ms", t.as_millis())
+                    } else {
+                        format!("{:.1} s", t.as_secs_f32())
+                    }
+                )));
+            }
+        });
         if self.settings != before.0 {
             self.slice_dirty_since = Some(Instant::now());
             self.slice_for_rev = u64::MAX;
@@ -1068,7 +1083,11 @@ impl App {
             ui.add_space(4.0);
             let plate = self.opt.state.plate;
             for (k, p) in o.parts.iter().enumerate() {
-                self.part_row(ui, &o, k, plate);
+                // The name row and the size row of a part close together.
+                ui.scope(|ui| {
+                    ui.spacing_mut().item_spacing.y = 2.0;
+                    self.part_row(ui, &o, k, plate);
+                });
                 // After the pieces of a split part: its split.
                 let parent = p.piece.as_ref().map(|(parent, _)| parent);
                 let next =
@@ -1166,7 +1185,7 @@ impl App {
         } else if p.copies == 0 {
             ("Not on the plates".to_string(), ui::c().dim)
         } else if !p.fits {
-            ("Too large for the print area".to_string(), ui::c().danger)
+            ("Too large".to_string(), ui::c().danger)
         } else if here == 0 {
             let list: Vec<String> = plates.iter().map(|n| (n + 1).to_string()).collect();
             (format!("On plate {}", list.join(", ")), ui::c().dim)
@@ -1182,7 +1201,12 @@ impl App {
                 text = format!("Piece {label} of {parent} · {text}");
             }
             ui.label(ui::dim(text));
-            ui.label(RichText::new(status).color(color).size(12.5));
+            let tip =
+                (!p.fits && ps.include && p.copies > 0).then_some("Too large for the print area");
+            let l = ui.label(RichText::new(status).color(color).size(12.5));
+            if let Some(t) = tip {
+                l.on_hover_text(t);
+            }
             if !p.report.skipped.is_empty() {
                 ui.label(ui::dim(format!("{} skipped", p.report.skipped.len())))
                     .on_hover_text(p.report.skipped.join("\n"));
@@ -1318,7 +1342,11 @@ impl App {
             None => String::new(),
         };
         ui::card(ui, |ui| {
-            if !self.card_head(ui, "Orientation", &note) {
+            let info = "Custom orientation off: the part keeps the rotation of the model.\n\n\
+                        Auto: CoCAD puts the part on its best face.\n\n\
+                        Select face: click a face of the part in the 3D view. That face goes on \
+                        the bed.";
+            if !self.card_head_info(ui, "Orientation", &note, info) {
                 return;
             }
             let Some(name) = name else {
@@ -1346,9 +1374,7 @@ impl App {
                     }
                 });
             });
-            if !custom {
-                ui.label(ui::dim("Off: the part keeps the rotation of the model."));
-            } else {
+            if custom {
                 let mut face = matches!(o.choice, orient::Choice::Face(_));
                 if ui::segmented(ui, &mut face, &[(false, "Auto"), (true, "Select face")]) {
                     o.choice = if face {
@@ -1369,8 +1395,6 @@ impl App {
                         ))
                         .wrap(),
                     );
-                } else {
-                    ui.label(ui::dim("CoCAD puts the part on its best face."));
                 }
                 ui.horizontal(|ui| {
                     if ui
@@ -1396,10 +1420,17 @@ impl App {
         let plate = self.opt.state.plate;
         let counts = (self.opt.outcome.as_ref()).map(|o| fix_counts(o, plate));
         let f = self.opt.state.fixes;
-        let on = [f.teardrops, f.bridges, f.chamfer, f.brim]
-            .iter()
-            .filter(|b| **b)
-            .count();
+        let on = [
+            f.teardrops,
+            f.bridges,
+            f.chamfer,
+            f.brim,
+            f.ears,
+            f.hole_size,
+        ]
+        .iter()
+        .filter(|b| **b)
+        .count();
         let note = if on == 0 {
             "Off".to_string()
         } else {
@@ -1425,6 +1456,29 @@ impl App {
                 &done(c.teardrops, "hole", "holes"),
                 "Round holes with a horizontal axis get a 45 degree point at the top.",
             );
+            fix_row(
+                ui,
+                "Hole size",
+                &mut f.hole_size,
+                &done(c.holes, "hole", "holes"),
+                "Round holes with a vertical axis print too small. They get the diameter of the model, plus a value.",
+            );
+            if f.hole_size {
+                ui.horizontal(|ui| {
+                    ui.label(ui::dim("Add to diameter"));
+                    ui.add(
+                        egui::DragValue::new(&mut f.hole_add)
+                            .range(0.0..=1.0)
+                            .speed(0.01)
+                            .max_decimals(2)
+                            .suffix(" mm"),
+                    );
+                });
+                ui.add(
+                    egui::Label::new(ui::dim("Set the X-Y hole compensation of the slicer to 0."))
+                        .wrap(),
+                );
+            }
             fix_row(
                 ui,
                 "Bridges",
@@ -1502,6 +1556,34 @@ impl App {
                     );
                 });
             }
+            fix_row(
+                ui,
+                "Mouse ears",
+                &mut f.ears,
+                &done(c.ears, "ear", "ears"),
+                "A one-layer disk on each sharp bed corner of a large part. It holds the corner on the bed.",
+            );
+            if f.ears {
+                ui.horizontal(|ui| {
+                    ui.label(ui::dim("Diameter"));
+                    ui.add(
+                        egui::DragValue::new(&mut f.ear_d)
+                            .range(5.0..=30.0)
+                            .speed(0.5)
+                            .suffix(" mm"),
+                    );
+                });
+                // On its own line: the two values do not fit one line.
+                ui.horizontal(|ui| {
+                    ui.label(ui::dim("Min size"));
+                    ui.add(
+                        egui::DragValue::new(&mut f.ear_min)
+                            .range(20.0..=300.0)
+                            .speed(1.0)
+                            .suffix(" mm"),
+                    );
+                });
+            }
             if !c.skipped.is_empty() {
                 ui.add_space(4.0);
                 ui.label(
@@ -1541,7 +1623,9 @@ impl App {
             plural(list.len(), "problem", "problems")
         };
         ui::card(ui, |ui| {
-            if !self.card_head(ui, "Check", &note) {
+            let info = "The problems of the plate. Click a problem to show its faces in the 3D \
+                        view.";
+            if !self.card_head_info(ui, "Check", &note, info) {
                 return;
             }
             let Some(o) = self.opt.outcome.clone() else {
@@ -1556,27 +1640,35 @@ impl App {
                 );
                 return;
             }
-            ui.label(ui::dim("Click a problem to show its faces."));
             for &(k, j) in list.iter().take(MAX_ISSUES) {
                 let p = &o.parts[k];
                 let is = &p.issues[j];
                 let marked = self.opt.issue == Some((k, j));
                 let text =
                     RichText::new(format!("{}  ·  {}", kind_label(is.kind).0, p.name)).size(13.0);
-                if ui
-                    .add(
-                        egui::Button::new(text)
-                            .selected(marked)
-                            .frame(false)
-                            .truncate(),
-                    )
-                    .clicked()
-                {
+                // The title and its text close together.
+                let clicked = ui
+                    .scope(|ui| {
+                        let sp = ui.spacing_mut();
+                        sp.item_spacing.y = 0.0;
+                        sp.button_padding.y = 2.0;
+                        let clicked = ui
+                            .add(
+                                egui::Button::new(text)
+                                    .selected(marked)
+                                    .frame(false)
+                                    .truncate(),
+                            )
+                            .clicked();
+                        ui.add(egui::Label::new(ui::dim(&is.text).size(12.5)).wrap());
+                        clicked
+                    })
+                    .inner;
+                if clicked {
                     self.opt.selected = Some(p.name.clone());
                     self.opt.issue = Some((k, j));
                     self.opt.view = PlateView::Plate;
                 }
-                ui.add(egui::Label::new(ui::dim(&is.text)).wrap());
             }
             if list.len() > MAX_ISSUES {
                 ui.label(ui::dim(format!("And {} more.", list.len() - MAX_ISSUES)));
@@ -1598,7 +1690,9 @@ impl App {
             )
         });
         ui::card(ui, |ui| {
-            if !self.card_head(ui, "Layers", &note) {
+            let info = "A rough preview of the layers, for checks. It is not for printing. \
+                        Up/Down or PgUp/PgDn change the layer.";
+            if !self.card_head_info(ui, "Layers", &note, info) {
                 return;
             }
             let mut v = self.opt.view;
@@ -1672,7 +1766,6 @@ impl App {
                         }
                     }
                 });
-            ui.label(ui::dim("Up/Down or PgUp/PgDn change the layer. Rough preview for checks, not for printing."));
         });
         ui.add_space(4.0);
     }
@@ -1681,10 +1774,10 @@ impl App {
         let a = self.opt.state.area;
         let note = format!("{:.0} × {:.0} × {:.0}", a.w, a.d, a.h);
         ui::card(ui, |ui| {
-            if !self.card_head(ui, "Printer", &note) {
+            let info = "The print area for this model.";
+            if !self.card_head_info(ui, "Printer", &note, info) {
                 return;
             }
-            ui.label(ui::dim("The print area for this model."));
             crate::printer::area_editor(ui, &mut self.opt.state.area, &mut self.opt.area_preset);
         });
         ui.add_space(4.0);
@@ -1798,6 +1891,8 @@ impl App {
                         "teardrops": r.teardrops,
                         "bridges": r.bridges,
                         "brims": r.brims,
+                        "ears": r.ears,
+                        "holes": r.holes,
                         "chamfer": r.chamfer,
                         "skipped": r.skipped,
                     },

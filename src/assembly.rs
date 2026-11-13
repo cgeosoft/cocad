@@ -4,7 +4,7 @@
 //!
 //! An assembly comes from a list of source meshes (`Source`): the rendered
 //! mesh, or the meshes of a background job that renders each part on its own
-//! (the `cocad_part` list, see `parts.rs`). A source is one part, or each of
+//! (a multicolor part list, see `parts.rs`). A source is one part, or each of
 //! its shells is one part ("Part 1", "Part 2" and so on).
 //!
 //! Shells: two triangles are in one shell when they share an edge. A shell
@@ -22,7 +22,7 @@ use crate::mesh::{Bounds, Mesh};
 use crate::parts::Part;
 use crate::pathtrace::{self, Paint};
 use glam::{Vec3, Vec4};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 use std::sync::Arc;
 
@@ -72,20 +72,54 @@ pub struct Assembly {
     pub parts: Vec<PartInfo>,
     /// Unique edges of `mesh`, grouped by part.
     pub edges: Vec<[u32; 2]>,
+    /// Where the parts come from. `Kind::Modules` also for the shells of
+    /// one mesh.
+    pub kind: Kind,
+}
+
+/// How a source divides into parts.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Shells {
+    /// The source is one part with its name.
+    Whole,
+    /// Each shell of the mesh is one part, with the name "Part N". The
+    /// number counts on over all sources.
+    Numbered,
+    /// Each shell of the mesh is one part with the name of the source:
+    /// "Name" for one shell, else "Name 1", "Name 2" and so on. The number
+    /// counts on over all sources with the same name.
+    Named,
 }
 
 /// One mesh that goes into an assembly.
 pub struct Source<'a> {
-    /// The part name. Not used when `split_shells` is set.
+    /// The part name. Not used for `Shells::Numbered`.
     pub name: String,
-    /// The color of a named part, for example from `cocad_color`.
+    /// The color of a named part, for example from the model definition.
     pub color: Option<[u8; 3]>,
     pub mesh: &'a Mesh,
-    /// Each shell of the mesh is one part, with the name "Part N". The
-    /// number counts on over all sources.
-    pub split_shells: bool,
+    pub shells: Shells,
     /// The part is a reference part (`PartInfo::reference`).
     pub reference: bool,
+}
+
+/// Where the parts of a background parts job come from. See
+/// `Assembly::from_parts`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum Kind {
+    /// A multicolor part list: each part is one part with its name and color.
+    Colors,
+    /// The `part` selector with all parts shown: each shell of each part is
+    /// one part, named after its part (`Shells::Named`).
+    Labeled,
+    /// The module split: each shell of each part is one part, "Part N".
+    #[default]
+    Modules,
+    /// The `part` selector with one value shown: the shells of the main
+    /// mesh, named with this label. When the parts (the pieces of the
+    /// module split of the value) give more solids, they replace the main
+    /// mesh, for example for segments that touch.
+    Shown(String),
 }
 
 /// A part before the measurements.
@@ -100,36 +134,64 @@ struct Group {
 impl Assembly {
     /// The parts of all sources, in source order. Empty sources give no part.
     pub fn build(sources: &[Source]) -> Assembly {
+        let solids: Vec<Vec<Vec<u32>>> = (sources.iter())
+            .map(|s| {
+                if s.shells == Shells::Whole || s.mesh.is_empty() {
+                    Vec::new()
+                } else {
+                    solids(s.mesh, shell_groups(s.mesh))
+                }
+            })
+            .collect();
+        // The number of solids for each name of `Shells::Named`.
+        let mut totals: HashMap<&str, usize> = HashMap::new();
+        for (s, list) in sources.iter().zip(&solids) {
+            if s.shells == Shells::Named {
+                *totals.entry(s.name.as_str()).or_default() += list.len();
+            }
+        }
+        let mut seen: HashMap<&str, usize> = HashMap::new();
         let mut mesh = Mesh::default();
         let mut groups: Vec<Group> = Vec::new();
         let mut number = 0;
-        for (k, s) in sources.iter().enumerate() {
+        for (k, (s, list)) in sources.iter().zip(solids).enumerate() {
             if s.mesh.is_empty() {
                 continue;
             }
             let base = mesh.vertices.len() as u32;
             mesh.vertices.extend_from_slice(&s.mesh.vertices);
             let moved = |t: &[u32; 3]| t.map(|v| v + base);
-            if s.split_shells {
-                for tris in solids(s.mesh, shell_groups(s.mesh)) {
-                    let start = mesh.triangles.len();
-                    let src = &s.mesh.triangles;
-                    mesh.triangles
-                        .extend(tris.iter().map(|&t| moved(&src[t as usize])));
-                    number += 1;
-                    groups.push(Group {
-                        name: format!("Part {number}"),
-                        color: s.color,
-                        source: k,
-                        tris: start..mesh.triangles.len(),
-                        reference: s.reference,
-                    });
-                }
-            } else {
+            if s.shells == Shells::Whole {
                 let start = mesh.triangles.len();
                 mesh.triangles.extend(s.mesh.triangles.iter().map(moved));
                 groups.push(Group {
                     name: s.name.clone(),
+                    color: s.color,
+                    source: k,
+                    tris: start..mesh.triangles.len(),
+                    reference: s.reference,
+                });
+                continue;
+            }
+            for tris in list {
+                let start = mesh.triangles.len();
+                let src = &s.mesh.triangles;
+                mesh.triangles
+                    .extend(tris.iter().map(|&t| moved(&src[t as usize])));
+                let name = if s.shells == Shells::Named {
+                    let n = seen.entry(s.name.as_str()).or_default();
+                    *n += 1;
+                    if totals[s.name.as_str()] == 1 {
+                        s.name.clone()
+                    } else {
+                        format!("{} {n}", s.name)
+                    }
+                } else {
+                    number += 1;
+                    format!("Part {number}")
+                };
+                groups.push(Group {
+                    name,
                     color: s.color,
                     source: k,
                     tris: start..mesh.triangles.len(),
@@ -140,14 +202,24 @@ impl Assembly {
         Assembly::measure(Arc::new(mesh), groups)
     }
 
-    /// The shells of the rendered mesh, each one a part. When the shells
-    /// keep the triangle order, the display mesh is `mesh` itself.
-    pub fn shells(mesh: &Arc<Mesh>) -> Assembly {
+    /// The number of solids of `mesh`, as `build` divides it.
+    pub fn solid_count(mesh: &Mesh) -> usize {
+        solids(mesh, shell_groups(mesh)).len()
+    }
+
+    /// The shells of the rendered mesh, each one a part "Part N", or named
+    /// after `label` (see `Shells::Named`). When the shells keep the
+    /// triangle order, the display mesh is `mesh` itself.
+    pub fn shells(mesh: &Arc<Mesh>, label: Option<&str>) -> Assembly {
         let mut a = Assembly::build(&[Source {
-            name: String::new(),
+            name: label.unwrap_or_default().to_string(),
             color: None,
             mesh,
-            split_shells: true,
+            shells: if label.is_some() {
+                Shells::Named
+            } else {
+                Shells::Numbered
+            },
             reference: false,
         }]);
         if a.mesh.triangles == mesh.triangles && a.mesh.vertices == mesh.vertices {
@@ -157,67 +229,111 @@ impl Assembly {
     }
 
     /// The parts of a background job that renders each part on its own.
-    /// `main` is the rendered model with all parts. Its triangles that are in
-    /// no part, for example hardware previews, become the parts "Other 1",
-    /// "Other 2" and so on (one shell each), or "Other" for one shell.
+    /// `main` is the rendered model with all parts.
     ///
-    /// Without `split_shells`, each part is one part with its name and color
-    /// (the `cocad_part` list). With `split_shells`, each shell of each part is
-    /// one part without a color, and there is no "Other" part. These parts
-    /// come from the module split (`csg_split.rs`). They hold all of the
-    /// model, but they render from the CSG tree, which has rounded numbers. So
-    /// their corners do not agree with the corners of `main`. With
-    /// `split_shells` and no parts (no module split), the shells of `main`
-    /// are the parts.
+    /// - `Kind::Colors` (a multicolor part list): each part is one part with
+    ///   its name and color.
+    /// - `Kind::Labeled` (the `part` selector): each shell of each part is
+    ///   one part without a color, named after its part.
+    /// - `Kind::Modules` (the module split, `csg_split.rs`): each shell of
+    ///   each part is one part "Part N" without a color. With no parts (no
+    ///   module split), the shells of `main` are the parts.
+    /// - `Kind::Shown`: the shells of `main`, named with the label. When
+    ///   `parts` are two or more and give more solids, the shells of
+    ///   `parts` replace them.
+    ///
+    /// With `Colors` and `Labeled`, the triangles of `main` that are in no
+    /// part, for example hardware previews, become the parts "Other 1",
+    /// "Other 2" and so on (one shell each), or "Other" for one shell. The
+    /// module split gives no "Other" part: its parts hold all of the model,
+    /// but they render from the CSG tree, which has rounded numbers, so
+    /// their corners do not agree with the corners of `main`.
     ///
     /// `references` are the `%` parts. They come last, each one a part with
     /// its name.
-    pub fn from_parts(
+    #[cfg(test)]
+    pub fn from_parts(main: &Mesh, parts: &[Part], kind: &Kind, references: &[Part]) -> Assembly {
+        Assembly::assemble(main, parts, parts, kind, references)
+    }
+
+    /// The parts of a `csg_split::Split`, as `from_parts`. For the "Other"
+    /// test, it uses `Split::cover` when it has meshes.
+    pub fn from_split(main: &Mesh, split: &crate::csg_split::Split) -> Assembly {
+        let cover = if split.cover.is_empty() {
+            &split.parts
+        } else {
+            &split.cover
+        };
+        Assembly::assemble(main, &split.parts, cover, &split.kind, &split.references)
+    }
+
+    /// `from_parts` with `cover`: the parts that the "Other" test uses.
+    fn assemble(
         main: &Mesh,
         parts: &[Part],
-        split_shells: bool,
+        cover: &[Part],
+        kind: &Kind,
         references: &[Part],
     ) -> Assembly {
-        let other = if split_shells {
-            Mesh::default()
-        } else {
-            leftover(main, parts)
+        let other = match kind {
+            Kind::Colors | Kind::Labeled => leftover(main, cover),
+            Kind::Modules | Kind::Shown(_) => Mesh::default(),
         };
-        let mut sources: Vec<Source> = if split_shells && parts.is_empty() {
-            vec![Source {
+        let mut sources: Vec<Source> = match kind {
+            Kind::Shown(label) if divides(parts, main) => (parts.iter())
+                .map(|p| Source {
+                    name: label.clone(),
+                    color: None,
+                    mesh: &p.mesh,
+                    shells: Shells::Named,
+                    reference: false,
+                })
+                .collect(),
+            Kind::Shown(label) => vec![Source {
+                name: label.clone(),
+                color: None,
+                mesh: main,
+                shells: Shells::Named,
+                reference: false,
+            }],
+            Kind::Modules if parts.is_empty() => vec![Source {
                 name: String::new(),
                 color: None,
                 mesh: main,
-                split_shells: true,
+                shells: Shells::Numbered,
                 reference: false,
-            }]
-        } else {
-            (parts.iter())
+            }],
+            _ => (parts.iter())
                 .map(|p| Source {
                     name: p.name.clone(),
-                    color: (!split_shells).then_some(p.color),
+                    color: (*kind == Kind::Colors).then_some(p.color),
                     mesh: &p.mesh,
-                    split_shells,
+                    shells: match kind {
+                        Kind::Colors => Shells::Whole,
+                        Kind::Labeled => Shells::Named,
+                        _ => Shells::Numbered,
+                    },
                     reference: false,
                 })
-                .collect()
+                .collect(),
         };
         let rest = sources.len();
         sources.push(Source {
             name: String::new(),
             color: None,
             mesh: &other,
-            split_shells: true,
+            shells: Shells::Numbered,
             reference: false,
         });
         sources.extend(references.iter().map(|r| Source {
             name: r.name.clone(),
             color: None,
             mesh: &r.mesh,
-            split_shells: false,
+            shells: Shells::Whole,
             reference: true,
         }));
         let mut a = Assembly::build(&sources);
+        a.kind = kind.clone();
         let count = a.parts.iter().filter(|p| p.source == rest).count();
         for (i, p) in a.parts.iter_mut().filter(|p| p.source == rest).enumerate() {
             p.name = if count == 1 {
@@ -279,7 +395,12 @@ impl Assembly {
                 }
             })
             .collect();
-        Assembly { mesh, parts, edges }
+        Assembly {
+            mesh,
+            parts,
+            edges,
+            kind: Kind::Modules,
+        }
     }
 
     /// Gives all parts this color, except the reference parts. For a model
@@ -471,6 +592,16 @@ fn ray_box(origin: Vec3, inv: Vec3, b: &Bounds) -> Option<f32> {
     let near = t1.min(t2).max_element().max(0.0);
     let far = t1.max(t2).min_element();
     (near <= far).then_some(near)
+}
+
+/// True when `pieces` are two or more and give more solids than `main`.
+fn divides(pieces: &[Part], main: &Mesh) -> bool {
+    pieces.len() >= 2
+        && pieces
+            .iter()
+            .map(|p| Assembly::solid_count(&p.mesh))
+            .sum::<usize>()
+            > Assembly::solid_count(main)
 }
 
 /// The triangles of `main` that are in no part, with only the vertices that
@@ -671,7 +802,7 @@ mod tests {
         let mut soup = cube_soup(5.0, Vec3::ZERO, false);
         soup.extend(cube_soup(10.0, Vec3::new(20.0, 0.0, 0.0), false));
         let mesh = Arc::new(Mesh::from_soup(&soup));
-        let a = Assembly::shells(&mesh);
+        let a = Assembly::shells(&mesh, None);
         check_ranges(&a);
         assert_eq!(a.parts.len(), 2);
         // The larger cube is first.
@@ -696,7 +827,7 @@ mod tests {
         // A separate small cube after the cavity.
         soup.extend(cube_soup(2.0, Vec3::new(30.0, 0.0, 0.0), false));
         let mesh = Arc::new(Mesh::from_soup(&soup));
-        let a = Assembly::shells(&mesh);
+        let a = Assembly::shells(&mesh, None);
         check_ranges(&a);
         assert_eq!(a.parts.len(), 2);
         assert_eq!(a.parts[0].tris, 0..24);
@@ -708,13 +839,13 @@ mod tests {
     #[test]
     fn one_shell_keeps_the_mesh() {
         let mesh = Arc::new(cube(10.0));
-        let a = Assembly::shells(&mesh);
+        let a = Assembly::shells(&mesh, None);
         check_ranges(&a);
         assert_eq!(a.parts.len(), 1);
         assert!(Arc::ptr_eq(&a.mesh, &mesh));
         assert!(Arc::ptr_eq(&a.moved(&[Vec3::ZERO]), &mesh));
         assert!(
-            Assembly::shells(&Arc::new(Mesh::default()))
+            Assembly::shells(&Arc::new(Mesh::default()), None)
                 .parts
                 .is_empty()
         );
@@ -726,7 +857,7 @@ mod tests {
         let mut soup = cube_soup(40.0, Vec3::ZERO, false);
         soup.extend(cube_soup(10.0, Vec3::splat(15.0), false));
         soup.extend(cube_soup(2.0, Vec3::splat(19.0), true));
-        let a = Assembly::shells(&Arc::new(Mesh::from_soup(&soup)));
+        let a = Assembly::shells(&Arc::new(Mesh::from_soup(&soup)), None);
         check_ranges(&a);
         assert_eq!(a.parts.len(), 2);
         assert_eq!(a.parts[1].tris.len(), 24);
@@ -759,7 +890,7 @@ mod tests {
             part("empty", [0, 0, 0], &[]),
             part("star", [4, 5, 6], &b_soup),
         ];
-        let a = Assembly::from_parts(&main, &parts, false, &[]);
+        let a = Assembly::from_parts(&main, &parts, &Kind::Colors, &[]);
         check_ranges(&a);
         let names: Vec<_> = a.parts.iter().map(|p| p.name.as_str()).collect();
         assert_eq!(names, ["plate", "star", "Other 1", "Other 2"]);
@@ -772,9 +903,88 @@ mod tests {
 
         // One leftover shell is just "Other".
         let main: Vec<_> = a_soup.iter().chain(&screw).copied().collect();
-        let a = Assembly::from_parts(&Mesh::from_soup(&main), &parts[..1], false, &[]);
+        let a = Assembly::from_parts(&Mesh::from_soup(&main), &parts[..1], &Kind::Colors, &[]);
         check_ranges(&a);
         assert_eq!(a.parts[1].name, "Other");
+    }
+
+    #[test]
+    fn labeled_parts_name_each_solid_after_its_part() {
+        let spine = cube_soup(10.0, Vec3::ZERO, false);
+        // One value with two solids: the larger one is first.
+        let small = cube_soup(2.0, Vec3::new(30.0, 0.0, 0.0), false);
+        let large = cube_soup(4.0, Vec3::new(40.0, 0.0, 0.0), false);
+        let pins: Vec<_> = small.iter().chain(&large).copied().collect();
+        // In the `all` build, but in no value.
+        let rest = cube_soup(3.0, Vec3::new(60.0, 0.0, 0.0), false);
+        let main: Vec<_> = [&spine, &pins, &rest]
+            .into_iter()
+            .flatten()
+            .copied()
+            .collect();
+        let parts = [
+            part("Spine", [0xff; 3], &spine),
+            part("Pin", [0xff; 3], &pins),
+        ];
+        let a = Assembly::from_parts(&Mesh::from_soup(&main), &parts, &Kind::Labeled, &[]);
+        check_ranges(&a);
+        assert_eq!(a.kind, Kind::Labeled);
+        let names: Vec<_> = a.parts.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(names, ["Spine", "Pin 1", "Pin 2", "Other"]);
+        assert!((a.parts[1].volume - 64.0).abs() < 1e-3);
+        assert!(a.parts.iter().all(|p| p.color.is_none()));
+    }
+
+    #[test]
+    fn named_solids_count_on_over_sources_with_one_name() {
+        // Two pieces of one value (the module split), and the exact build
+        // of the value, where the two pieces touch and are one solid.
+        let a_soup = cube_soup(10.0, Vec3::ZERO, false);
+        let b_soup = cube_soup(10.0, Vec3::new(10.0, 0.0, 0.0), false);
+        let both: Vec<_> = a_soup.iter().chain(&b_soup).copied().collect();
+        let split = crate::csg_split::Split {
+            parts: vec![
+                part("Segment", [0xff; 3], &a_soup),
+                part("Segment", [0xff; 3], &b_soup),
+            ],
+            cover: vec![part("Segment", [0xff; 3], &both)],
+            kind: Kind::Labeled,
+            ..Default::default()
+        };
+        let a = Assembly::from_split(&Mesh::from_soup(&both), &split);
+        check_ranges(&a);
+        let names: Vec<_> = a.parts.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(names, ["Segment 1", "Segment 2"]);
+        assert_eq!(Assembly::solid_count(&Mesh::from_soup(&both)), 1);
+    }
+
+    #[test]
+    fn shown_part_names_its_shells_with_the_label() {
+        let mut soup = cube_soup(10.0, Vec3::ZERO, false);
+        let one = Assembly::shells(&Arc::new(Mesh::from_soup(&soup)), Some("Spine"));
+        assert_eq!(one.parts[0].name, "Spine");
+        soup.extend(cube_soup(2.0, Vec3::new(30.0, 0.0, 0.0), false));
+        let main = Mesh::from_soup(&soup);
+        let a = Assembly::from_parts(&main, &[], &Kind::Shown("Pin".into()), &[]);
+        let names: Vec<_> = a.parts.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(names, ["Pin 1", "Pin 2"]);
+
+        // Two pieces that touch are one solid of the build: the pieces win.
+        let a_soup = cube_soup(10.0, Vec3::ZERO, false);
+        let b_soup = cube_soup(10.0, Vec3::new(10.0, 0.0, 0.0), false);
+        let both: Vec<_> = a_soup.iter().chain(&b_soup).copied().collect();
+        let pieces = [
+            part("Segment", [0xff; 3], &a_soup),
+            part("Segment", [0xff; 3], &b_soup),
+        ];
+        let kind = Kind::Shown("Segment".into());
+        let a = Assembly::from_parts(&Mesh::from_soup(&both), &pieces, &kind, &[]);
+        check_ranges(&a);
+        let names: Vec<_> = a.parts.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(names, ["Segment 1", "Segment 2"]);
+        // Pieces that give no more solids than the build: the build wins.
+        let a = Assembly::from_parts(&main, &pieces, &Kind::Shown("Pin".into()), &[]);
+        assert!(a.parts.iter().all(|p| p.source == 0), "{:?}", a.parts);
     }
 
     #[test]
@@ -784,7 +994,7 @@ mod tests {
         soup.extend(cube_soup(10.0, Vec3::splat(10.0), false));
         let mesh = Arc::new(Mesh::from_soup(&soup));
         assert_eq!(mesh.vertices.len(), 15);
-        let a = Assembly::shells(&mesh);
+        let a = Assembly::shells(&mesh, None);
         assert_eq!(a.parts.len(), 2);
         let d = Vec3::new(0.0, 0.0, 5.0);
         let moved = a.moved(&[Vec3::ZERO, d]);
@@ -805,7 +1015,7 @@ mod tests {
     fn paint_follows_the_part_ranges() {
         let mut soup = cube_soup(10.0, Vec3::ZERO, false);
         soup.extend(cube_soup(5.0, Vec3::splat(20.0), false));
-        let a = Assembly::shells(&Arc::new(Mesh::from_soup(&soup)));
+        let a = Assembly::shells(&Arc::new(Mesh::from_soup(&soup)), None);
         let paint = a.paint(&[[255, 0, 0], [0, 0, 255]]);
         assert_eq!(paint.color(0), Some(Vec3::new(1.0, 0.0, 0.0)));
         assert_eq!(paint.color(11), Some(Vec3::new(1.0, 0.0, 0.0)));
@@ -826,7 +1036,7 @@ mod tests {
             part("Part 1", [9, 9, 9], &first),
             part("Part 2", [9, 9, 9], &second),
         ];
-        let a = Assembly::from_parts(&Mesh::from_soup(&main), &parts, true, &[]);
+        let a = Assembly::from_parts(&Mesh::from_soup(&main), &parts, &Kind::Modules, &[]);
         check_ranges(&a);
         let names: Vec<_> = a.parts.iter().map(|p| p.name.as_str()).collect();
         assert_eq!(names, ["Part 1", "Part 2", "Part 3"]);
@@ -848,7 +1058,7 @@ mod tests {
             [0xff; 3],
             &cube_soup(2.0, Vec3::new(4.0, 4.0, 12.0), false),
         );
-        let a = Assembly::from_parts(&main, &[], true, std::slice::from_ref(&screw));
+        let a = Assembly::from_parts(&main, &[], &Kind::Modules, std::slice::from_ref(&screw));
         check_ranges(&a);
         let names: Vec<_> = a.parts.iter().map(|p| p.name.as_str()).collect();
         assert_eq!(names, ["Part 1", "Part 2", "Reference"]);
@@ -861,7 +1071,7 @@ mod tests {
         assert_eq!(photo.triangles.len(), a.parts[1].tris.end);
         assert_eq!(photo.triangles.len(), main.triangles.len());
         // paint_all leaves the reference part as it is.
-        let mut b = Assembly::from_parts(&main, &[], true, std::slice::from_ref(&screw));
+        let mut b = Assembly::from_parts(&main, &[], &Kind::Modules, std::slice::from_ref(&screw));
         b.paint_all([1, 2, 3]);
         assert_eq!(b.parts[0].color, Some([1, 2, 3]));
         assert_eq!(b.parts[2].color, None);
@@ -902,7 +1112,7 @@ mod tests {
     fn two_cubes() -> Assembly {
         let mut soup = cube_soup(5.0, Vec3::ZERO, false);
         soup.extend(cube_soup(10.0, Vec3::new(20.0, 0.0, 0.0), false));
-        Assembly::shells(&Arc::new(Mesh::from_soup(&soup)))
+        Assembly::shells(&Arc::new(Mesh::from_soup(&soup)), None)
     }
 
     #[test]
@@ -1002,7 +1212,7 @@ mod tests {
         );
         soup.push([a, b, c]);
         soup.push([a, c, b]);
-        let a = Assembly::shells(&Arc::new(Mesh::from_soup(&soup)));
+        let a = Assembly::shells(&Arc::new(Mesh::from_soup(&soup)), None);
         check_ranges(&a);
         assert_eq!(a.parts.len(), 2);
         let near = a.part_of(a.mesh.triangles.len() - 1).unwrap();

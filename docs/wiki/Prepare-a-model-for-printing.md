@@ -29,7 +29,7 @@ The **Plate** card shows three print parts:
 
 | Print part | What it is | Status |
 |---|---|---|
-| **Part 1** | The base plate | Too large for the print area |
+| **Part 1** | The base plate | Too large |
 | **Part 2** | The stand | 7 problems |
 | **Part 3 ×3** | The clips. CoCAD found three parts with the same shape. | 5 problems |
 
@@ -98,6 +98,24 @@ The front foot of the stand is 2.4 mm thin. It gets a brim.
 
 **When to use it.** Use it for thin feet, thin walls on the bed and small pins that stand on the bed. After the print, cut the brim off the part. The brim is only one layer thick.
 
+### Hole size
+
+A round hole that goes up from the bed prints smaller than in the model. A screw or a shaft then does not go in.
+
+**What the fix does.** CoCAD finds the round holes with a vertical axis, from 1 to 40 mm in diameter. Each hole gets the diameter of the model plus a value, 0.2 mm by default. A hole with six faces can be a pocket for a nut: it only gets the value. A blind hole does not get deeper.
+
+On the desk dock, the fix changes 9 holes.
+
+**When to use it.** Use it when screws, pins or shafts must go into vertical holes. The correct value depends on your printer and material: print a test part, measure the hole, and set the value. Then set the X-Y hole compensation of your slicer to 0. Without this, the holes get two corrections.
+
+### Mouse ears
+
+A large flat part can lift from the bed at its corners when the plastic cools.
+
+**What the fix does.** CoCAD finds the large areas of the first layer: areas with a long side of 100 mm or more. Each sharp corner of such an area gets a disk of one layer, 15 mm in diameter by default. The center of the disk is on the corner. The disks do not go into the holes of the part, and they stay inside the print area.
+
+**When to use it.** Use it for large plates, lids and frames with sharp corners. After the print, cut the ears off the part. An ear is only one layer thick.
+
 ### Bed chamfer
 
 The first layers of a print spread out a little, because the nozzle presses them onto the bed. This is the **elephant foot**. The part then is a little wider at the bed than above it. Parts that go together can then be too tight, and the bottom edge is not clean.
@@ -113,7 +131,7 @@ Other properties of the bed chamfer:
 - An edge that has a chamfer or a foot in the model does not get a second chamfer.
 - Holes and pockets on the bed get the same chamfer: they are a little larger at the bed.
 - A wall that is too thin for the chamfer keeps its first layers at full size.
-- The brim comes after the chamfer, so the chamfer does not cut the brim.
+- The brim and the mouse ears come after the chamfer, so the chamfer does not cut them.
 
 **When to use it.** Use it on all parts that stand on a flat face, and always for parts that must fit together. Then set the elephant foot compensation of your slicer to 0. Without this, the bed edges get two corrections. In PrusaSlicer and OrcaSlicer, the setting is "Elephant foot compensation". In Cura, it is "Initial Layer Horizontal Expansion".
 
@@ -121,7 +139,7 @@ Other properties of the bed chamfer:
 
 ![The stand before and after all fixes](https://raw.githubusercontent.com/cgeosoft/cocad/main/assets/guide/9-all-fixes.png)
 
-The fixes work together. CoCAD applies them in this order: the cuts and the additions of the teardrops and the bridges, then the bed chamfer, then the brim.
+The fixes work together. CoCAD applies them in this order: the hole size, the cuts and the additions of the teardrops and the bridges, then the bed chamfer, then the brim and the mouse ears.
 
 ## 5. Turn the clips
 
@@ -184,7 +202,7 @@ The **Layers** card shows a rough estimate of the print time, the weight and the
 
 ## 9. Export the plate
 
-In the **Export** card at the bottom of the tab, click **Export 3MF**. For an STL file, click the arrow at the right of **Export 3MF**, then **STL: this plate**.
+At the bottom of the tab, click **Export 3MF**. For an STL file, click the arrow at the right of **Export 3MF**, then **STL: this plate**.
 
 - The 3MF file has one object for each print part, and one item for each copy. Your slicer shows the parts as separate objects, in the positions of the plate.
 - With two or more plates, **3MF: all 2 plates** in the same menu writes one file for each plate, for example `desk-dock-plate1.3mf` and `desk-dock-plate2.3mf`.

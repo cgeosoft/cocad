@@ -1,0 +1,34 @@
+# yaml-language-server: $schema=https://cocad.cgeosoft.com/schema/model-1.json
+cocad: 1
+title: Bracket
+description: >-
+  An L bracket with slots, holes and a gusset. Use it to test overhangs, holes
+  and bridges.
+author: cgeosoft
+license: MIT
+url: https://github.com/cgeosoft/cocad/blob/main/examples/bracket.scad
+
+sets:
+  Shelf bracket:
+    description: The default bracket, with two slots on each leg and a gusset.
+  Heavy duty:
+    description: A wide, thick bracket with long legs, three holes on each leg and a large gusset.
+    values:
+      width: 50
+      leg_a: 80
+      leg_b: 60
+      thickness: 6
+      hole: 6.5
+      holes_per_leg: 3
+      gusset_size: 35
+  Small, round holes:
+    description: A small bracket with one round hole on each leg and no gusset.
+    values:
+      width: 16
+      leg_a: 25
+      leg_b: 20
+      thickness: 3
+      hole: 3.4
+      holes_per_leg: 1
+      slots: false
+      gusset: false

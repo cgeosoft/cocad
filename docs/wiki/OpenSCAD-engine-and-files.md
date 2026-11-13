@@ -37,11 +37,11 @@ The [command line](Command-line) uses the same settings.
 |---|---|
 | `config` | The settings, with the default print area and the cards that you closed |
 | `recent` | The list of recent models |
-| `sets-files` | The sets file of each model |
 | `last-sets` | The set that you used last for each model |
 | `models.json` | For each model: the settings of the right panel, the Optimize values (print area, fixes, orientation, splits, copies), the closed parameter groups and your last parameter values (last 100 models) |
 | `mcp/` | The addresses of the open windows, for the [MCP server](MCP-reference) |
 | `examples/` | The copies of the example models |
+| `thumbs/` | A 512 x 512 picture of the Iso view of each model, for the start page |
 | `tour_seen` | The marker of the welcome tour. Delete it to show the tour at the next start. |
 
 ## Updates

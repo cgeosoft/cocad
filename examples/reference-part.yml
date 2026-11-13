@@ -1,0 +1,9 @@
+# yaml-language-server: $schema=https://cocad.cgeosoft.com/schema/model-1.json
+cocad: 1
+title: Reference part
+description: >-
+  A box and a screw with the % mark. CoCAD shows the screw in gray and does
+  not print or export it.
+author: cgeosoft
+license: MIT
+url: https://github.com/cgeosoft/cocad/blob/main/examples/reference-part.scad

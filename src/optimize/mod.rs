@@ -21,8 +21,10 @@
 pub mod bridges;
 pub mod brim;
 pub mod check;
+pub mod ears;
 pub mod fixes;
 pub mod headless;
+pub mod holes;
 pub mod orient;
 pub mod pipeline;
 pub mod plate;
@@ -53,14 +55,17 @@ impl Default for Area {
     }
 }
 
-/// The layer heights that the fixes use: the bed chamfer, the brim and the
-/// sacrificial layers are whole layers.
+/// The print settings that the fixes and the check use. The bed chamfer,
+/// the brim and the sacrificial layers are whole layers. The thin wall
+/// check uses the line width.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Layers {
     /// Height of the first layer.
     pub first: f32,
     /// Height of the other layers.
     pub height: f32,
+    /// Width of one printed line.
+    pub line_width: f32,
 }
 
 impl Default for Layers {
@@ -68,6 +73,7 @@ impl Default for Layers {
         Layers {
             first: 0.2,
             height: 0.2,
+            line_width: 0.45,
         }
     }
 }
@@ -115,7 +121,11 @@ impl Default for Limits {
 pub fn transformed(mesh: &Mesh, m: Mat4) -> Mesh {
     let flip = m.determinant() < 0.0;
     Mesh {
-        vertices: mesh.vertices.iter().map(|v| m.transform_point3(*v)).collect(),
+        vertices: mesh
+            .vertices
+            .iter()
+            .map(|v| m.transform_point3(*v))
+            .collect(),
         triangles: if flip {
             mesh.triangles.iter().map(|t| [t[0], t[2], t[1]]).collect()
         } else {
@@ -193,10 +203,7 @@ mod tests {
 
     #[test]
     fn layers_count_whole_layers() {
-        let l = Layers {
-            first: 0.2,
-            height: 0.2,
-        };
+        let l = Layers::default();
         assert_eq!(l.count_to(0.0), 0);
         assert_eq!(l.count_to(0.2), 1);
         assert_eq!(l.count_to(0.4), 2);

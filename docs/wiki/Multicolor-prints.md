@@ -4,7 +4,7 @@ Some printers can print one object with more than one filament. For such a print
 
 ## What you need
 
-The model must name its parts. The author of the model does this with a `cocad_part` parameter. See [Write models for CoCAD](Write-models-for-CoCAD#parts-for-a-multicolor-print).
+The model must name its parts and their colors. The author of the model does this in the [model definition](Model-definition), the `.yml` file next to the model, with `multicolor: true`. See [Write models for CoCAD](Write-models-for-CoCAD#parts-for-a-multicolor-print).
 
 To try it, open **File > Examples > Multicolor badge**.
 
@@ -27,7 +27,7 @@ The multicolor 3MF contains all parts of the model as built. It does not use the
 
 ## In the Optimize tab
 
-The parts of the `cocad_part` list are the colors of one object. In the [Optimize](Optimize) tab, they stay together as one print part with the name of the model. The orientation, the print fixes and the plate apply to this object as a whole. **Export 3MF** and **STL: this plate** write this object without colors.
+The parts of the multicolor list are the colors of one object. In the [Optimize](Optimize) tab, they stay together as one print part with the name of the model. The orientation, the print fixes and the plate apply to this object as a whole. **Export 3MF** and **STL: this plate** write this object without colors.
 
 ## In the slicer
 
@@ -36,7 +36,7 @@ The parts of the `cocad_part` list are the colors of one object. In the [Optimiz
 | **PrusaSlicer 2.9** | Each part has its own extruder. The file contains no colors. Use a printer profile with more than one filament. With a one-filament profile, all parts show in one color. |
 | **OrcaSlicer** | Each part has its own filament, and the file contains the colors. The printer and process settings stay as they are. |
 
-The order of the parts in the `cocad_part` list sets the filament number.
+The order of the parts in the `parts` list of the definition sets the filament number.
 
 ## Limits
 

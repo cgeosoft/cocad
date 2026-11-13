@@ -17,7 +17,7 @@
 //!
 //! The brim is a late statement, because the bed chamfer must not cut it.
 
-use super::{Area, Layers, Limits, bridges, brim, scad, teardrop};
+use super::{Area, Layers, Limits, bridges, brim, ears, holes, scad, teardrop};
 use crate::mesh::Mesh;
 use crate::openscad::Config;
 use anyhow::Result;
@@ -68,6 +68,19 @@ pub struct Settings {
     pub brim_w: f32,
     /// Gap between the brim and the rest of the part, in mm.
     pub brim_gap: f32,
+    pub ears: bool,
+    /// Diameter of a mouse ear, in mm.
+    pub ear_d: f32,
+    /// An island gets ears when its long side is this or more, in mm.
+    pub ear_min: f32,
+    pub hole_size: bool,
+    /// The hole size fix adds this to the diameter of a vertical hole, in
+    /// mm.
+    pub hole_add: f32,
+    /// The hole size fix does not change holes of this diameter, in mm.
+    /// 0: none. The pipeline sets it for the pieces of a split with pins.
+    /// It is not stored.
+    pub hole_keep: f32,
 }
 
 impl Default for Settings {
@@ -82,13 +95,19 @@ impl Default for Settings {
             brim: false,
             brim_w: 5.0,
             brim_gap: 1.0,
+            ears: false,
+            ear_d: 15.0,
+            ear_min: 100.0,
+            hole_size: false,
+            hole_add: 0.2,
+            hole_keep: 0.0,
         }
     }
 }
 
 impl Settings {
     pub fn any(&self) -> bool {
-        self.teardrops || self.bridges || self.chamfer || self.brim
+        self.teardrops || self.bridges || self.chamfer || self.brim || self.ears || self.hole_size
     }
 }
 
@@ -121,6 +140,8 @@ pub struct Report {
     pub teardrops: usize,
     pub bridges: usize,
     pub brims: usize,
+    pub ears: usize,
+    pub holes: usize,
     pub chamfer: bool,
     /// Places that a fix found but did not change.
     pub skipped: Vec<String>,
@@ -243,6 +264,26 @@ pub fn apply(
 ) -> Result<(Mesh, Report)> {
     let mut report = Report::default();
     let mut plans = Vec::new();
+    // The bridge fix makes its shapes from the outline of a hole. With the
+    // hole size fix on, it must see the new holes: one run for the hole
+    // size, then the other fixes on its result.
+    let mut resized = None;
+    if s.hole_size {
+        let p = holes::plan(mesh, s, limits);
+        report.holes = p.fixed;
+        report.skipped.extend(p.skipped.iter().cloned());
+        if s.bridges && !p.is_empty() {
+            resized = Some(scad::run(
+                cfg,
+                &[mesh],
+                |imports| compose(&imports[0], std::slice::from_ref(&p), None),
+                cancel,
+            )?);
+        } else {
+            plans.push(p);
+        }
+    }
+    let mesh = resized.as_ref().unwrap_or(mesh);
     if s.teardrops {
         let p = teardrop::plan(mesh, layers, limits);
         report.teardrops = p.fixed;
@@ -253,6 +294,14 @@ pub fn apply(
         let p = bridges::plan(mesh, s, layers, limits);
         report.bridges = p.fixed;
         report.skipped.extend(p.skipped.iter().cloned());
+        plans.push(p);
+    }
+    if s.ears {
+        // The ears are late statements: they come after the bed chamfer.
+        // Each ear has its center on a corner of the part before the
+        // chamfer, so it stays joined to the chamfered part.
+        let p = ears::plan(mesh, s, layers, area);
+        report.ears = p.fixed;
         plans.push(p);
     }
     let height = mesh.bounds().map_or(0.0, |b| b.max.z - b.min.z);
@@ -311,10 +360,7 @@ mod tests {
 
     #[test]
     fn bed_cut_has_one_step_per_layer() {
-        let l = Layers {
-            first: 0.2,
-            height: 0.2,
-        };
+        let l = Layers::default();
         let m = bed_cut_module(0.4, l).unwrap();
         assert_eq!(m.matches("bed_keep(").count(), 3, "{m}");
         assert!(m.contains("bed_keep(0.4)"), "{m}");
@@ -336,7 +382,9 @@ mod tests {
         .unwrap();
         let cancel = Arc::new(AtomicBool::new(false));
         let cfg = Config::default();
-        let mesh = crate::openscad::render(&cfg, &path, &[], &cancel).unwrap().mesh;
+        let mesh = crate::openscad::render(&cfg, &path, &[], &cancel)
+            .unwrap()
+            .mesh;
         let _ = std::fs::remove_file(&path);
         let s = Settings {
             chamfer: true,
@@ -380,14 +428,25 @@ mod tests {
         std::fs::write(&path, "cube([20, 20, 2.4]); cube([30, 20, 0.4]);").unwrap();
         let cancel = Arc::new(AtomicBool::new(false));
         let cfg = Config::default();
-        let mesh = crate::openscad::render(&cfg, &path, &[], &cancel).unwrap().mesh;
+        let mesh = crate::openscad::render(&cfg, &path, &[], &cancel)
+            .unwrap()
+            .mesh;
         let _ = std::fs::remove_file(&path);
         let s = Settings {
             chamfer: true,
             ..Settings::default()
         };
         let l = Layers::default();
-        let (out, _) = apply(&cfg, &mesh, &s, l, &Limits::default(), &Area::default(), &cancel).unwrap();
+        let (out, _) = apply(
+            &cfg,
+            &mesh,
+            &s,
+            l,
+            &Limits::default(),
+            &Area::default(),
+            &cancel,
+        )
+        .unwrap();
         let a: f32 = super::super::section(&out, 0.1)
             .iter()
             .map(|lp| super::super::loop_area(lp))
@@ -414,25 +473,47 @@ mod tests {
         .unwrap();
         let cancel = Arc::new(AtomicBool::new(false));
         let cfg = Config::default();
-        let mesh = crate::openscad::render(&cfg, &path, &[], &cancel).unwrap().mesh;
+        let mesh = crate::openscad::render(&cfg, &path, &[], &cancel)
+            .unwrap()
+            .mesh;
         let _ = std::fs::remove_file(&path);
         let l = Layers::default();
         let only_brim = Settings {
             brim: true,
             ..Settings::default()
         };
-        let (_, r) = apply(&cfg, &mesh, &only_brim, l, &Limits::default(), &Area::default(), &cancel).unwrap();
+        let (_, r) = apply(
+            &cfg,
+            &mesh,
+            &only_brim,
+            l,
+            &Limits::default(),
+            &Area::default(),
+            &cancel,
+        )
+        .unwrap();
         assert_eq!(r.brims, 0);
         let both = Settings {
             chamfer: true,
             ..only_brim
         };
-        let (out, r) = apply(&cfg, &mesh, &both, l, &Limits::default(), &Area::default(), &cancel).unwrap();
+        let (out, r) = apply(
+            &cfg,
+            &mesh,
+            &both,
+            l,
+            &Limits::default(),
+            &Area::default(),
+            &cancel,
+        )
+        .unwrap();
         assert!(r.chamfer);
         assert_eq!(r.brims, 1);
         let issues = super::super::check::run(&out, l, &Limits::default(), &Area::default());
         assert!(
-            !issues.iter().any(|i| i.kind == super::super::check::Kind::SmallIsland),
+            !issues
+                .iter()
+                .any(|i| i.kind == super::super::check::Kind::SmallIsland),
             "{issues:?}"
         );
     }
@@ -444,7 +525,11 @@ mod tests {
             late: vec!["cube(2);".into()],
             ..Plan::default()
         };
-        let s = compose("import(\"a.stl\");", &[p], Some("module bed_cut() children();\n".into()));
+        let s = compose(
+            "import(\"a.stl\");",
+            &[p],
+            Some("module bed_cut() children();\n".into()),
+        );
         let cut = s.find("bed_cut() difference()").unwrap();
         let late = s.find("cube(2);").unwrap();
         assert!(cut < late, "{s}");

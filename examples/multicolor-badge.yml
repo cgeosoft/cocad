@@ -1,0 +1,36 @@
+# yaml-language-server: $schema=https://cocad.cgeosoft.com/schema/model-1.json
+cocad: 1
+title: Multicolor badge
+description: >-
+  A badge with two SVG inlays, one part for each color. multicolor-badge.yml
+  sets the part names, the colors and the filament order.
+author: cgeosoft
+license: MIT
+url: https://github.com/cgeosoft/cocad/blob/main/examples/multicolor-badge.scad
+multicolor: true
+
+parts:
+  - id: plate
+    name: Plate
+    color: white
+  - id: star
+    name: Star
+    color: red
+  - id: ring
+    name: Ring
+    color: black
+
+sets:
+  Badge:
+    description: The default badge.
+  Coaster:
+    description: A large, thick badge with deeper inlays.
+    values:
+      size: 100
+      thickness: 4
+      depth: 0.6
+  Thin tag:
+    description: The smallest badge, 1.6 mm thick.
+    values:
+      size: 46
+      thickness: 1.6

@@ -81,7 +81,7 @@ pub struct Job {
     pub parts: Vec<Input>,
     /// Volume of the built mesh, for the overlap test.
     pub whole_volume: f32,
-    /// The parts are the colors of one object (a `cocad_part` list).
+    /// The parts are the colors of one object (a multicolor part list).
     pub multicolor: bool,
     /// The model name, for a multicolor object.
     pub model_name: String,
@@ -364,7 +364,11 @@ pub fn run(
                         errors.push(format!(
                             "{}: the cut at {at:.1} mm has no room for {}. It is a flat cut.",
                             p.name,
-                            if sp.joint == split::Joint::Pins { "pins" } else { "tabs" }
+                            if sp.joint == split::Joint::Pins {
+                                "pins"
+                            } else {
+                                "tabs"
+                            }
                         ));
                     }
                 }
@@ -541,17 +545,26 @@ fn prepare(
     // No split is needed when the part fits on another side.
     if !fits && proposal.is_none() && p.piece.is_none() && split::fits(&p.mesh, &st.area) {
         errs.lock().unwrap().push(format!(
-            "{}: too large in this orientation. It fits on another side: turn on Custom orientation.",
+            "{}: too large in this orientation. It fits on another side: select the bed face in the Orientation card.",
             p.name
         ));
     }
-    let key = hash_of(&[&mesh_hash(&print), &st.fixes, &job.layers, &job.limits, &st.area]);
+    // The pin holes of a split keep their size: the clearance of the
+    // split sets their fit.
+    let mut fix = st.fixes;
+    if let Some((parent, _)) = &p.piece
+        && let Some(sp) = st.part(parent).split
+        && sp.joint == split::Joint::Pins
+    {
+        fix.hole_keep = sp.values.hole_d();
+    }
+    let key = hash_of(&[&mesh_hash(&print), &fix, &job.layers, &job.limits, &st.area]);
     let hit = cache.lock().unwrap().fixed.get(&key).cloned();
     let fixed = match hit {
         Some(f) => f,
         None => {
-            let (mesh, report) = if st.fixes.any() {
-                fixes::apply(cfg, &print, &st.fixes, job.layers, &job.limits, &st.area, cancel)?
+            let (mesh, report) = if fix.any() {
+                fixes::apply(cfg, &print, &fix, job.layers, &job.limits, &st.area, cancel)?
             } else {
                 (print, fixes::Report::default())
             };
@@ -688,9 +701,17 @@ mod tests {
     #[test]
     fn parts_go_to_more_plates_and_a_large_part_to_none() {
         let mut parts: Vec<Input> = (0..6)
-            .map(|i| input(&format!("Part {i}"), boxed(45.0, 45.0, 5.0, Vec3::new(i as f32 * 60.0, 0.0, 0.0))))
+            .map(|i| {
+                input(
+                    &format!("Part {i}"),
+                    boxed(45.0, 45.0, 5.0, Vec3::new(i as f32 * 60.0, 0.0, 0.0)),
+                )
+            })
             .collect();
-        parts.push(input("Big", boxed(150.0, 20.0, 5.0, Vec3::new(0.0, 80.0, 0.0))));
+        parts.push(input(
+            "Big",
+            boxed(150.0, 20.0, 5.0, Vec3::new(0.0, 80.0, 0.0)),
+        ));
         let o = go(&job(parts));
         assert_eq!(o.plates, 2);
         let big = o.parts.iter().position(|p| p.name == "Big").unwrap();
@@ -724,7 +745,9 @@ mod tests {
 // { "area": [250, 220, 270], "gap": 10, "only": "Part 2", "plate": 0,
 //   "fixes": { "teardrops": true, "bridges": false, "hole_above": "stepped",
 //              "sacrificial_layers": 2, "chamfer": true, "chamfer_mm": 0.4,
-//              "brim": false, "brim_w": 5, "brim_gap": 1 },
+//              "brim": false, "brim_w": 5, "brim_gap": 1,
+//              "ears": false, "ear_d": 15, "ear_min": 100,
+//              "hole_size": false, "hole_add": 0.2 },
 //   "parts": { "Part 1": { "include": true, "copies": 2,
 //                          "orient": "face", "down": [0, 1, 0], "turns": 1,
 //                          "split": { "joint": "dovetail", "cuts": [[0, 150]],
@@ -765,6 +788,11 @@ fn fixes_json(f: &fixes::Settings) -> Json {
         "brim": f.brim,
         "brim_w": r4(f.brim_w),
         "brim_gap": r4(f.brim_gap),
+        "ears": f.ears,
+        "ear_d": r4(f.ear_d),
+        "ear_min": r4(f.ear_min),
+        "hole_size": f.hole_size,
+        "hole_add": r4(f.hole_add),
     })
 }
 
@@ -775,6 +803,8 @@ fn fixes_of(v: &Json) -> fixes::Settings {
     f.bridges = b("bridges", f.bridges);
     f.chamfer = b("chamfer", f.chamfer);
     f.brim = b("brim", f.brim);
+    f.ears = b("ears", f.ears);
+    f.hole_size = b("hole_size", f.hole_size);
     if let Some(h) = v
         .get("hole_above")
         .and_then(Json::as_str)
@@ -786,11 +816,16 @@ fn fixes_of(v: &Json) -> fixes::Settings {
         f.sacrificial_layers = (n as u32).clamp(1, 10);
     }
     let clamp = |k: &str, d: f32, lo: f32, hi: f32| {
-        f32_of(v.get(k)).filter(|x| x.is_finite()).map_or(d, |x| x.clamp(lo, hi))
+        f32_of(v.get(k))
+            .filter(|x| x.is_finite())
+            .map_or(d, |x| x.clamp(lo, hi))
     };
     f.chamfer_mm = clamp("chamfer_mm", f.chamfer_mm, 0.0, 2.0);
     f.brim_w = clamp("brim_w", f.brim_w, 0.0, 20.0);
     f.brim_gap = clamp("brim_gap", f.brim_gap, 0.2, 5.0);
+    f.ear_d = clamp("ear_d", f.ear_d, 5.0, 30.0);
+    f.ear_min = clamp("ear_min", f.ear_min, 20.0, 300.0);
+    f.hole_add = clamp("hole_add", f.hole_add, 0.0, 1.0);
     f
 }
 
@@ -853,7 +888,9 @@ impl PartState {
         }
         let o = &self.orientation;
         match o.choice {
-            orient::Choice::Model => {}
+            orient::Choice::Model => {
+                m.insert("orient".into(), json!("model"));
+            }
             orient::Choice::Auto => {
                 m.insert("orient".into(), json!("auto"));
             }
@@ -881,12 +918,14 @@ impl PartState {
             .and_then(Json::as_u64)
             .map(|c| c.min(999) as u32);
         p.orientation.choice = match v.get("orient").and_then(Json::as_str) {
-            Some("auto") => orient::Choice::Auto,
+            Some("model") => orient::Choice::Model,
             Some("face") => match vec3_of(v.get("down")) {
                 Some(d) if d.length() > 0.5 => orient::Choice::Face(d.normalize()),
-                _ => orient::Choice::Model,
+                _ => orient::Choice::Auto,
             },
-            _ => orient::Choice::Model,
+            // Auto is the default. CoCAD 0.7 stored no key for the model
+            // rotation: these parts also get Auto.
+            _ => orient::Choice::Auto,
         };
         p.orientation.quarter_turns = v.get("turns").and_then(Json::as_u64).unwrap_or(0) as u8 % 4;
         p.split = v.get("split").and_then(split_of);
@@ -984,7 +1023,7 @@ mod storage_tests {
             "Part 2".into(),
             PartState {
                 orientation: orient::Orientation {
-                    choice: orient::Choice::Auto,
+                    choice: orient::Choice::Model,
                     quarter_turns: 0,
                 },
                 ..PartState::default()
@@ -992,6 +1031,15 @@ mod storage_tests {
         );
         let back = State::from_json(&s.to_json(), Area::default());
         assert_eq!(back, s);
+    }
+
+    #[test]
+    fn a_part_with_no_orient_key_gets_auto() {
+        // CoCAD 0.7 stored the model rotation with no "orient" key.
+        let p = PartState::from_json(&json!({ "include": true }));
+        assert_eq!(p.orientation.choice, orient::Choice::Auto);
+        let p = PartState::from_json(&json!({ "orient": "model" }));
+        assert_eq!(p.orientation.choice, orient::Choice::Model);
     }
 
     #[test]

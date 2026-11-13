@@ -33,6 +33,7 @@
 - [Command line](Command-line)
 - [MCP reference](MCP-reference)
 - [Write models for CoCAD](Write-models-for-CoCAD)
+- [Model definition](Model-definition)
 - [How CoCAD finds the parts](How-CoCAD-finds-the-parts)
 - [OpenSCAD engine and files](OpenSCAD-engine-and-files)
 - [Build from source](Build-from-source)

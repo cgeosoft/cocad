@@ -87,7 +87,10 @@ fn issues(m: &Mesh) -> (usize, String) {
         .map(|(k, n)| format!("{k:?} {n}"))
         .collect::<Vec<_>>()
         .join(", ");
-    (list.len(), if text.is_empty() { "none".into() } else { text })
+    (
+        list.len(),
+        if text.is_empty() { "none".into() } else { text },
+    )
 }
 
 struct Combo {
@@ -371,5 +374,9 @@ fn showcase_pins_without_room_are_reported() {
     )
     .unwrap();
     println!("{:?}", o.errors);
-    assert!(o.errors.iter().any(|e| e.contains("no room for pins")), "{:?}", o.errors);
+    assert!(
+        o.errors.iter().any(|e| e.contains("no room for pins")),
+        "{:?}",
+        o.errors
+    );
 }

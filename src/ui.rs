@@ -8,6 +8,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 pub const ACCENT: Color32 = Color32::from_rgb(0xff, 0x93, 0x00);
+/// The side margin of the right panel.
+pub const PANEL_PAD: i8 = 18;
 /// Status dots: all is well.
 pub const GOOD: Color32 = Color32::from_rgb(0x3f, 0xb9, 0x50);
 
@@ -231,9 +233,43 @@ fn style(ctx: &egui::Context) {
         sp.indent = 16.0;
         sp.window_margin = Margin::same(20);
         sp.menu_margin = Margin::same(8);
-        sp.scroll = egui::style::ScrollStyle::floating();
+        sp.scroll = scroll_style();
         s.interaction.tooltip_delay = 0.35;
     });
+}
+
+/// Slim scroll bars without a track. The bar is a thin line while the
+/// pointer is on the scroll area, and becomes a little wider on the bar.
+fn scroll_style() -> egui::style::ScrollStyle {
+    egui::style::ScrollStyle {
+        bar_width: 6.0,
+        floating_width: 2.0,
+        active_background_opacity: 0.0,
+        interact_background_opacity: 0.0,
+        ..egui::style::ScrollStyle::floating()
+    }
+}
+
+/// Space between a scroll bar and the edge of a panel that has a resize
+/// handle or a border at that edge. Set it in `spacing.scroll.bar_outer_margin`.
+pub const BAR_INSET: f32 = 6.0;
+
+/// Space at the right of the content of a scroll area for the scroll bar.
+const BAR_ROOM: i8 = 8;
+
+/// Content of a scroll area that has no side padding: the content stops
+/// before the scroll bar, so the bar does not cover it.
+pub fn bar_room<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    egui::Frame::NONE
+        .inner_margin(Margin {
+            right: BAR_ROOM,
+            ..Margin::ZERO
+        })
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            add(ui)
+        })
+        .inner
 }
 
 /// Rounded surface with padding.
@@ -247,6 +283,61 @@ pub fn card<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
             add(ui)
         })
         .inner
+}
+
+/// A vertical scroll area that fills the space left. The content gets
+/// `pad` on the left, the right and the bottom, so the scroll bar is in the
+/// padding at the edge of the panel, not on the content. A soft shadow
+/// shows at the top or the bottom when more content is above or below.
+pub fn scroll<R>(ui: &mut egui::Ui, pad: i8, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    let out = egui::ScrollArea::vertical()
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            // The bottom margin keeps the last card off the edge of the panel.
+            egui::Frame::NONE
+                .inner_margin(Margin {
+                    left: pad,
+                    right: pad,
+                    top: 0,
+                    bottom: pad,
+                })
+                .show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    add(ui)
+                })
+                .inner
+        });
+    let view = out.inner_rect;
+    let top = out.state.offset.y;
+    let below = out.content_size.y - view.height() - top;
+    edge_shadow(ui, view, true, (top / 24.0).clamp(0.0, 1.0));
+    edge_shadow(ui, view, false, (below / 24.0).clamp(0.0, 1.0));
+    out.inner
+}
+
+/// A shadow at the top or the bottom edge of `rect`. `strength` from 0 to
+/// 1 fades it in as the content scrolls.
+fn edge_shadow(ui: &egui::Ui, rect: Rect, top: bool, strength: f32) {
+    if strength <= 0.0 {
+        return;
+    }
+    const HEIGHT: f32 = 14.0;
+    let alpha = if is_dark() { 110.0 } else { 45.0 };
+    let dark = Color32::from_black_alpha((alpha * strength) as u8);
+    let clear = Color32::TRANSPARENT;
+    let (y0, y1) = if top {
+        (rect.top(), rect.top() + HEIGHT)
+    } else {
+        (rect.bottom(), rect.bottom() - HEIGHT)
+    };
+    let mut mesh = egui::Mesh::default();
+    mesh.colored_vertex(egui::pos2(rect.left(), y0), dark);
+    mesh.colored_vertex(egui::pos2(rect.right(), y0), dark);
+    mesh.colored_vertex(egui::pos2(rect.right(), y1), clear);
+    mesh.colored_vertex(egui::pos2(rect.left(), y1), clear);
+    mesh.add_triangle(0, 1, 2);
+    mesh.add_triangle(0, 2, 3);
+    ui.painter().add(egui::Shape::mesh(mesh));
 }
 
 /// Small upper-case section title.
@@ -277,9 +368,37 @@ pub fn group_header(ui: &mut egui::Ui, title: &str, open: bool, edited: usize) -
 }
 
 /// Clickable card title with a chevron, as `group_header`, and a short
-/// dim `note` at the right, for example a value of a closed card.
-pub fn fold_header(ui: &mut egui::Ui, title: &str, open: bool, note: &str) -> egui::Response {
-    let (rect, resp, title_w) = fold_row(ui, title, open);
+/// dim `note` at the right, for example a value of a closed card. When
+/// `info` is not empty, an info icon after the title shows it on hover.
+pub fn fold_header(
+    ui: &mut egui::Ui,
+    title: &str,
+    open: bool,
+    note: &str,
+    info: &str,
+) -> egui::Response {
+    let (rect, resp, mut title_w) = fold_row(ui, title, open);
+    if !info.is_empty() {
+        let center = egui::pos2(rect.left() + title_w + 13.0, rect.center().y);
+        let hit = Rect::from_center_size(center, vec2(20.0, 20.0));
+        // Click sense, so that a click on the icon does not fold the card.
+        let icon = ui.interact(hit, resp.id.with("info"), Sense::click());
+        let color = if icon.hovered() { c().text } else { c().dim };
+        let p = ui.painter();
+        p.circle_stroke(center, 6.5, Stroke::new(1.2_f32, color));
+        p.text(
+            center + vec2(0.0, 0.5),
+            Align2::CENTER_CENTER,
+            "i",
+            FontId::proportional(10.0),
+            color,
+        );
+        icon.on_hover_ui(|ui| {
+            ui.set_max_width(260.0);
+            ui.label(info);
+        });
+        title_w += 26.0;
+    }
     if !note.is_empty() {
         let max = (rect.width() - title_w - 34.0).max(0.0);
         let galley = one_line(ui, note, FontId::proportional(12.5), max);
@@ -542,11 +661,63 @@ pub fn ghost(text: &str, active: bool) -> egui::Button<'static> {
         .corner_radius(8)
 }
 
-/// Line icons for `icon_button` and `icon_text_button`.
+/// The CoCAD mark, as in packaging/cocad.svg without the tile: a cube with a
+/// teardrop hole, tip up, in the left face. The teardrop is the hole shape
+/// that prints without support (Optimize tab).
+pub fn paint_app_mark(p: &egui::Painter, rect: egui::Rect) {
+    // The cube in the SVG fills x 26..102 and y 22..106 of a 128 grid.
+    let k = rect.height().min(rect.width() * 84.0 / 76.0) / 84.0;
+    let at = |x: f32, y: f32| rect.center() + k * vec2(x - 64.0, y - 64.0);
+    let top = [
+        at(64.0, 22.0),
+        at(102.0, 43.0),
+        at(64.0, 64.0),
+        at(26.0, 43.0),
+    ];
+    let left = [
+        at(26.0, 43.0),
+        at(64.0, 64.0),
+        at(64.0, 106.0),
+        at(26.0, 85.0),
+    ];
+    p.add(egui::Shape::convex_polygon(
+        top.to_vec(),
+        ACCENT.gamma_multiply(0.45),
+        Stroke::NONE,
+    ));
+    p.add(egui::Shape::convex_polygon(
+        left.to_vec(),
+        ACCENT,
+        Stroke::NONE,
+    ));
+    // The teardrop: a circle of radius 9 at (45, 74.4) and a tip r·√2 above
+    // its center. The shear puts it in the plane of the left face, which
+    // falls 21 units over 38.
+    let face = |x: f32, y: f32| at(x, y + (x - 45.0) * 21.0 / 38.0);
+    let mut drop = vec![face(45.0, 74.4 - 9.0 * std::f32::consts::SQRT_2)];
+    const STEPS: usize = 24;
+    for i in 0..=STEPS {
+        let a = (-45.0 + 270.0 * i as f32 / STEPS as f32).to_radians();
+        drop.push(face(45.0 + 9.0 * a.cos(), 74.4 + 9.0 * a.sin()));
+    }
+    p.add(egui::Shape::convex_polygon(drop, c().bg, Stroke::NONE));
+    let s = Stroke::new((6.0 * k).max(1.2), ACCENT);
+    let outline = [
+        at(64.0, 22.0),
+        at(102.0, 43.0),
+        at(102.0, 85.0),
+        at(64.0, 106.0),
+        at(26.0, 85.0),
+        at(26.0, 43.0),
+    ];
+    p.add(egui::Shape::closed_line(outline.to_vec(), s));
+    p.line(vec![at(26.0, 43.0), at(64.0, 64.0), at(102.0, 43.0)], s);
+    p.line_segment([at(64.0, 64.0), at(64.0, 106.0)], s);
+}
+
+/// Line icons for `icon_button`.
 #[derive(Clone, Copy)]
 pub enum Icon {
-    /// A folder.
-    Open,
     /// A floppy disk.
     Save,
     /// A gear: more actions.
@@ -557,6 +728,8 @@ pub enum Icon {
     Collapse,
     /// Two chevrons that point away from each other.
     Expand,
+    /// An "i" in a circle: more information.
+    Info,
 }
 
 /// Draws `icon` on a 16 × 16 grid around `center`.
@@ -571,17 +744,6 @@ fn paint_icon(p: &egui::Painter, icon: Icon, center: Pos2, color: Color32) {
         p.add(egui::Shape::closed_line(pts(xy), s));
     };
     match icon {
-        Icon::Open => {
-            closed(&[
-                (1.5, 3.5),
-                (6.0, 3.5),
-                (7.5, 5.25),
-                (14.5, 5.25),
-                (14.5, 12.75),
-                (1.5, 12.75),
-            ]);
-            line(&[(1.5, 7.25), (14.5, 7.25)]);
-        }
         Icon::Save => {
             closed(&[
                 (2.25, 2.25),
@@ -629,6 +791,11 @@ fn paint_icon(p: &egui::Painter, icon: Icon, center: Pos2, color: Color32) {
             line(&[(4.0, 6.0), (8.0, 2.5), (12.0, 6.0)]);
             line(&[(4.0, 10.0), (8.0, 13.5), (12.0, 10.0)]);
         }
+        Icon::Info => {
+            p.circle_stroke(center, 6.25, s);
+            p.circle_filled(o + vec2(8.0, 4.9), 1.0, color);
+            line(&[(8.0, 7.25), (8.0, 11.5)]);
+        }
     }
 }
 
@@ -661,30 +828,6 @@ pub fn icon_button(ui: &mut egui::Ui, icon: Icon, size: f32, active: bool) -> eg
         let p = ui.painter();
         p.rect_filled(rect, 8.0, fill);
         paint_icon(p, icon, rect.center(), fg);
-    }
-    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
-}
-
-/// Filled button with a line icon and a label.
-pub fn icon_text_button(ui: &mut egui::Ui, icon: Icon, text: &str, height: f32) -> egui::Response {
-    let font = FontId::proportional(13.5);
-    let width = ui.fonts(|f| {
-        f.layout_no_wrap(text.to_owned(), font.clone(), c().text)
-            .size()
-            .x
-    });
-    let (pad, icon_w, gap) = (10.0, 16.0, 6.0);
-    let size = vec2(pad + icon_w + gap + width + pad + 2.0, height);
-    let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
-    if ui.is_rect_visible(rect) {
-        let (fill, fg) = button_colors(ui, &resp, false);
-        let p = ui.painter();
-        p.rect_filled(rect, 8.0, fill);
-        let y = rect.center().y;
-        paint_icon(p, icon, egui::pos2(rect.left() + pad + icon_w / 2.0, y), fg);
-        let galley = p.layout_no_wrap(text.to_owned(), font, fg);
-        let at = egui::pos2(rect.left() + pad + icon_w + gap, y - galley.size().y / 2.0);
-        p.galley(at, galley, fg);
     }
     resp.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
@@ -862,112 +1005,75 @@ pub fn menu_separator(ui: &mut egui::Ui) {
     );
 }
 
-/// Full-width tab selector; returns true when the value changed. Each
+/// Full-width row of classic tabs; returns true when the value changed. Each
 /// option has a value, a label and the index (in characters) of the letter
-/// of its key. The label shows that letter underlined.
+/// of its key. The tooltip shows that key. The selected tab has
+/// the panel color and no bottom edge, so it joins the panel below it. Put
+/// the row in a strip with the `bg` color, with no bottom margin.
 pub fn tabs<T: PartialEq + Copy>(
     ui: &mut egui::Ui,
     value: &mut T,
     options: &[(T, &str, Option<usize>)],
 ) -> bool {
-    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 40.0), Sense::hover());
-    ui.painter().rect_filled(rect, 11.0, c().input);
-    let inner = rect.shrink(4.0);
-    let w = inner.width() / options.len() as f32;
+    const GAP: f32 = 4.0;
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 38.0), Sense::hover());
+    let n = options.len() as f32;
+    let w = (rect.width() - GAP * (n - 1.0)) / n;
+    let line = Stroke::new(1.0_f32, c().line);
+    let base = rect.bottom() - 0.5;
+    // The line below the tabs goes to the edges of the strip.
+    ui.painter().hline(ui.clip_rect().x_range(), base, line);
+    let top = CornerRadius {
+        nw: 8,
+        ne: 8,
+        sw: 0,
+        se: 0,
+    };
     let mut changed = false;
     for (i, (v, label, key)) in options.iter().enumerate() {
-        let cell =
-            Rect::from_min_size(inner.min + vec2(w * i as f32, 0.0), vec2(w, inner.height()));
+        let cell = Rect::from_min_size(
+            rect.min + vec2((w + GAP) * i as f32, 0.0),
+            vec2(w, rect.height()),
+        );
         let resp = ui.interact(cell, ui.id().with(("tab", i)), Sense::click());
         let sel = *value == *v;
         if resp.clicked() && !sel {
             *value = *v;
             changed = true;
         }
-        let fg = if sel {
-            Color32::BLACK
-        } else if resp.hovered() {
+        let p = ui.painter();
+        if sel {
+            // The accent fills the tab, and the face covers all but a band
+            // at the top, so the band follows the round corners.
+            p.rect_filled(cell, top, ACCENT);
+            let face = Rect::from_min_max(
+                egui::pos2(cell.left(), cell.top() + 2.5),
+                egui::pos2(cell.right(), cell.bottom() + 1.0),
+            );
+            p.rect_filled(face, top, c().panel);
+            let sides = (cell.top() + 8.0)..=base;
+            p.vline(cell.left() + 0.5, sides.clone(), line);
+            p.vline(cell.right() - 0.5, sides, line);
+        } else {
+            let t = if resp.hovered() { 0.85 } else { 0.45 };
+            let cell = cell.with_min_y(cell.top() + 3.0);
+            let fill = c().bg.lerp_to_gamma(c().input, t);
+            p.rect_filled(cell.with_max_y(cell.bottom() - 1.0), top, fill);
+        }
+        let fg = if sel || resp.hovered() {
             c().text
         } else {
             c().dim
         };
-        if sel {
-            ui.painter().rect_filled(cell, 8.0, ACCENT);
-        }
-        let job = underlined(label, *key, FontId::proportional(14.5), fg);
-        let galley = ui.fonts(|f| f.layout_job(job));
+        let font = FontId::proportional(14.5);
+        let galley = ui.fonts(|f| f.layout_no_wrap(label.to_string(), font, fg));
+        let center = cell.center() + vec2(0.0, if sel { 0.0 } else { 1.5 });
         ui.painter()
-            .galley(cell.center() - galley.size() / 2.0, galley, fg);
-        resp.on_hover_cursor(egui::CursorIcon::PointingHand);
+            .galley(center - galley.size() / 2.0, galley, fg);
+        let resp = resp.on_hover_cursor(egui::CursorIcon::PointingHand);
+        if let Some(k) = key.and_then(|k| label.chars().nth(k)) {
+            resp.on_hover_text(format!("Key {}", k.to_ascii_uppercase()));
+        }
     }
     changed
-}
-
-/// The byte range of character `key` of `text`. `None` when the text is
-/// shorter.
-fn key_range(text: &str, key: usize) -> Option<std::ops::Range<usize>> {
-    let (at, ch) = text.char_indices().nth(key)?;
-    Some(at..at + ch.len_utf8())
-}
-
-/// `text` in one line, with character `key` underlined.
-pub fn underlined(
-    text: &str,
-    key: Option<usize>,
-    font: FontId,
-    color: Color32,
-) -> egui::text::LayoutJob {
-    let plain = egui::TextFormat {
-        font_id: font,
-        color,
-        ..Default::default()
-    };
-    let mut job = egui::text::LayoutJob::default();
-    match key.and_then(|k| key_range(text, k)) {
-        Some(r) => {
-            let mut under = plain.clone();
-            under.underline = Stroke::new(1.2_f32, color);
-            job.append(&text[..r.start], 0.0, plain.clone());
-            job.append(&text[r.clone()], 0.0, under);
-            job.append(&text[r.end..], 0.0, plain);
-        }
-        None => job.append(text, 0.0, plain),
-    }
-    job
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn key_letter_range() {
-        assert_eq!(key_range("Optimize", 0), Some(0..1));
-        assert_eq!(key_range("Render", 3), Some(3..4));
-        assert_eq!(key_range("Über", 1), Some(2..3));
-        assert_eq!(key_range("Ab", 2), None);
-    }
-
-    #[test]
-    fn underline_is_on_the_key_letter_only() {
-        let job = underlined(
-            "Render",
-            Some(0),
-            FontId::proportional(14.0),
-            Color32::WHITE,
-        );
-        let under: Vec<(&str, bool)> = (job.sections.iter())
-            .filter(|s| !s.byte_range.is_empty())
-            .map(|s| {
-                (
-                    &job.text[s.byte_range.clone()],
-                    s.format.underline.width > 0.0,
-                )
-            })
-            .collect();
-        assert_eq!(under, [("R", true), ("ender", false)]);
-        let job = underlined("Model", None, FontId::proportional(14.0), Color32::WHITE);
-        assert!(job.sections.iter().all(|s| s.format.underline.width == 0.0));
-        assert_eq!(job.text, "Model");
-    }
 }

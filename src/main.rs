@@ -5,6 +5,7 @@
 mod app;
 mod assembly;
 mod csg_split;
+mod definition;
 mod examples;
 mod export;
 mod mcp;
@@ -13,6 +14,7 @@ mod net;
 mod openscad;
 mod optimize;
 mod params;
+mod part_param;
 mod parts;
 mod pathtrace;
 mod presets;
@@ -21,6 +23,7 @@ mod recent;
 mod render;
 mod slicer;
 mod telemetry;
+mod thumbs;
 mod ui;
 mod update;
 
@@ -39,6 +42,9 @@ Usage:
   cocad mcp                              Serve MCP on stdin and stdout, for Claude Desktop and
                                                other MCP clients. Controls the open window.
   cocad params FILE.scad                 List the Customizer parameters
+  cocad sets FILE.scad [--json]          List the parameter sets of FILE.yml. --json writes
+                                               them in the OpenSCAD Customizer format, for
+                                               openscad -p
   cocad export FILE.scad -o OUT [-P SET] [-D name=value]... [PRINT OPTIONS] [--for prusa|orca]
                                                Build and write OUT (.stl, .3mf or .step).
                                                STL and 3MF get the print plate, STEP gets
@@ -54,11 +60,11 @@ Usage:
 
 Parameter sets:
   -P SET      Apply a saved parameter set before the -D values
-  -p FILE     Read sets from FILE (default: the file chosen in the app, else FILE.json)
+  -p FILE     Read sets from FILE (default: FILE.yml, else FILE.json in the OpenSCAD format)
 
 Print options (export and slice):
   CoCAD starts from the Optimize values that the app stored for the model, else
-  from the defaults (all parts, model rotation, all fixes off). The options change them.
+  from the defaults (all parts, Auto orientation, all fixes off). The options change them.
   --plate N|all        The plate to export or slice (default: export plate 1, slice
                        all plates). all: export one file per plate, OUT-plateN.ext
   --part NAME|all      Only this print part, or all print parts
@@ -69,6 +75,9 @@ Print options (export and slice):
   --bridges[=sacrificial|stepped]
                        Bridge fixes, with the fix for a hole above a bridge
   --brim               Brim on small bed islands
+  --ears               Mouse ears on the sharp bed corners of large parts
+  --holes[=MM]         Hole size: vertical round holes get their diameter plus MM
+                       (0.2 mm by default)
   --no-fixes           All stored fixes off. The fix options above still turn a fix on.
   --as-built           The model as built, without the print preparation (as before 0.7)
 
@@ -86,7 +95,7 @@ fn main() -> Result<()> {
     #[cfg(windows)]
     if args.first().is_some_and(|a| {
         a.starts_with('-') && start_tab(a).is_none()
-            || matches!(a.as_str(), "params" | "export" | "slice" | "photo")
+            || matches!(a.as_str(), "params" | "sets" | "export" | "slice" | "photo")
     }) {
         attach_console();
     }
@@ -101,6 +110,7 @@ fn main() -> Result<()> {
         }
         // `params` does not run OpenSCAD, so it needs no check.
         Some("params") => cmd_params(&args[1..]),
+        Some("sets") => cmd_sets(&args[1..]),
         Some(cmd @ ("mcp" | "export" | "slice" | "photo")) => {
             // These stop when OpenSCAD has no Manifold. The window shows a
             // notice instead.
@@ -136,8 +146,9 @@ fn gui(file: Option<PathBuf>, mode: &str) -> Result<()> {
     let options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
             .with_inner_size([1400.0, 900.0])
-            .with_min_inner_size([800.0, 500.0])
+            .with_min_inner_size([1280.0, 720.0])
             .with_app_id("cocad")
+            .with_icon(window_icon())
             .with_title("CoCAD"),
         // Window position and size, panel widths: ~/.local/share/cocad.
         persist_window: true,
@@ -153,6 +164,27 @@ fn gui(file: Option<PathBuf>, mode: &str) -> Result<()> {
         Box::new(move |cc| Ok(Box::new(app::App::new(cc, file, &mode)))),
     )
     .map_err(|e| anyhow::anyhow!("{e}"))
+}
+
+/// The app icon (packaging/cocad.svg at 256 px) for the title bar and the task bar.
+fn window_icon() -> eframe::egui::IconData {
+    let decode = || -> Option<eframe::egui::IconData> {
+        let mut dec = png::Decoder::new(std::io::Cursor::new(include_bytes!("../assets/icon.png")));
+        dec.set_transformations(png::Transformations::EXPAND);
+        let mut reader = dec.read_info().ok()?;
+        let mut buf = vec![0; reader.output_buffer_size()];
+        let info = reader.next_frame(&mut buf).ok()?;
+        if info.color_type != png::ColorType::Rgba || info.bit_depth != png::BitDepth::Eight {
+            return None;
+        }
+        buf.truncate(info.buffer_size());
+        Some(eframe::egui::IconData {
+            rgba: buf,
+            width: info.width,
+            height: info.height,
+        })
+    };
+    decode().unwrap_or_default()
 }
 
 struct PhotoArgs {
@@ -246,8 +278,19 @@ fn parse_batch(args: &[String]) -> Result<Batch> {
     let src = std::fs::read_to_string(&file)
         .with_context(|| format!("cannot read {}", file.display()))?;
     let mut params = params::parse(&src);
+    let def_path = definition::path_for(&file);
+    let shown = definition::source(&def_path).unwrap_or(def_path.clone());
+    let shown = shown.file_name().unwrap_or_default().to_string_lossy();
+    match definition::load(&def_path) {
+        Ok(def) => {
+            for w in def.warnings.iter().chain(&def.apply_parts(&mut params)) {
+                eprintln!("warning: {shown}: {w}");
+            }
+        }
+        Err(e) => eprintln!("warning: {e:#}"),
+    }
     if let Some(name) = &set {
-        let path = set_file.unwrap_or_else(|| presets::file_for(&file));
+        let path = set_file.unwrap_or(def_path);
         for k in presets::apply(&path, name, &mut params)? {
             eprintln!("warning: set '{name}': skipped '{k}'");
         }
@@ -309,6 +352,7 @@ fn prepare(b: &Batch) -> Result<(optimize::headless::Built, optimize::headless::
     let layers = optimize::Layers {
         first: b.settings.first_layer,
         height: b.settings.layer_height,
+        line_width: b.settings.line_width,
     };
     let p = optimize::headless::optimize(
         &openscad::Config::load(),
@@ -341,6 +385,36 @@ fn plates(b: &Batch, o: &optimize::pipeline::Outcome, all_by_default: bool) -> R
         None if all_by_default => (0..o.plates).collect(),
         None => vec![0],
     })
+}
+
+/// `cocad sets FILE.scad [--json]`: the sets of the definition. `--json`
+/// writes them in the format of the OpenSCAD Customizer.
+fn cmd_sets(args: &[String]) -> Result<()> {
+    let mut json = false;
+    let mut file = None;
+    for a in args {
+        match a.as_str() {
+            "--json" => json = true,
+            s if s.starts_with('-') => bail!("unknown option {s}"),
+            s => file = Some(PathBuf::from(s)),
+        }
+    }
+    let file = file.context("missing FILE.scad")?;
+    let def = definition::load(&definition::path_for(&file))?;
+    for w in &def.warnings {
+        eprintln!("warning: {w}");
+    }
+    if json {
+        println!("{}", serde_json::to_string_pretty(&definition::openscad_json(&def))?);
+        return Ok(());
+    }
+    for s in &def.sets {
+        match &s.description {
+            Some(d) => println!("{}  // {d}", s.name),
+            None => println!("{}", s.name),
+        }
+    }
+    Ok(())
 }
 
 fn cmd_params(args: &[String]) -> Result<()> {
@@ -590,5 +664,15 @@ fn attach_console() {
     // SAFETY: plain Win32 call without pointers; failure only means no console.
     unsafe {
         AttachConsole(ATTACH_PARENT_PROCESS);
+    }
+}
+
+#[cfg(test)]
+mod icon_tests {
+    #[test]
+    fn window_icon_decodes() {
+        let icon = super::window_icon();
+        assert_eq!((icon.width, icon.height), (256, 256));
+        assert_eq!(icon.rgba.len(), 256 * 256 * 4);
     }
 }

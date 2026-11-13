@@ -61,7 +61,7 @@ pub fn clean(n: f64) -> f64 {
     if r == 0.0 { 0.0 } else { r }
 }
 
-fn fmt_num(n: f64) -> String {
+pub(crate) fn fmt_num(n: f64) -> String {
     let n = clean(n);
     if n.fract() == 0.0 && n.abs() < 1e15 {
         format!("{}", n as i64)
@@ -92,6 +92,9 @@ pub struct Param {
     pub widget: Widget,
     /// The default was written without a decimal point.
     pub integer: bool,
+    /// The parts that this parameter selects, when it is the part
+    /// parameter. See `part_param.rs`.
+    pub parts: Option<crate::part_param::PartList>,
 }
 
 impl Param {
@@ -178,6 +181,7 @@ pub fn parse(src: &str) -> Vec<Param> {
             depth = 0;
         }
     }
+    crate::part_param::mark_legacy(&mut out);
     out
 }
 
@@ -284,6 +288,7 @@ fn assignment(line: &str, group: &str, description: &str) -> Option<Param> {
         value,
         widget,
         integer,
+        parts: None,
     })
 }
 

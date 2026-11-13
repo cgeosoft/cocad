@@ -24,16 +24,16 @@ A message in the 3D view names each change that the assistant makes.
 
 - It cannot delete a file or a parameter set.
 - It does not replace a file that exists, unless it asks for that explicitly.
-- It can open only `.scad` files, and it can save photos only as `.png` files.
+- It can open and make only `.scad` files, and it can save photos only as `.png` files.
+- It makes a new model only in a file that does not exist.
 
 ## Connect an assistant
 
 The easiest way is the welcome tour, because it shows the text with the correct path for your computer:
 
-1. In CoCAD, open **Help > Welcome tour**.
-2. Go to the step **Connect an agent**.
-3. Click **Copy** next to the text for your client.
-4. Put the text in your client, as described below.
+1. In CoCAD, click **Connect an agent** on the start page. Or open **Help > Welcome tour** and go to the step **Connect an agent**.
+2. Click **Copy** next to the text for your client.
+3. Put the text in your client, as described below.
 
 ### Claude Desktop and other clients
 
@@ -62,8 +62,9 @@ claude mcp add cocad -- "cocad" mcp
 
 ## Use it
 
-1. Start CoCAD and open a model. If CoCAD is not open, the assistant can start it when it opens a model.
+1. Start CoCAD and open a model, or ask the assistant to make a new model. If CoCAD is not open, the assistant can start it when it opens or makes a model.
 2. Ask the assistant in your own words. Examples:
+   - "Make a new model of a phone stand in my Documents folder."
    - "Which parameters does this model have?"
    - "Set the number of teeth to 24 and show me the result."
    - "Save a photo of the part to my Pictures folder."

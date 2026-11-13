@@ -1,0 +1,43 @@
+# yaml-language-server: $schema=https://cocad.cgeosoft.com/schema/model-1.json
+cocad: 1
+title: Lid box
+description: >-
+  A small box with a lid and a knob. CoCAD finds the three parts from the
+  module calls. Try Part colors, Explode and Section in the Model tab.
+author: cgeosoft
+license: MIT
+url: https://github.com/cgeosoft/cocad/blob/main/examples/lid-box.scad
+
+sets:
+  Small box:
+    description: The default box with a lid and a knob.
+  Jewelry box:
+    description: A wider box with large round corners and a large knob.
+    values:
+      width: 90
+      depth: 60
+      height: 35
+      corner: 10
+      knob_d: 20
+      knob_h: 10
+  Tall canister:
+    description: A tall, square box with a deep lip.
+    values:
+      width: 50
+      depth: 50
+      height: 80
+      corner: 12
+      lid_height: 6
+      lip: 6
+      knob_d: 18
+  Flat case:
+    description: A large, flat case with thin walls and a low knob.
+    values:
+      width: 120
+      depth: 80
+      height: 15
+      wall: 1.6
+      corner: 3
+      lid_height: 3
+      lip: 2
+      knob_h: 4

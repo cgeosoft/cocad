@@ -1,32 +1,70 @@
 //! The section cut of the 3D view: at most three planes, one across each
-//! axis. Each plane removes one side of the model. The cut is in model
-//! space, before the explode offset, so each part keeps the same cut when
-//! it moves. The "Section" card is in the Model tab.
+//! axis. Each plane removes one side of the view. The "Section" bar at the
+//! top right of the 3D view sets the cuts. All tabs show it.
 //!
-//! The 3D view, the photo and the MCP images show the cut. The Optimize tab,
-//! the grid, fit and the export ignore it.
+//! The Model and the Render tabs cut the model. This cut is in model space,
+//! before the explode offset, so each part keeps the same cut when it moves.
+//! The Optimize tab cuts the plate, in the coordinates of the bed. The two
+//! spaces share the cuts and the sides to keep. Each space has its own
+//! positions.
+//!
+//! The 3D view, the layers of the Optimize tab, the photo and the MCP
+//! images show the cut. The photo and the MCP images show the cut of the
+//! model. The grid, fit and all exports ignore it.
 
 use super::{App, Mode};
 use crate::mesh::Bounds;
 use crate::pathtrace;
 use crate::render;
 use crate::ui;
-use eframe::egui;
+use eframe::egui::{self, Color32, RichText, Vec2};
 use glam::{Vec3, Vec4};
 use serde_json::{Map, Value as Json, json};
 use std::sync::Arc;
 
-/// The names of the axes in the card.
+/// The names of the axes in the bar.
 const LABELS: [&str; 3] = ["X", "Y", "Z"];
 /// The names of the axes in the MCP tools.
 const NAMES: [&str; 3] = ["x", "y", "z"];
+/// The colors of the axis names in the bar. X and Y have the colors of the
+/// axis lines of the grid.
+const AXIS_COLORS: [Color32; 3] = [
+    Color32::from_rgb(0xe0, 0x55, 0x55),
+    Color32::from_rgb(0x5c, 0xcc, 0x6a),
+    Color32::from_rgb(0x5a, 0x9c, 0xff),
+];
 
-/// One cut, across one axis.
+/// The coordinates of the cut positions.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Space {
+    /// The model, before the explode offset: the Model and the Render tabs.
+    Model,
+    /// The bed: the plate of the Optimize tab.
+    Plate,
+}
+
+impl Space {
+    /// The space of the cut in tab `mode`.
+    pub fn of(mode: Mode) -> Space {
+        if mode == Mode::Optimize {
+            Space::Plate
+        } else {
+            Space::Model
+        }
+    }
+
+    fn index(self) -> usize {
+        match self {
+            Space::Model => 0,
+            Space::Plate => 1,
+        }
+    }
+}
+
+/// One cut, across one axis. Its positions are in `Section`.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(super) struct Cut {
     pub on: bool,
-    /// The position on the axis in mm. `None` is the center of the model.
-    pub at: Option<f32>,
     /// Keep the side below the position (−). `false` keeps the side above
     /// the position (+).
     pub keep_below: bool,
@@ -36,11 +74,14 @@ pub(super) struct Cut {
 #[derive(Clone, Debug, Default)]
 pub(super) struct Section {
     pub cuts: [Cut; 3],
-    /// The bounds of all parts without offset. A position of `None` uses
-    /// their center.
-    bounds: Option<Bounds>,
-    /// The axis of the position that the user changes in this frame. The
-    /// view then shows where the plane is.
+    /// The position of each cut in mm, in each space. `None` is the center
+    /// of the bounds of that space.
+    at: [[Option<f32>; 3]; 2],
+    /// The bounds of each space: all parts of the model without offset, and
+    /// the parts on the plate.
+    bounds: [Option<Bounds>; 2],
+    /// The axis of the position that the user changes. The view then shows
+    /// where the plane is.
     shown: Option<usize>,
 }
 
@@ -94,22 +135,26 @@ fn outline(k: usize, at: f32, b: &Bounds, offset: Vec3) -> [Vec3; 4] {
 }
 
 impl Section {
-    /// Sets the bounds of the parts of a new assembly. The cuts and their
-    /// positions stay.
-    pub fn set_bounds(&mut self, b: Option<Bounds>) {
-        self.bounds = b;
+    /// Sets the bounds of a space: the parts of a new assembly, or the parts
+    /// on the plate. The cuts and their positions stay.
+    pub fn set_bounds(&mut self, space: Space, b: Option<Bounds>) {
+        self.bounds[space.index()] = b;
+    }
+
+    /// The bounds of a space.
+    pub fn bounds(&self, space: Space) -> Option<Bounds> {
+        self.bounds[space.index()]
     }
 
     /// Another model: the positions go back to the center.
     pub fn new_model(&mut self) {
-        for c in &mut self.cuts {
-            c.at = None;
-        }
+        self.at = Default::default();
     }
 
     /// All cuts off, at the center, keeping the + side.
     pub fn reset(&mut self) {
         self.cuts = [Cut::default(); 3];
+        self.at = Default::default();
     }
 
     /// A cut is on.
@@ -117,45 +162,61 @@ impl Section {
         self.cuts.iter().any(|c| c.on)
     }
 
-    /// The position of the cut on axis `k` in mm. `None` without a
-    /// position and without bounds.
-    pub fn position(&self, k: usize) -> Option<f32> {
-        (self.cuts[k].at).or_else(|| self.bounds.map(|b| b.center()[k]))
+    /// A cut is on, keeps the − side or has a position: Reset has something
+    /// to do.
+    fn changed(&self) -> bool {
+        self.cuts.iter().any(|c| *c != Cut::default())
+            || self.at.iter().flatten().any(Option::is_some)
     }
 
-    /// Turns on the cut on axis `k` at `at` mm (`None`: the center). A
-    /// position out of the slider range goes to the end of the range.
-    pub fn set(&mut self, k: usize, at: Option<f32>, keep_below: bool) {
-        let at = match (at, self.bounds) {
+    /// The position of the cut on axis `k` in mm, in `space`. `None`
+    /// without a position and without bounds.
+    pub fn position(&self, space: Space, k: usize) -> Option<f32> {
+        let s = space.index();
+        (self.at[s][k]).or_else(|| self.bounds[s].map(|b| b.center()[k]))
+    }
+
+    /// Sets the position of the cut on axis `k` in `space` (`None`: the
+    /// center). A position out of the slider range goes to the end of the
+    /// range.
+    pub fn set_position(&mut self, space: Space, k: usize, at: Option<f32>) {
+        let s = space.index();
+        self.at[s][k] = match (at, self.bounds[s]) {
             (Some(a), Some(b)) => {
                 let (lo, hi, _) = range(&b, k);
                 Some(a.clamp(lo, hi))
             }
             (a, _) => a,
         };
+    }
+
+    /// Turns on the cut on axis `k` at `at` mm in `space` (`None`: the
+    /// center).
+    pub fn set(&mut self, space: Space, k: usize, at: Option<f32>, keep_below: bool) {
+        self.set_position(space, k, at);
         self.cuts[k] = Cut {
             on: true,
-            at,
             keep_below,
         };
     }
 
-    /// The planes of the active cuts, in model space.
-    pub fn planes(&self) -> Vec<Vec4> {
+    /// The planes of the active cuts, in `space`.
+    pub fn planes(&self, space: Space) -> Vec<Vec4> {
         (0..3)
             .filter(|&k| self.cuts[k].on)
-            .filter_map(|k| Some(plane(k, self.position(k)?, self.cuts[k].keep_below)))
+            .filter_map(|k| Some(plane(k, self.position(space, k)?, self.cuts[k].keep_below)))
             .collect()
     }
 
-    /// The state for `get_state`, in the form that `set_view` takes.
-    pub fn to_json(&self) -> Json {
+    /// The state for `get_state`, in the form that `set_view` takes. The
+    /// positions are in `space`.
+    pub fn to_json(&self, space: Space) -> Json {
         let mut out = Map::new();
         for (k, name) in NAMES.iter().enumerate() {
             let c = &self.cuts[k];
             let v = if c.on {
                 json!({
-                    "at": self.position(k),
+                    "at": self.position(space, k),
                     "keep": if c.keep_below { "-" } else { "+" },
                 })
             } else {
@@ -167,10 +228,10 @@ impl Section {
     }
 
     /// Sets all cuts from the `section` object of `set_view`. A missing or
-    /// null axis turns its cut off. `at` is in mm (default: the center of
-    /// the model), `keep` is "+" or "-" (default "+"). Nothing changes on an
+    /// null axis turns its cut off. `at` is in mm in `space` (default: the
+    /// center), `keep` is "+" or "-" (default "+"). Nothing changes on an
     /// error.
-    pub fn set_json(&mut self, v: &Json) -> Result<(), String> {
+    pub fn set_json(&mut self, space: Space, v: &Json) -> Result<(), String> {
         let Some(obj) = v.as_object() else {
             return Err(format!(
                 "section must be an object such as {{\"x\": {{\"at\": 10, \"keep\": \"+\"}}}}, got {v}"
@@ -212,7 +273,7 @@ impl Section {
         }
         for (k, c) in cuts.into_iter().enumerate() {
             match c {
-                Some((at, keep_below)) => self.set(k, at, keep_below),
+                Some((at, keep_below)) => self.set(space, k, at, keep_below),
                 None => self.cuts[k].on = false,
             }
         }
@@ -221,24 +282,31 @@ impl Section {
 }
 
 impl App {
-    /// The section cut of the 3D view in this frame. The Optimize tab shows
-    /// the real mesh, without a cut.
+    /// The space of the cut in the current tab.
+    pub(super) fn section_space(&self) -> Space {
+        Space::of(self.mode)
+    }
+
+    /// The section cut of the 3D view in this frame. The Optimize tab cuts
+    /// the plate. The plate parts have no offset.
     pub(super) fn section_view(&self) -> render::Section {
         let s = &self.view3d.section;
-        if self.mode == Mode::Optimize || !s.any() {
+        let space = self.section_space();
+        if !s.any() {
             return render::Section::default();
         }
         let mut outlines = Vec::new();
-        // The card is in the Model tab only.
-        if let (Some(k), Some(a)) = (s.shown, &self.assembly)
-            && self.mode == Mode::Model
+        if let Some(k) = s.shown
             && s.cuts[k].on
-            && let (Some(at), Some(all)) = (s.position(k), s.bounds)
+            && let (Some(at), Some(all)) = (s.position(space, k), s.bounds(space))
         {
-            let styles = self.part_styles();
+            let styles = match (space, &self.assembly) {
+                (Space::Model, Some(_)) => self.part_styles(),
+                _ => Vec::new(),
+            };
             if styles.iter().all(|st| st.offset == Vec3::ZERO) {
                 outlines.push(outline(k, at, &all, Vec3::ZERO));
-            } else {
+            } else if let Some(a) = &self.assembly {
                 // Each part moves with its cut: one rectangle for each part
                 // that the plane cuts.
                 for (p, st) in a.parts.iter().zip(&styles) {
@@ -249,15 +317,15 @@ impl App {
             }
         }
         render::Section {
-            planes: s.planes(),
+            planes: s.planes(space),
             outlines,
         }
     }
 
-    /// The section cut for the photo, for parts with these offsets. `None`
-    /// without a cut.
+    /// The section cut of the model for the photo, for parts with these
+    /// offsets. `None` without a cut.
     pub(super) fn photo_clip(&self, offsets: &[Vec3]) -> Option<Arc<pathtrace::Clip>> {
-        let planes = self.view3d.section.planes();
+        let planes = self.view3d.section.planes(Space::Model);
         if planes.is_empty() {
             return None;
         }
@@ -266,111 +334,174 @@ impl App {
         Some(Arc::new(pathtrace::Clip::new(planes, ranges)))
     }
 
-    /// The "Section" card: cuts across X, Y and Z. The Model tab shows it.
-    pub(super) fn section_card(&mut self, ui: &mut egui::Ui) {
+    /// The "Section" bar at the top right of the 3D view `rect`: a switch
+    /// for each axis, and for each cut that is on, its position and the side
+    /// to keep. When the bar does not fit next to `taken`, it goes below
+    /// it. Returns the rectangle of the bar. All tabs show it when there is
+    /// something to cut.
+    pub(super) fn section_bar(
+        &mut self,
+        ui: &mut egui::Ui,
+        rect: egui::Rect,
+        taken: Option<egui::Rect>,
+    ) -> Option<egui::Rect> {
         self.view3d.section.shown = None;
-        let s = &self.view3d.section;
-        let Some(bounds) = s.bounds.filter(|_| self.assembly.is_some()) else {
-            return;
-        };
-        let on: Vec<&str> = (0..3)
-            .filter(|&k| s.cuts[k].on)
-            .map(|k| LABELS[k])
-            .collect();
-        let note = if on.is_empty() {
-            "Off".to_string()
+        let space = self.section_space();
+        let bounds = self.view3d.section.bounds(space)?;
+        let rows = self.view3d.section.any();
+        let m = 16.0;
+        // The widths of the bar, without and with the rows of the cuts. A
+        // fixed width keeps the bar at the right edge: a layout that aligns
+        // to the right puts the items of each row in the opposite order.
+        let width: f32 = if rows { 300.0 } else { 160.0 };
+        let width = width.min(rect.width() - 2.0 * m).max(0.0);
+        let mut top = rect.top() + m;
+        if let Some(t) = taken
+            && rect.right() - m - width < t.right() + 8.0
+        {
+            top = t.bottom() + 8.0;
+        }
+        let area = egui::Rect::from_min_max(
+            egui::pos2(rect.right() - m - width, top),
+            egui::pos2(rect.right() - m, rect.bottom() - m),
+        );
+        let what = if space == Space::Plate {
+            "the plate"
         } else {
-            format!("Cut {}", on.join(", "))
+            "the model"
         };
-        ui::card(ui, |ui| {
-            if !self.card_head(ui, "Section", &note) {
-                return;
-            }
-            let s = &mut self.view3d.section;
-            let row = egui::Vec2::new(ui.available_width(), 24.0);
-            let rtl = egui::Layout::right_to_left(egui::Align::Center);
-            ui.allocate_ui_with_layout(row, rtl, |ui| {
-                let moved = s.cuts.iter().any(|c| *c != Cut::default());
-                if ui
-                    .add_enabled(moved, ui::ghost("Reset", false))
-                    .on_hover_text("Turn off all cuts and move them to the center")
-                    .clicked()
-                {
-                    s.reset();
-                }
-                let ltr = egui::Layout::left_to_right(egui::Align::Center);
-                ui.with_layout(ltr, |ui| {
-                    ui.label(ui::dim("Cuts the model to show the inside."))
-                });
-            });
-            ui.add_space(2.0);
-            for (k, axis) in LABELS.into_iter().enumerate() {
-                ui.horizontal(|ui| {
-                    ui.label(format!("Cut {axis}"));
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui::toggle(ui, &mut s.cuts[k].on)
-                            .on_hover_text(format!("Cut the model across the {axis} axis"));
+        let info = if space == Space::Plate {
+            "Cuts the plate to show the inside, across the axes of the bed. The cuts stay \
+             in all tabs. The plate has its own positions. The export does not use the cut."
+        } else {
+            "Cuts the model to show the inside. The cuts stay in all tabs. The photo shows \
+             the cut. The export does not use it."
+        };
+        let s = &mut self.view3d.section;
+        let r = ui.scope_builder(
+            egui::UiBuilder::new()
+                .max_rect(area)
+                .layout(egui::Layout::top_down(egui::Align::Min)),
+            |ui| {
+                egui::Frame::NONE
+                    .fill(ui::glass())
+                    .corner_radius(10)
+                    .inner_margin(egui::Margin::same(4))
+                    .show(ui, |ui| {
+                        ui.set_width(width - 8.0);
+                        ui.spacing_mut().item_spacing = Vec2::new(2.0, 2.0);
+                        ui.spacing_mut().button_padding = Vec2::new(10.0, 5.0);
+                        ui.horizontal(|ui| {
+                            ui.add_space(8.0);
+                            ui.label(RichText::new("Section").size(13.5))
+                                .on_hover_text(info);
+                            ui.add_space(6.0);
+                            for (k, axis) in LABELS.into_iter().enumerate() {
+                                let on = s.cuts[k].on;
+                                if ui
+                                    .add(ui::ghost(axis, on))
+                                    .on_hover_text(format!("Cut {what} across the {axis} axis"))
+                                    .clicked()
+                                {
+                                    s.cuts[k].on = !on;
+                                }
+                            }
+                            // Reset needs room: it shows with the rows.
+                            if rows && s.changed() {
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        if ui
+                                            .add(ui::ghost("Reset", false))
+                                            .on_hover_text(
+                                                "Turn off all cuts and move them to the center",
+                                            )
+                                            .clicked()
+                                        {
+                                            s.reset();
+                                        }
+                                    },
+                                );
+                            }
+                        });
+                        for k in 0..3 {
+                            if s.cuts[k].on {
+                                cut_row(ui, s, space, &bounds, k);
+                            }
+                        }
                     });
-                });
-                if !s.cuts[k].on {
-                    continue;
-                }
-                let (lo, hi, step) = range(&bounds, k);
-                let mut at = s.position(k).unwrap_or(0.0);
-                let (changed, active) = position_row(ui, &mut at, lo..=hi, step);
-                if changed {
-                    s.cuts[k].at = Some(at);
-                }
-                if active {
-                    s.shown = Some(k);
-                }
-                let mut below = s.cuts[k].keep_below;
-                let plus = format!("Keep +{axis}");
-                let minus = format!("Keep \u{2212}{axis}");
-                if ui::segmented(ui, &mut below, &[(false, &plus), (true, &minus)]) {
-                    s.cuts[k].keep_below = below;
-                }
-                ui.add_space(4.0);
-            }
-        });
-        ui.add_space(4.0);
+            },
+        );
+        Some(r.response.rect)
     }
 }
 
-/// The position of a cut: a number field and a slider. Returns (changed,
-/// active): active is true while the user drags or points at the slider.
-fn position_row(
-    ui: &mut egui::Ui,
-    v: &mut f32,
-    range: std::ops::RangeInclusive<f32>,
-    step: f64,
-) -> (bool, bool) {
-    let (mut changed, mut active) = (false, false);
+/// The row of the cut on axis `k`: the axis, a slider, the position in mm
+/// and the side to keep.
+fn cut_row(ui: &mut egui::Ui, s: &mut Section, space: Space, bounds: &Bounds, k: usize) {
+    let axis = LABELS[k];
+    let (lo, hi, step) = range(bounds, k);
+    let mut at = s.position(space, k).unwrap_or(0.0);
+    // The center of a model at the origin can be −0.0 or a rounding error:
+    // show 0.
+    if at.abs() < (step * 0.5) as f32 {
+        at = 0.0;
+    }
+    let mut active = false;
     ui.horizontal(|ui| {
-        ui.label(ui::dim("Position"));
+        ui.add_space(8.0);
+        ui.add_sized(
+            [14.0, 26.0],
+            egui::Label::new(RichText::new(axis).strong().color(AXIS_COLORS[k])),
+        );
+        ui.add_space(4.0);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let below = s.cuts[k].keep_below;
+            let (side, other) = if below {
+                ("\u{2212}", "+")
+            } else {
+                ("+", "\u{2212}")
+            };
+            if ui
+                .add(ui::ghost(&format!("{side}{axis}"), false).min_size(Vec2::new(42.0, 0.0)))
+                .on_hover_text(format!(
+                    "The cut keeps the {side}{axis} side. Click to keep the {other}{axis} side."
+                ))
+                .clicked()
+            {
+                s.cuts[k].keep_below = !below;
+            }
             let d = super::decimals(step);
-            let r = ui.add(
-                egui::DragValue::new(v)
-                    .range(range.clone())
+            let r = ui.add_sized(
+                [78.0, 22.0],
+                egui::DragValue::new(&mut at)
+                    .range(lo..=hi)
                     .speed(step)
                     .max_decimals(d)
                     .min_decimals(d)
                     .suffix(" mm"),
             );
-            changed |= r.changed();
+            if r.changed() {
+                s.set_position(space, k, Some(at));
+            }
             active |= r.dragged() || r.has_focus();
+            ui.add_space(4.0);
+            ui.spacing_mut().slider_width = ui.available_width().max(40.0);
+            let r = ui.add(
+                egui::Slider::new(&mut at, lo..=hi)
+                    .step_by(step)
+                    .show_value(false),
+            );
+            if r.changed() {
+                s.set_position(space, k, Some(at));
+            }
+            active |= r.dragged() || r.hovered();
         });
     });
-    ui.spacing_mut().slider_width = ui.available_width();
-    let r = ui.add(egui::Slider::new(v, range).step_by(step).show_value(false));
-    changed |= r.changed();
-    active |= r.dragged() || r.hovered();
-    ui.add_space(2.0);
     if active {
+        s.shown = Some(k);
         ui.ctx().request_repaint();
     }
-    (changed, active)
 }
 
 #[cfg(test)]
@@ -388,6 +519,9 @@ mod tests {
             max: Vec3::new(40.0, 10.0, 20.0),
         }
     }
+
+    const M: Space = Space::Model;
+    const P: Space = Space::Plate;
 
     #[test]
     fn plane_keeps_one_side() {
@@ -407,12 +541,12 @@ mod tests {
     #[test]
     fn planes_combine() {
         let mut s = Section::default();
-        s.set_bounds(Some(bounds()));
-        assert!(s.planes().is_empty());
+        s.set_bounds(M, Some(bounds()));
+        assert!(s.planes(M).is_empty());
         // X and Y at the center: a quarter stays.
         s.cuts[0].on = true;
         s.cuts[1].on = true;
-        let planes = s.planes();
+        let planes = s.planes(M);
         assert_eq!(planes.len(), 2);
         assert!(keeps(&planes, Vec3::new(30.0, 5.0, 10.0)));
         assert!(!keeps(&planes, Vec3::new(10.0, 5.0, 10.0)));
@@ -420,7 +554,7 @@ mod tests {
         assert!(!keeps(&planes, Vec3::new(10.0, -5.0, 10.0)));
         // The other side of X.
         s.cuts[0].keep_below = true;
-        let planes = s.planes();
+        let planes = s.planes(M);
         assert!(keeps(&planes, Vec3::new(10.0, 5.0, 10.0)));
         assert!(!keeps(&planes, Vec3::new(30.0, 5.0, 10.0)));
     }
@@ -442,45 +576,85 @@ mod tests {
     #[test]
     fn position_follows_the_model_until_the_user_sets_one() {
         let mut s = Section::default();
-        assert_eq!(s.position(0), None);
+        assert_eq!(s.position(M, 0), None);
         s.cuts[0].on = true;
         // No bounds yet: no plane.
-        assert!(s.planes().is_empty());
-        s.set_bounds(Some(bounds()));
-        assert_eq!(s.position(0), Some(20.0));
-        assert_eq!(s.position(1), Some(0.0));
+        assert!(s.planes(M).is_empty());
+        s.set_bounds(M, Some(bounds()));
+        assert_eq!(s.position(M, 0), Some(20.0));
+        assert_eq!(s.position(M, 1), Some(0.0));
         // A new render with other bounds: the center moves.
-        s.set_bounds(Some(Bounds {
-            min: Vec3::ZERO,
-            max: Vec3::splat(10.0),
-        }));
-        assert_eq!(s.position(0), Some(5.0));
+        s.set_bounds(
+            M,
+            Some(Bounds {
+                min: Vec3::ZERO,
+                max: Vec3::splat(10.0),
+            }),
+        );
+        assert_eq!(s.position(M, 0), Some(5.0));
         // The user sets a position: it stays after a new render.
-        s.set(0, Some(3.0), true);
-        s.set_bounds(Some(bounds()));
-        assert_eq!(s.position(0), Some(3.0));
-        assert_eq!(s.planes(), vec![plane(0, 3.0, true)]);
+        s.set(M, 0, Some(3.0), true);
+        s.set_bounds(M, Some(bounds()));
+        assert_eq!(s.position(M, 0), Some(3.0));
+        assert_eq!(s.planes(M), vec![plane(0, 3.0, true)]);
         // Out of the range: the end of the range.
-        s.set(1, Some(500.0), false);
+        s.set(M, 1, Some(500.0), false);
         let (_, hi, _) = range(&bounds(), 1);
-        assert_eq!(s.position(1), Some(hi));
+        assert_eq!(s.position(M, 1), Some(hi));
         assert!(hi > 10.0 && hi < 12.0);
         // Another model: back to the center, the cuts stay on.
         s.new_model();
-        assert_eq!(s.position(0), Some(20.0));
+        assert_eq!(s.position(M, 0), Some(20.0));
         assert!(s.cuts[0].on);
+        assert!(s.changed());
         s.reset();
         assert!(!s.any());
+        assert!(!s.changed());
+    }
+
+    #[test]
+    fn the_plate_shares_the_cuts_and_has_its_own_positions() {
+        let mut s = Section::default();
+        s.set_bounds(M, Some(bounds()));
+        let bed = Bounds {
+            min: Vec3::new(100.0, 80.0, 0.0),
+            max: Vec3::new(160.0, 120.0, 30.0),
+        };
+        s.set_bounds(P, Some(bed));
+        // A cut in the Model tab is on in the Optimize tab, at the center of
+        // the plate, with the same side.
+        s.set(M, 2, Some(4.0), true);
+        assert_eq!(s.planes(M), vec![plane(2, 4.0, true)]);
+        assert_eq!(s.planes(P), vec![plane(2, 15.0, true)]);
+        // A position on the plate does not move the cut of the model.
+        s.set_position(P, 2, Some(7.5));
+        assert_eq!(s.position(P, 2), Some(7.5));
+        assert_eq!(s.position(M, 2), Some(4.0));
+        // The side and the switch are the same in both spaces.
+        s.cuts[2].keep_below = false;
+        assert_eq!(s.planes(P), vec![plane(2, 7.5, false)]);
+        assert_eq!(s.planes(M), vec![plane(2, 4.0, false)]);
+        s.cuts[2].on = false;
+        assert!(s.planes(P).is_empty() && s.planes(M).is_empty());
+        // No plate yet: no plane on the plate, the model keeps its cut.
+        s.cuts[0].on = true;
+        s.set_bounds(P, None);
+        assert!(s.planes(P).is_empty());
+        assert_eq!(s.planes(M), vec![plane(0, 20.0, false)]);
+        // The tabs and their spaces.
+        assert_eq!(Space::of(Mode::Optimize), P);
+        assert_eq!(Space::of(Mode::Model), M);
+        assert_eq!(Space::of(Mode::Render), M);
     }
 
     #[test]
     fn json_round_trip() {
         let mut s = Section::default();
-        s.set_bounds(Some(bounds()));
-        s.set_json(&json!({ "x": { "at": 12.5, "keep": "-" }, "z": {} }))
+        s.set_bounds(M, Some(bounds()));
+        s.set_json(M, &json!({ "x": { "at": 12.5, "keep": "-" }, "z": {} }))
             .unwrap();
         assert_eq!(
-            s.to_json(),
+            s.to_json(M),
             json!({
                 "x": { "at": 12.5, "keep": "-" },
                 "y": null,
@@ -489,14 +663,14 @@ mod tests {
         );
         // The state goes back into set_view.
         let mut t = Section::default();
-        t.set_bounds(Some(bounds()));
-        t.set_json(&s.to_json()).unwrap();
-        assert_eq!(t.planes(), s.planes());
+        t.set_bounds(M, Some(bounds()));
+        t.set_json(M, &s.to_json(M)).unwrap();
+        assert_eq!(t.planes(M), s.planes(M));
         // Null and missing axes turn their cut off.
-        s.set_json(&json!({ "x": null })).unwrap();
+        s.set_json(M, &json!({ "x": null })).unwrap();
         assert!(!s.any());
         // Errors change nothing.
-        s.set_json(&json!({ "y": {} })).unwrap();
+        s.set_json(M, &json!({ "y": {} })).unwrap();
         for bad in [
             json!(5),
             json!({ "w": {} }),
@@ -504,10 +678,22 @@ mod tests {
             json!({ "x": { "at": "middle" } }),
             json!({ "x": 3 }),
         ] {
-            assert!(s.set_json(&bad).is_err(), "{bad}");
+            assert!(s.set_json(M, &bad).is_err(), "{bad}");
         }
-        assert_eq!(s.to_json()["y"], json!({ "at": 0.0, "keep": "+" }));
-        assert!(s.to_json()["x"].is_null());
+        assert_eq!(s.to_json(M)["y"], json!({ "at": 0.0, "keep": "+" }));
+        assert!(s.to_json(M)["x"].is_null());
+        // The positions on the plate are apart from the positions in the
+        // model.
+        s.set_bounds(
+            P,
+            Some(Bounds {
+                min: Vec3::ZERO,
+                max: Vec3::splat(50.0),
+            }),
+        );
+        s.set_json(P, &json!({ "y": { "at": 30.0 } })).unwrap();
+        assert_eq!(s.to_json(P)["y"], json!({ "at": 30.0, "keep": "+" }));
+        assert_eq!(s.to_json(M)["y"], json!({ "at": 0.0, "keep": "+" }));
     }
 
     #[test]

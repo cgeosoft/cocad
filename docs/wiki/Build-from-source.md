@@ -65,6 +65,7 @@ A tag `v*` (for example `v0.2.0`) also makes a GitHub release with all files att
 | `multicolor-badge.scad` | SVG inlays, one part for each color in touching solids |
 | `desk-dock.scad` | The showcase of the Optimize tab: a part too large for the bed, horizontal holes, counterbores with holes above, blind holes, a thin foot, three same parts in a tilted rotation, `%` reference parts |
 | `reference-part.scad` | A `%` reference part that is not printed or exported |
+| `part-selector.scad` | A `part` selector list: each value builds on its own, and the parts get the labels as names |
 | `open-mesh.scad` | Open mesh: open-edge warning, STEP as an open shell |
 | `flat-2d.scad` | 2D only: must fail with a clear error |
 | `empty.scad` | No geometry: must fail with a clear error |
@@ -80,17 +81,21 @@ Models with `// expect: error` on the first line must fail.
 | `src/app/remote.rs` | MCP tools inside the window |
 | `src/app/select.rs` | Select a part in the 3D view, part menu, focus, color window of one part |
 | `src/app/tour.rs` | Welcome tour |
+| `src/app/start.rs` | Start page when no model is open, new model and its template |
+| `src/app/thumb.rs` | Model thumbnails: drawn when a model opens and closes, start page cache of thumbnails, titles and descriptions |
+| `src/thumbs.rs` | Thumbnail files in the settings folder (`thumbs/`) |
 | `src/app/optimize_tab.rs` | The Optimize tab: cards, plate view, pipeline runs in the background, plate export, MCP Optimize state |
 | `src/mcp.rs` | MCP server, tool list, window listener |
 | `src/app/view3d.rs` | 3D view options for the parts: part colors, explode, Parts and Explode cards, part colors window |
 | `src/app/state.rs` | State of each model: right panel settings and last parameter values, in `models.json` |
-| `src/app/section.rs` | Section cut: planes on X, Y and Z, Section card, MCP section state |
+| `src/app/section.rs` | Section cut: planes on X, Y and Z in model or bed coordinates, the Section bar of the 3D view, MCP section state |
 | `src/render.rs` | OpenGL shaders and buffers. Draws each part with its own color, offset and transparency, and the section cut with stencil cut faces |
 | `src/assembly.rs` | Parts of the 3D view: shells, named parts, part palette, moved mesh for the photo |
 | `src/csg_split.rs` | Module split: finds the module calls in the CSG tree and renders each one |
 | `src/ui.rs` | Dark and light palettes and widgets |
 | `src/params.rs` | Customizer parameter parser |
-| `src/presets.rs` | Parameter sets (OpenSCAD `.json` format) |
+| `src/definition.rs` | Model definition `<model>.yml`: text, part names and colors, parameter sets. Reads the OpenSCAD `.json` format of older models |
+| `src/presets.rs` | Parameter sets: apply, save, delete, the set that loads at open |
 | `src/recent.rs` | List of recent models |
 | `src/examples.rs` | Example models in the File menu |
 | `src/telemetry.rs` | Optional analytics and error reports (PostHog), final allowlist |
@@ -100,16 +105,18 @@ Models with `// expect: error` on the first line must fail.
 | `src/net.rs` | HTTP client setup |
 | `src/openscad.rs` | Runs `openscad` and reads the STL |
 | `src/mesh.rs` | Indexed mesh, STL reader, checks |
-| `src/parts.rs` | Finds the parts of a multicolor model and renders each one |
+| `src/part_param.rs` | The part list: from the model definition, else from the dropdown list of the part parameter. Builds each value of a part list |
+| `src/parts.rs` | Multicolor part lists: renders each part with its color |
 | `src/export.rs` | STL, 3MF, multicolor 3MF and STEP writers |
 | `src/slicer.rs` | Preview slicer |
-| `src/optimize/` | Print preparation: `pipeline.rs` (print parts, plates, cache), `plate.rs` (same parts, overlap, layout), `orient.rs`, `split.rs`, `fixes.rs` with `teardrop.rs`, `bridges.rs` and `brim.rs`, `check.rs`, `scad.rs` (OpenSCAD runs on part meshes), `headless.rs` (CLI print options and report) |
+| `src/optimize/` | Print preparation: `pipeline.rs` (print parts, plates, cache), `plate.rs` (same parts, overlap, layout), `orient.rs`, `split.rs`, `fixes.rs` with `teardrop.rs`, `holes.rs`, `bridges.rs`, `brim.rs` and `ears.rs`, `check.rs`, `scad.rs` (OpenSCAD runs on part meshes), `headless.rs` (CLI print options and report) |
 | `src/printer.rs` | Printer presets and the print area editor |
 | `src/pathtrace.rs` | Path tracer for photo renders (BVH, plastic material, studio light, section cut) |
 | `examples/` | Test models. The binary embeds the models that render. |
 | `scripts/` | Build and packaging scripts |
 | `packaging/` | Desktop entry, icon, MIME type for the `.deb` |
 | `assets/tour/` | Tour screenshots, embedded in the binary |
+| `assets/examples/` | Thumbnails of the examples (`scripts/example-thumbs.sh`), embedded in the binary |
 | `assets/guide/` | Screenshots (`scripts/guide-shots.sh`) and before and after pictures of the guide [Prepare a model for printing](Prepare-a-model-for-printing) |
 | `docs/wiki/` | The source of these wiki pages. `scripts/publish-wiki.sh` copies them to the GitHub wiki. |
 

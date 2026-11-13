@@ -15,9 +15,10 @@ use std::f64::consts::{FRAC_PI_2, PI};
 /// How a part lies on the bed.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Choice {
-    /// The model rotation. The default.
+    /// The model rotation.
     Model,
-    /// The best face, found by `auto_down`.
+    /// The best face, found by `auto_down`. The default: a model gives
+    /// the parts in their position in use, not in print position.
     Auto,
     /// The user selected a face: this direction of the model points down.
     Face(Vec3),
@@ -33,7 +34,7 @@ pub struct Orientation {
 impl Default for Orientation {
     fn default() -> Self {
         Orientation {
-            choice: Choice::Model,
+            choice: Choice::Auto,
             quarter_turns: 0,
         }
     }
@@ -694,7 +695,12 @@ fn convex_hull(pts: &[DVec3]) -> Vec<[usize; 3]> {
 
     let tet = [i0, i1, i2, i3];
     let mut faces: Vec<Facet> = Vec::new();
-    for (f, opp) in [([0, 1, 2], 3), ([0, 1, 3], 2), ([0, 2, 3], 1), ([1, 2, 3], 0)] {
+    for (f, opp) in [
+        ([0, 1, 2], 3),
+        ([0, 1, 3], 2),
+        ([0, 2, 3], 1),
+        ([1, 2, 3], 0),
+    ] {
         let mut v = f.map(|k| tet[k]);
         if Facet::new(pts, v).dist(pts[tet[opp]]) > 0.0 {
             v.swap(1, 2);
@@ -939,7 +945,11 @@ mod tests {
         let d = auto_down(&m, &limits());
         assert!(d == Vec3::X || d == Vec3::NEG_X, "down = {d}");
         let b = print_bounds(&m, &auto(), &Area::default());
-        assert!(near(b.size(), Vec3::new(30.0, 20.0, 10.0), 1e-4), "{:?}", b.size());
+        assert!(
+            near(b.size(), Vec3::new(30.0, 20.0, 10.0), 1e-4),
+            "{:?}",
+            b.size()
+        );
     }
 
     #[test]
@@ -977,7 +987,11 @@ mod tests {
         let want = t.transform_vector3(Vec3::NEG_Z);
         assert!(near(d, want, 1e-4), "down = {d}, want {want}");
         let b = print_bounds(&turned, &auto(), &Area::default());
-        assert!(near(b.size(), Vec3::new(50.0, 40.0, 30.0), 1e-3), "{:?}", b.size());
+        assert!(
+            near(b.size(), Vec3::new(50.0, 40.0, 30.0), 1e-3),
+            "{:?}",
+            b.size()
+        );
     }
 
     #[test]
@@ -987,7 +1001,14 @@ mod tests {
             rotation_down(Vec3::Z),
             Mat4::from_cols(Vec4::X, Vec4::NEG_Y, Vec4::NEG_Z, Vec4::W)
         );
-        for d in [Vec3::X, Vec3::NEG_X, Vec3::Y, Vec3::NEG_Y, Vec3::Z, Vec3::NEG_Z] {
+        for d in [
+            Vec3::X,
+            Vec3::NEG_X,
+            Vec3::Y,
+            Vec3::NEG_Y,
+            Vec3::Z,
+            Vec3::NEG_Z,
+        ] {
             let r = rotation_down(d);
             assert_eq!(r.transform_vector3(d), Vec3::NEG_Z, "{d}");
             assert!((r.determinant() - 1.0).abs() < 1e-6);
@@ -997,12 +1018,19 @@ mod tests {
             }
         }
         let d = Vec3::new(0.3, -0.5, 0.8).normalize();
-        assert!(near(rotation_down(d).transform_vector3(d), Vec3::NEG_Z, 1e-6));
+        assert!(near(
+            rotation_down(d).transform_vector3(d),
+            Vec3::NEG_Z,
+            1e-6
+        ));
     }
 
     #[test]
     fn matrix_puts_the_part_on_the_bed_at_the_center() {
-        let m = transformed(&bracket(), tilt() * Mat4::from_translation(Vec3::new(5.0, -7.0, 3.0)));
+        let m = transformed(
+            &bracket(),
+            tilt() * Mat4::from_translation(Vec3::new(5.0, -7.0, 3.0)),
+        );
         let area = Area::default();
         for o in [
             Orientation::default(),
@@ -1042,15 +1070,38 @@ mod tests {
         // Long along y in the model.
         let m = cuboid(Vec3::ZERO, Vec3::new(10.0, 40.0, 5.0));
         let size = |m: &Mesh, o, a| print_bounds(m, &o, a).size();
-        assert!(near(size(&m, face(0), &wide), Vec3::new(40.0, 10.0, 5.0), 1e-4));
-        assert!(near(size(&m, face(0), &deep), Vec3::new(10.0, 40.0, 5.0), 1e-4));
-        assert!(near(size(&m, face(1), &wide), Vec3::new(10.0, 40.0, 5.0), 1e-4));
+        assert!(near(
+            size(&m, face(0), &wide),
+            Vec3::new(40.0, 10.0, 5.0),
+            1e-4
+        ));
+        assert!(near(
+            size(&m, face(0), &deep),
+            Vec3::new(10.0, 40.0, 5.0),
+            1e-4
+        ));
+        assert!(near(
+            size(&m, face(1), &wide),
+            Vec3::new(10.0, 40.0, 5.0),
+            1e-4
+        ));
         // Turned by 30 degrees about z in the model.
         let turned = transformed(&m, Mat4::from_rotation_z(std::f32::consts::FRAC_PI_6));
-        assert!(near(size(&turned, face(0), &wide), Vec3::new(40.0, 10.0, 5.0), 1e-3));
+        assert!(near(
+            size(&turned, face(0), &wide),
+            Vec3::new(40.0, 10.0, 5.0),
+            1e-3
+        ));
         // The model choice does not turn.
-        let model = Orientation::default();
-        assert!(near(size(&m, model, &wide), Vec3::new(10.0, 40.0, 5.0), 1e-4));
+        let model = Orientation {
+            choice: Choice::Model,
+            quarter_turns: 0,
+        };
+        assert!(near(
+            size(&m, model, &wide),
+            Vec3::new(10.0, 40.0, 5.0),
+            1e-4
+        ));
     }
 
     #[test]

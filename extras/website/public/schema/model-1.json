@@ -1,0 +1,122 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cocad.cgeosoft.com/schema/model-1.json",
+  "title": "CoCAD model definition, version 1",
+  "description": "The file <model>.yml next to <model>.scad. It holds the text about the model, the parts and the parameter sets. The .scad file holds only OpenSCAD code.",
+  "type": "object",
+  "required": ["cocad"],
+  "additionalProperties": false,
+  "patternProperties": {
+    "^x-": {
+      "description": "A key for other tools. CoCAD does not read it."
+    }
+  },
+  "properties": {
+    "cocad": {
+      "description": "The version of this format.",
+      "const": 1
+    },
+    "title": {
+      "description": "The name of the model.",
+      "type": "string"
+    },
+    "description": {
+      "description": "What the model is.",
+      "type": "string"
+    },
+    "author": {
+      "description": "The person or the group that made the model.",
+      "type": "string"
+    },
+    "version": {
+      "description": "The version of the model.",
+      "type": ["string", "number"]
+    },
+    "license": {
+      "description": "The license of the model, for example an SPDX identifier.",
+      "type": "string"
+    },
+    "url": {
+      "description": "The web page of the model.",
+      "type": "string",
+      "format": "uri"
+    },
+    "part_parameter": {
+      "description": "The string parameter of the .scad file that selects a part. The value \"all\" shows all parts. Default: part.",
+      "type": "string",
+      "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+      "default": "part"
+    },
+    "multicolor": {
+      "description": "true: the parts are the colors of one object. CoCAD keeps them together as one print part and exports a multicolor 3MF. false: each part is a separate print part.",
+      "type": "boolean",
+      "default": false
+    },
+    "parts": {
+      "description": "The values of the part parameter other than \"all\", in order. For a multicolor model, the order sets the filament number.",
+      "type": "array",
+      "items": {
+        "anyOf": [
+          {
+            "description": "The value of the part parameter. CoCAD uses it as the name.",
+            "type": "string",
+            "minLength": 1,
+            "not": { "const": "all" }
+          },
+          { "$ref": "#/$defs/part" }
+        ]
+      }
+    },
+    "sets": {
+      "description": "Parameter sets. The key is the name of the set.",
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/set" }
+    }
+  },
+  "$defs": {
+    "part": {
+      "type": "object",
+      "required": ["id"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "description": "The value of the part parameter that shows only this part.",
+          "type": "string",
+          "minLength": 1,
+          "not": { "const": "all" }
+        },
+        "name": {
+          "description": "The name that CoCAD shows. Default: the id.",
+          "type": "string"
+        },
+        "color": {
+          "description": "The color of the part: #RRGGBB or a color name (white, black, red, green, blue, yellow, orange, purple, pink, brown, cyan, magenta, gold, silver, gray, grey).",
+          "type": "string",
+          "pattern": "^(#[0-9A-Fa-f]{6}|[A-Za-z]+)$"
+        }
+      }
+    },
+    "set": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "description": "What the set is for.",
+          "type": "string"
+        },
+        "values": {
+          "description": "Parameter name and value. Parameters that are not in the set keep the default of the model.",
+          "type": "object",
+          "additionalProperties": {
+            "oneOf": [
+              { "type": "number" },
+              { "type": "string" },
+              { "type": "boolean" },
+              { "type": "array", "items": { "type": "number" } }
+            ]
+          }
+        }
+      }
+    }
+  }
+}

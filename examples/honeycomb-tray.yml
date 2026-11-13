@@ -1,0 +1,26 @@
+# yaml-language-server: $schema=https://cocad.cgeosoft.com/schema/model-1.json
+cocad: 1
+title: Honeycomb tray
+description: >-
+  A tray with a honeycomb floor. Use it to test many holes in each layer and
+  thin walls.
+author: cgeosoft
+license: MIT
+url: https://github.com/cgeosoft/cocad/blob/main/examples/honeycomb-tray.scad
+
+sets:
+  Desk tray:
+    description: The default tray.
+  Coarse cells:
+    description: Large cells with thick webs, so each layer has fewer holes.
+    values:
+      cell: 20
+      web: 2.4
+  Drawer insert:
+    description: A long, deep insert with small cells.
+    values:
+      length: 200
+      width: 60
+      height: 40
+      cell: 8
+      web: 1.2

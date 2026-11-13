@@ -1,0 +1,35 @@
+# yaml-language-server: $schema=https://cocad.cgeosoft.com/schema/model-1.json
+cocad: 1
+title: Gear
+description: >-
+  A spur gear with a hub and a bore. Use it to test polygon math and many
+  facets.
+author: cgeosoft
+license: MIT
+url: https://github.com/cgeosoft/cocad/blob/main/examples/gear.scad
+
+sets:
+  24 teeth:
+    description: The default gear, module 2 with a hub.
+  Pinion:
+    description: A small gear with 12 teeth and a tall hub.
+    values:
+      teeth: 12
+      hub_height: 10
+  Large wheel:
+    description: A wheel with 60 teeth, module 1.5 and a large bore.
+    values:
+      teeth: 60
+      gear_module: 1.5
+      thickness: 8
+      bore: 8
+      hub_height: 8
+  Fine pitch:
+    description: 40 small teeth with a pressure angle of 14.5 degrees and no hub.
+    values:
+      teeth: 40
+      gear_module: 0.8
+      thickness: 4
+      pressure_angle: 14.5
+      bore: 3
+      hub: false

@@ -17,7 +17,7 @@
 
 ## Keys
 
-The keys do nothing while a text field has the focus. The tab names show the key letter underlined.
+The keys do nothing while a text field has the focus. Point to a tab name to see its key.
 
 | Key | Action |
 |---|---|
@@ -35,6 +35,7 @@ The keys do nothing while a text field has the focus. The tab names show the key
 
 | Key | Action |
 |---|---|
+| Ctrl+N | Make a new model |
 | Ctrl+O | Open a file |
 | Ctrl+, | Settings |
 | Ctrl+Q | Quit |

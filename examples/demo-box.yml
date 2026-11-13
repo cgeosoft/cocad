@@ -1,0 +1,41 @@
+# yaml-language-server: $schema=https://cocad.cgeosoft.com/schema/model-1.json
+cocad: 1
+title: Demo box
+description: >-
+  A box with compartments, a lid lip and a front label. It uses each
+  Customizer widget type.
+author: cgeosoft
+license: MIT
+url: https://github.com/cgeosoft/cocad/blob/main/examples/demo-box.scad
+
+sets:
+  Two compartments:
+    description: The default box.
+  Pencil tray:
+    description: A long, low tray with one compartment.
+    values:
+      width: 140
+      depth: 40
+      height: 20
+      compartments: 1
+      label: PENS
+  Parts organizer:
+    description: A large box with four compartments, square corners and no lid lip.
+    values:
+      width: 120
+      depth: 80
+      height: 30
+      corners: square
+      compartments: 4
+      lip: false
+      label: M3
+  Deep box:
+    description: A tall box with thick walls and the label above the center.
+    values:
+      width: 60
+      depth: 60
+      height: 60
+      wall: 3
+      compartments: 1
+      label: BOX
+      label_offset: [0, 15]

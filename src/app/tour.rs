@@ -34,9 +34,9 @@ const STEPS: [Step; 10] = [
         title: "Welcome to CoCAD",
         intro: "View and change OpenSCAD models. OpenSCAD does the geometry in the background.",
         points: &[
-            "Press Ctrl+O to open a .scad file, or drop it on the window.",
-            "The start view and the File menu list your recent models.",
-            "File > Examples opens a sample model.",
+            "The start page makes a new model, opens a .scad file or opens a sample model.",
+            "Press Ctrl+N for a new model and Ctrl+O to open a file. You can also drop a file on the window.",
+            "The start page and the File menu list your recent models.",
             "When the file changes on disk, the model reloads and keeps your values.",
             "Left drag orbits. Right drag pans. The wheel zooms.",
         ],
@@ -60,18 +60,18 @@ const STEPS: [Step; 10] = [
             "Select a set to load it. Model defaults resets all values.",
             "The disk button saves to the selected set. The gear menu makes a new set.",
             "The set that you used last loads when you open the model.",
-            "The sets are in a .json file. OpenSCAD reads the same format.",
+            "The sets are in <model>.yml next to the model, with the title and the part names.",
         ],
         image: shot!("3-sets"),
     },
     Step {
         title: "Check and export",
-        intro: "The status bar and the Mesh card of the Model tab show the mesh data. The Export card is at the bottom of the Optimize tab.",
+        intro: "The status bar and the Mesh card of the Model tab show the mesh data. Export 3MF is at the bottom of the Optimize tab.",
         points: &[
             "Check the size, volume, triangles and open edges.",
             "Back faces show in purple. Press W for the wireframe.",
             "Export 3MF writes the print plate. The arrow opens a menu with STL, all plates and STEP of the model as built.",
-            "A model with a cocad_part list shows each part in its color and exports a multicolor 3MF.",
+            "A model with a multicolor part list shows each part in its color and exports a multicolor 3MF.",
             "The Model menu has the export commands in all tabs.",
         ],
         image: shot!("4-export"),
@@ -82,7 +82,7 @@ const STEPS: [Step; 10] = [
         points: &[
             "Part colors gives each part a different color. Colors… sets your own colors.",
             "Explode moves the parts apart. Press E.",
-            "Section cuts the view on the X, Y and Z axes. You select the side to keep.",
+            "Section, at the top right of the 3D view, cuts the view on the X, Y and Z axes. The cut stays in all tabs.",
             "Click a part to select it. Right click a part to focus on it or to change its color.",
         ],
         image: shot!("5-parts"),
@@ -92,10 +92,10 @@ const STEPS: [Step; 10] = [
         intro: "The Optimize tab puts the parts on the bed of your printer. Press O to open it.",
         points: &[
             "Same parts show as one row with a count. When the parts do not fit on one plate, CoCAD fills more plates.",
-            "Custom orientation puts a part on its best face, or on a face that you click.",
-            "Turn on print fixes: teardrop holes, bridges, bed chamfer and brims.",
+            "CoCAD puts each part on its best face. You can also click the face that goes on the bed.",
+            "Turn on print fixes: teardrop holes, hole size, bridges, bed chamfer, brims and mouse ears.",
             "Split a part that is too large. The Check card lists the problems.",
-            "Layers shows the slice of the plate. The Export card at the bottom writes the plate.",
+            "Layers shows the slice of the plate. Export 3MF at the bottom writes the plate.",
         ],
         image: shot!("6-slice"),
     },
@@ -103,9 +103,9 @@ const STEPS: [Step; 10] = [
         title: "Render a photo",
         intro: "The Render tab path-traces the current view on all CPU cores. Press R to open it.",
         points: &[
-            "The image gets cleaner with each sample.",
-            "Choose the plastic color, finish, studio and image size.",
-            "The Render card at the bottom shows the progress. Save PNG writes the image at its full size.",
+            "Click Render at the bottom. The image gets cleaner with each sample.",
+            "Material sets one color for the model or a color for each part, and the finish.",
+            "Save PNG writes the image at its full size. A change of the view stops the render.",
         ],
         image: shot!("7-photo"),
     },
@@ -158,6 +158,14 @@ impl Tour {
             image: None,
             binary: binary_path(std::env::current_exe().ok()),
             copied: None,
+        }
+    }
+
+    /// The tour at the step that shows how to connect an MCP client.
+    pub fn connect() -> Tour {
+        Tour {
+            step: CONNECT,
+            ..Tour::new()
         }
     }
 
@@ -286,15 +294,17 @@ impl App {
                             .max_height(height)
                             .auto_shrink([false, false])
                             .show(ui, |ui| {
-                                ui.spacing_mut().item_spacing.y = 8.0;
-                                ui.label(current.intro);
-                                ui.add_space(4.0);
-                                for point in current.points {
-                                    bullet(ui, point);
-                                }
-                                if tour.step == CONNECT {
-                                    connect(ui, running, &tour.binary, &mut tour.copied);
-                                }
+                                ui::bar_room(ui, |ui| {
+                                    ui.spacing_mut().item_spacing.y = 8.0;
+                                    ui.label(current.intro);
+                                    ui.add_space(4.0);
+                                    for point in current.points {
+                                        bullet(ui, point);
+                                    }
+                                    if tour.step == CONNECT {
+                                        connect(ui, running, &tour.binary, &mut tour.copied);
+                                    }
+                                });
                             });
                     });
                 });

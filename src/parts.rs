@@ -1,24 +1,30 @@
-//! Multicolor models. A model lists its parts in a `cocad_part` dropdown:
+//! Multicolor models. The model definition lists the parts with
+//! `multicolor: true`, and gives each part its color:
 //!
-//! ```openscad
-//! cocad_part = "all"; // [all, plate, star]
+//! ```yaml
+//! multicolor: true
+//! parts:
+//!   - id: plate
+//!     color: white
+//!   - id: star
+//!     color: red
 //! ```
 //!
-//! Each part renders on its own with `-D cocad_part="name"`. The order of the
-//! list sets the filament number. A part sets its color with
-//! `echo(cocad_color = "red")`, and CoCAD reads it from the OpenSCAD log.
+//! Each part renders on its own with `-D part="plate"` (see `part_param.rs`
+//! for the part parameter). The order of the list sets the filament number.
+//! A part without a color in the definition can set it with
+//! `echo(cocad_color = "red")`: CoCAD reads it from the OpenSCAD log. Models
+//! before CoCAD 0.8 list the parts in a `cocad_part` dropdown.
 
 use crate::mesh::Mesh;
 use crate::openscad::{self, Config};
-use crate::params::{self, Param, Value, Widget};
+use crate::params::{self, Param, Value};
+use crate::part_param::{self, PartList};
 use anyhow::{Context, Result, bail};
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
-
-const PARAM: &str = "cocad_part";
-const ALL: &str = "all";
 
 /// Used for a part that does not set a color. Neighbors stay easy to tell apart.
 const PALETTE: [[u8; 3]; 6] = [
@@ -36,28 +42,22 @@ pub struct Part {
     pub mesh: Mesh,
 }
 
-/// The part names in filament order. Empty for a model without parts.
-pub fn names(params: &[Param]) -> Vec<String> {
-    let Some(Widget::Dropdown(options)) =
-        params.iter().find(|p| p.name == PARAM).map(|p| &p.widget)
-    else {
-        return Vec::new();
-    };
-    options
-        .iter()
-        .filter_map(|(value, _)| match value {
-            Value::Str(s) if s != ALL => Some(s.clone()),
-            _ => None,
-        })
-        .collect()
+/// The part parameter of a multicolor list.
+fn list(params: &[Param]) -> Option<(&Param, &PartList)> {
+    part_param::selector(params).filter(|(_, l)| l.multicolor)
 }
 
-/// The selected `cocad_part` value, or `None` for a model without parts.
+/// The part values in filament order. Empty for a model without a
+/// multicolor list.
+pub fn names(params: &[Param]) -> Vec<String> {
+    list(params)
+        .map(|(_, l)| l.choices.iter().map(|c| c.value.clone()).collect())
+        .unwrap_or_default()
+}
+
+/// The selected value, or `None` for a model without a multicolor list.
 pub fn selected(params: &[Param]) -> Option<String> {
-    if names(params).is_empty() {
-        return None;
-    }
-    match &params.iter().find(|p| p.name == PARAM)?.value {
+    match &list(params)?.0.value {
         Value::Str(s) => Some(s.clone()),
         _ => None,
     }
@@ -66,15 +66,24 @@ pub fn selected(params: &[Param]) -> Option<String> {
 /// True when the 3D view must render each part to color the model:
 /// the model has parts and shows all of them.
 pub fn needs_render(params: &[Param]) -> bool {
-    selected(params).is_some_and(|s| s == ALL)
+    selected(params).is_some_and(|s| s == part_param::ALL)
 }
 
 /// The color of the one part that the model shows, from the log of the
 /// main render. `None` when the model shows all parts or has no parts.
 pub fn shown_color(params: &[Param], log: &str) -> Option<[u8; 3]> {
-    let name = selected(params).filter(|s| s != ALL)?;
-    let i = names(params).iter().position(|n| *n == name)?;
-    Some(echoed_color(log).unwrap_or(PALETTE[i % PALETTE.len()]))
+    let value = selected(params).filter(|s| s != part_param::ALL)?;
+    let (_, l) = list(params)?;
+    let i = l.choices.iter().position(|c| c.value == value)?;
+    Some(color(l.choices[i].color, log, i))
+}
+
+/// The color of part `i`: from the definition, else from the log, else
+/// from the palette.
+fn color(defined: Option<[u8; 3]>, log: &str, i: usize) -> [u8; 3] {
+    defined
+        .or_else(|| echoed_color(log))
+        .unwrap_or(PALETTE[i % PALETTE.len()])
 }
 
 /// The part color of each triangle of `mesh`, the model with all parts.
@@ -129,34 +138,34 @@ pub fn face_colors(mesh: &Mesh, parts: &[Part]) -> Vec<Option<[u8; 3]>> {
         .collect()
 }
 
-/// Renders all parts at the same time. The value of `cocad_part` has no effect.
+/// Renders all parts at the same time. The value of the part parameter has
+/// no effect. Each part has its name from the definition, else its value.
 pub fn render(
     cfg: &Config,
     file: &Path,
     params: &[Param],
     cancel: &Arc<AtomicBool>,
 ) -> Result<Vec<Part>> {
-    let names = names(params);
-    if names.is_empty() {
-        bail!("the model has no {PARAM} parameter with part names");
-    }
-    let prefix = format!("{PARAM}=");
+    let Some((param, l)) = list(params) else {
+        bail!("the model has no multicolor part list");
+    };
+    let param = param.name.as_str();
+    let prefix = format!("{param}=");
     let mut defines = params::defines(params);
     defines.retain(|d| !d.starts_with(&prefix));
     let defines = &defines;
     std::thread::scope(|scope| {
-        let jobs: Vec<_> = names
-            .iter()
+        let jobs: Vec<_> = (l.choices.iter())
             .enumerate()
-            .map(|(i, name)| {
+            .map(|(i, c)| {
                 scope.spawn(move || {
                     let mut defs = defines.clone();
-                    defs.push(format!("{PARAM}=\"{name}\""));
+                    defs.push(format!("{param}={}", Value::Str(c.value.clone()).to_scad()));
                     let out = openscad::render(cfg, file, &defs, cancel)
-                        .with_context(|| format!("part '{name}'"))?;
+                        .with_context(|| format!("part '{}'", c.label))?;
                     Ok(Part {
-                        name: name.clone(),
-                        color: echoed_color(&out.log).unwrap_or(PALETTE[i % PALETTE.len()]),
+                        name: c.label.clone(),
+                        color: color(c.color, &out.log, i),
                         mesh: out.mesh,
                     })
                 })
@@ -176,7 +185,7 @@ fn echoed_color(log: &str) -> Option<[u8; 3]> {
 }
 
 /// A `#RRGGBB` value or a common OpenSCAD color name.
-fn parse_color(text: &str) -> Option<[u8; 3]> {
+pub fn parse_color(text: &str) -> Option<[u8; 3]> {
     if let Some(hex) = text.strip_prefix('#') {
         if hex.len() != 6 {
             return None;

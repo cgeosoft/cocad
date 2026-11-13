@@ -228,6 +228,11 @@ impl Job {
         });
         Job { frame, cancel }
     }
+
+    /// Stops the render. The frame keeps the samples that are done.
+    pub fn stop(&self) {
+        self.cancel.store(true, Ordering::Relaxed);
+    }
 }
 
 impl Drop for Job {

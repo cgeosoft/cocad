@@ -1,0 +1,32 @@
+# yaml-language-server: $schema=https://cocad.cgeosoft.com/schema/model-1.json
+cocad: 1
+title: Knob
+description: >-
+  A control knob with grip ribs, a D-shaft bore and a pointer. Use it to test
+  rotate_extrude, small features and text.
+author: cgeosoft
+license: MIT
+url: https://github.com/cgeosoft/cocad/blob/main/examples/knob.scad
+
+sets:
+  Volume knob:
+    description: The default knob for a 6 mm D shaft.
+  Large dial:
+    description: A large dial with many ribs and a label.
+    values:
+      diameter: 60
+      height: 20
+      ribs: 36
+      chamfer: 3
+      label: TEMP
+  Small trimmer:
+    description: A small, smooth knob for a 3 mm round shaft, with no label.
+    values:
+      diameter: 14
+      height: 10
+      ribs: 0
+      chamfer: 1
+      shaft: 3
+      flat: 0
+      depth: 6
+      label: ""

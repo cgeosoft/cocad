@@ -41,8 +41,8 @@ No. CoCAD loads the file again when it changes on disk. Your edited values stay.
 
 ## Parts
 
-**The Explode card says that it needs two or more parts.**
-CoCAD found only one part in the model. Explode has nothing to move.
+**The Explode card is not there.**
+CoCAD found only one part in the model. Explode has nothing to move, so the card does not show.
 
 **CoCAD shows two parts as one, or one part as many.**
 CoCAD finds the parts from the structure of the model. See the limits in [How CoCAD finds the parts](How-CoCAD-finds-the-parts).
@@ -55,8 +55,11 @@ That is correct. The part colors are for the view and the photo only. For a file
 **The disk button is orange.**
 The selected set has changes that are not saved. Click the button to save them.
 
-**My new sets file is not on the disk.**
-CoCAD writes a new sets file at the first save.
+**The model has no `.yml` file.**
+CoCAD writes the [model definition](Model-definition) at the first save of a set.
+
+**A message names the `.yml` file.**
+The [model definition](Model-definition) has a problem, for example an unknown key or a part without an `id`. The message and the top of the OpenSCAD output tell what is wrong. CoCAD does not use that entry.
 
 **Auto save does not save.**
 With **Model defaults** selected, auto save saves nothing. Select a set, or make a new one.
@@ -66,7 +69,7 @@ With **Model defaults** selected, auto save saves nothing. Select a set, or make
 **The Plate card says "Too large for the print area".**
 The part does not fit the print area of the **Printer** card. Do one of these:
 - Check the print area. Select your printer in the **Printer** card.
-- Turn on **Custom orientation** for the part. When the part fits on a different side, the **Plate** card tells you so.
+- Put the part on a different side: click **Select face** in the **Orientation** card. When the part fits on a different side, the **Plate** card tells you so.
 - Click **Split** in the **Split** section below the row. See [Optimize](Optimize#split-a-part-that-is-too-large).
 
 A part that is too large is on no plate, so it is not in the STL or 3MF export.
@@ -94,8 +97,11 @@ No. The preview is for checks only and writes no G-code. Export the plate and us
 **The photo is grainy.**
 Wait. The image gets cleaner with each sample. You can also set more **Samples** in the **Quality** section.
 
-**The photo starts again and again.**
-The render starts again each time you move the view or change a setting. Let the view rest.
+**The Render tab shows no photo.**
+The tab does not start a render by itself. Click **Render** at the bottom of the tab.
+
+**The photo stops.**
+The render stops when you move the view or change a setting, because the image does not show the new view. Click **Render** again.
 
 ## Multicolor
 

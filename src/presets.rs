@@ -1,24 +1,12 @@
-//! Parameter sets in the OpenSCAD Customizer format: `<model>.json` next to
-//! `<model>.scad`. OpenSCAD reads the same file (`-p model.json -P name`).
-//!
-//! ```json
-//! { "fileFormatVersion": "1",
-//!   "parameterSets": { "big": { "width": "80", "shape": "round", "offset": "[0, 5]" } } }
-//! ```
-//!
-//! Metadata is optional. String fields at the root (for example `title`,
-//! `description`, `author`) describe the file. In a set, keys that start
-//! with `$` (for example `$title`, `$description`) describe the set. The
-//! Customizer has no parameters with a `$` name, thus OpenSCAD ignores them.
+//! Parameter sets: the `sets` block of the model definition `<model>.yml`
+//! (see `definition.rs`). A model without a `.yml` file can have a `.json`
+//! file in the OpenSCAD Customizer format: CoCAD reads its sets, and the
+//! first save writes the `.yml` file.
 
+use crate::definition::{self, SetDef};
 use crate::params::{Param, Value};
 use anyhow::{Context, Result};
-use serde_json::{Map, Value as Json, json};
-use std::path::{Path, PathBuf};
-
-pub fn path_for(scad: &Path) -> PathBuf {
-    scad.with_extension("json")
-}
+use std::path::Path;
 
 /// The value for `scad` in the file `name` of the settings folder. Each line
 /// of the file is `<model path>\t<value>`.
@@ -48,18 +36,6 @@ fn store(name: &str, scad: &Path, value: Option<&str>) -> Result<()> {
     }
     std::fs::write(file, lines.join("\n") + "\n")?;
     Ok(())
-}
-
-/// The sets file last used for `scad`, from `<config>/sets-files`.
-pub fn remembered(scad: &Path) -> Option<PathBuf> {
-    lookup("sets-files", scad).map(PathBuf::from)
-}
-
-/// Records `json` as the sets file for `scad`.
-pub fn remember(scad: &Path, json: &Path) -> Result<()> {
-    let key = scad.canonicalize()?;
-    let value = (json != path_for(&key)).then(|| json.display().to_string());
-    store("sets-files", scad, value.as_deref())
 }
 
 /// The set that was active last for `scad`, from `<config>/last-sets`.
@@ -93,130 +69,6 @@ fn choose(last: Option<Option<String>>, sets: &[String]) -> Option<String> {
     }
 }
 
-/// The sets file to use for `scad`: the remembered one when it still
-/// exists, else `<model>.json` next to the model.
-pub fn file_for(scad: &Path) -> PathBuf {
-    remembered(scad)
-        .filter(|p| p.exists())
-        .unwrap_or_else(|| path_for(scad))
-}
-
-fn read(path: &Path) -> Result<Map<String, Json>> {
-    match std::fs::read_to_string(path) {
-        Ok(text) => {
-            let v: Json = serde_json::from_str(&text)
-                .with_context(|| format!("cannot parse {}", path.display()))?;
-            Ok(v.as_object().cloned().unwrap_or_default())
-        }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Map::new()),
-        Err(e) => Err(e.into()),
-    }
-}
-
-fn write(path: &Path, mut root: Map<String, Json>) -> Result<()> {
-    root.insert("fileFormatVersion".into(), json!("1"));
-    std::fs::write(
-        path,
-        serde_json::to_string_pretty(&Json::Object(root))? + "\n",
-    )?;
-    Ok(())
-}
-
-/// Descriptive text of a sets file or of one set.
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct Meta {
-    pub title: Option<String>,
-    pub description: Option<String>,
-    /// Other fields as (key, value), in file order.
-    pub other: Vec<(String, String)>,
-}
-
-impl Meta {
-    pub fn is_empty(&self) -> bool {
-        self.title.is_none() && self.description.is_none() && self.other.is_empty()
-    }
-
-    /// Reads the fields of `obj` for which `key` gives a name. Empty values
-    /// are not used. Numbers and booleans become text.
-    fn from_fields(obj: &Map<String, Json>, key: impl Fn(&str) -> Option<&str>) -> Meta {
-        let mut m = Meta::default();
-        for (k, v) in obj {
-            let Some(name) = key(k) else { continue };
-            let text = match v {
-                Json::String(s) => s.trim().to_string(),
-                Json::Number(n) => n.to_string(),
-                Json::Bool(b) => b.to_string(),
-                _ => continue,
-            };
-            if text.is_empty() {
-                continue;
-            }
-            match name {
-                "title" => m.title = Some(text),
-                "description" => m.description = Some(text),
-                _ => m.other.push((name.to_string(), text)),
-            }
-        }
-        m
-    }
-}
-
-/// Metadata of the file and of each set.
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct Info {
-    pub file: Meta,
-    pub sets: Vec<(String, Meta)>,
-}
-
-impl Info {
-    pub fn set(&self, name: &str) -> Option<&Meta> {
-        self.sets.iter().find(|(n, _)| n == name).map(|(_, m)| m)
-    }
-}
-
-/// A set key that holds metadata, not a parameter value.
-fn is_meta_key(key: &str) -> bool {
-    key.starts_with('$')
-}
-
-/// Reads the metadata of the file. A file that cannot be read has none.
-pub fn info(path: &Path) -> Info {
-    let Ok(root) = read(path) else {
-        return Info::default();
-    };
-    let file = Meta::from_fields(&root, |k| {
-        (k != "fileFormatVersion" && k != "parameterSets").then_some(k)
-    });
-    let sets = root
-        .get("parameterSets")
-        .and_then(|s| s.as_object())
-        .map(|sets| {
-            sets.iter()
-                .filter_map(|(n, s)| {
-                    let m = Meta::from_fields(s.as_object()?, |k| k.strip_prefix('$'));
-                    (!m.is_empty()).then(|| (n.clone(), m))
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-    Info { file, sets }
-}
-
-/// Names of the sets in the file, in file order.
-pub fn names(path: &Path) -> Vec<String> {
-    try_names(path).unwrap_or_default()
-}
-
-/// Like `names`, but a file that cannot be read or parsed is an error.
-/// A missing file has no sets.
-pub fn try_names(path: &Path) -> Result<Vec<String>> {
-    Ok(read(path)?
-        .get("parameterSets")
-        .and_then(|s| s.as_object())
-        .map(|s| s.keys().cloned().collect())
-        .unwrap_or_default())
-}
-
 /// The value as the Customizer writes it: strings bare, the rest as source.
 pub(crate) fn to_text(v: &Value) -> String {
     match v {
@@ -225,62 +77,51 @@ pub(crate) fn to_text(v: &Value) -> String {
     }
 }
 
-/// Saves all parameter values as set `name`. Other sets and the metadata
-/// of the set stay.
+/// Saves all parameter values as set `name`. Other sets and the
+/// description of the set stay.
 pub fn save(path: &Path, name: &str, params: &[Param]) -> Result<()> {
-    let mut root = read(path)?;
-    let sets = root
-        .entry("parameterSets")
-        .or_insert_with(|| json!({}))
-        .as_object_mut()
-        .context("parameterSets is not an object")?;
-    let mut set: Map<String, Json> = sets
-        .get(name)
-        .and_then(|s| s.as_object())
-        .map(|s| {
-            s.iter()
-                .filter(|(k, _)| is_meta_key(k))
-                .map(|(k, v)| (k.clone(), v.clone()))
-                .collect()
-        })
-        .unwrap_or_default();
-    set.extend(
-        params
-            .iter()
-            .map(|p| (p.name.clone(), json!(to_text(&p.value)))),
-    );
-    sets.insert(name.to_string(), Json::Object(set));
-    write(path, root)
+    let mut def = definition::load(path)?;
+    let values = params
+        .iter()
+        .map(|p| (p.name.clone(), definition::json_of(&p.value)))
+        .collect();
+    match def.sets.iter_mut().find(|s| s.name == name) {
+        Some(set) => set.values = values,
+        None => def.sets.push(SetDef {
+            name: name.to_string(),
+            description: None,
+            values,
+        }),
+    }
+    definition::write_sets(path, &def)
 }
 
 pub fn delete(path: &Path, name: &str) -> Result<()> {
-    let mut root = read(path)?;
-    if let Some(sets) = root
-        .get_mut("parameterSets")
-        .and_then(|s| s.as_object_mut())
-    {
-        sets.shift_remove(name);
-    }
-    write(path, root)
+    let mut def = definition::load(path)?;
+    def.sets.retain(|s| s.name != name);
+    definition::write_sets(path, &def)
 }
 
 /// Applies set `name`. Values of parameters that are not in the set go back
 /// to the file defaults. Returns the names that could not be applied.
 pub fn apply(path: &Path, name: &str, params: &mut [Param]) -> Result<Vec<String>> {
-    let root = read(path)?;
-    let set = root
-        .get("parameterSets")
-        .and_then(|s| s.get(name))
-        .and_then(|s| s.as_object())
+    let def = definition::load(path)?;
+    let set = def
+        .set(name)
         .with_context(|| format!("no parameter set '{name}' in {}", path.display()))?;
+    Ok(apply_set(set, params))
+}
+
+/// Applies `set`, as `apply` does.
+pub fn apply_set(set: &SetDef, params: &mut [Param]) -> Vec<String> {
     let mut skipped = Vec::new();
     for p in params.iter_mut() {
         p.value = p.default.clone();
     }
-    for (key, raw) in set.iter().filter(|(k, _)| !is_meta_key(k)) {
-        let text = match raw {
-            Json::String(s) => s.clone(),
-            other => other.to_string(),
+    for (key, raw) in &set.values {
+        let Some(text) = definition::value_text(raw) else {
+            skipped.push(key.clone());
+            continue;
         };
         match params.iter_mut().find(|p| &p.name == key) {
             Some(p) => {
@@ -291,65 +132,59 @@ pub fn apply(path: &Path, name: &str, params: &mut [Param]) -> Result<Vec<String
             None => skipped.push(key.clone()),
         }
     }
-    Ok(skipped)
+    skipped
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    fn names(path: &Path) -> Vec<String> {
+        try_names(path).unwrap_or_default()
+    }
+
+    fn try_names(path: &Path) -> Result<Vec<String>> {
+        Ok(definition::load(path)?.set_names())
+    }
+
+    fn temp(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("cocad-{tag}-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
     #[test]
     fn try_names_reports_a_bad_file() {
-        let dir = std::env::temp_dir().join(format!("cocad-names-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("m.json");
+        let dir = temp("names");
+        let path = dir.join("m.yml");
         assert!(try_names(&path).unwrap().is_empty());
-        std::fs::write(&path, "{ \"parameterSets\": { \"a\"").unwrap();
+        std::fs::write(&path, "cocad: 1\nsets: {a: [\n").unwrap();
         assert!(try_names(&path).is_err());
-        std::fs::write(&path, "{ \"parameterSets\": { \"b\": {}, \"a\": {} } }").unwrap();
+        std::fs::write(&path, "cocad: 1\nsets:\n  b: {}\n  a: {}\n").unwrap();
         assert_eq!(try_names(&path).unwrap(), ["b", "a"]);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
-    fn metadata() {
-        let dir = std::env::temp_dir().join(format!("cocad-meta-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("m.json");
+    fn save_keeps_the_description() {
+        let dir = temp("meta");
+        let path = dir.join("m.yml");
         std::fs::write(
             &path,
-            r#"{ "fileFormatVersion": "1", "title": "Case", "description": "A box",
-                 "author": "me", "version": 2, "tags": ["x"],
-                 "parameterSets": {
-                   "big": { "$title": "Big", "$description": "For B", "$note": "n", "w": "42" },
-                   "plain": { "w": "1" } } }"#,
+            "cocad: 1\ntitle: Case\nsets:\n  big:\n    description: For B\n    values:\n      w: 42\n",
         )
         .unwrap();
-        let i = info(&path);
-        assert_eq!(i.file.title.as_deref(), Some("Case"));
-        assert_eq!(i.file.description.as_deref(), Some("A box"));
-        assert_eq!(
-            i.file.other,
-            [
-                ("author".into(), "me".into()),
-                ("version".into(), "2".into())
-            ]
-        );
-        let big = i.set("big").unwrap();
-        assert_eq!(big.title.as_deref(), Some("Big"));
-        assert_eq!(big.description.as_deref(), Some("For B"));
-        assert_eq!(big.other, [("note".into(), "n".into())]);
-        assert!(i.set("plain").is_none());
-
-        // Apply skips the metadata keys. Save keeps them.
         let src = "w = 10;\n";
         let mut p = crate::params::parse(src);
         assert!(apply(&path, "big", &mut p).unwrap().is_empty());
         assert_eq!(p[0].value, Value::Num(42.0));
         crate::params::apply_define(&mut p, "w=7").unwrap();
         save(&path, "big", &p).unwrap();
-        let i2 = info(&path);
-        assert_eq!(i2, i);
+        let d = definition::load(&path).unwrap();
+        assert_eq!(d.meta.title.as_deref(), Some("Case"));
+        let big = d.set("big").unwrap();
+        assert_eq!(big.description.as_deref(), Some("For B"));
+        assert_eq!(big.values, [("w".to_string(), serde_json::json!(7))]);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -369,18 +204,20 @@ mod tests {
 
     #[test]
     fn save_apply_delete() {
-        let dir = std::env::temp_dir().join(format!("cocad-presets-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("m.json");
+        let dir = temp("presets");
+        let path = dir.join("m.yml");
         let src = "w = 10; // [1:100]\nshape = \"round\"; // [round, square]\nlabel = \"5\";\non = true;\nv = [1, 2];\n";
         let mut p = crate::params::parse(src);
         crate::params::apply_define(&mut p, "w=42").unwrap();
         crate::params::apply_define(&mut p, "shape=square").unwrap();
         crate::params::apply_define(&mut p, "on=false").unwrap();
-        crate::params::apply_define(&mut p, "v=[3, 4]").unwrap();
+        crate::params::apply_define(&mut p, "v=[3, 4.5]").unwrap();
         save(&path, "big", &p).unwrap();
         save(&path, "other", &crate::params::parse(src)).unwrap();
         assert_eq!(names(&path), ["big", "other"]);
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.starts_with("# yaml-language-server"), "{text}");
+        assert!(text.contains("      w: 42\n      shape: square\n      label: \"5\"\n      on: false\n      v: [3, 4.5]\n"), "{text}");
 
         let mut q = crate::params::parse(src);
         assert!(apply(&path, "big", &mut q).unwrap().is_empty());
@@ -388,7 +225,7 @@ mod tests {
         assert_eq!(q[1].value, Value::Str("square".into()));
         assert_eq!(q[2].value, Value::Str("5".into())); // stays a string
         assert_eq!(q[3].value, Value::Bool(false));
-        assert_eq!(q[4].value, Value::Vec(vec![3.0, 4.0]));
+        assert_eq!(q[4].value, Value::Vec(vec![3.0, 4.5]));
 
         delete(&path, "big").unwrap();
         assert_eq!(names(&path), ["other"]);

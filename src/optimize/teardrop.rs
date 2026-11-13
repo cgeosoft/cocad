@@ -23,8 +23,8 @@ use std::f32::consts::SQRT_2;
 /// The largest angle between a hole axis and the bed plane, in degrees.
 const MAX_TILT_DEG: f32 = 10.0;
 /// The smallest and the largest hole diameter that gets a point, in mm.
-const MIN_D: f32 = 1.0;
-const MAX_D: f32 = 40.0;
+pub(super) const MIN_D: f32 = 1.0;
+pub(super) const MAX_D: f32 = 40.0;
 /// Two faces that turn more than this (degrees) at their edge are not on a
 /// round surface. A square has 90 degrees, a pentagon 72 degrees.
 const MAX_TURN_DEG: f32 = 80.0;
@@ -35,17 +35,28 @@ const MIN_CORNERS: usize = 5;
 /// Two faces with normals closer than this (cosine) are coplanar.
 const COPLANAR: f32 = 1.0 - 1e-6;
 /// The cut goes this far past each end of the hole, in mm.
-const OVERLAP: f32 = 0.02;
+pub(super) const OVERLAP: f32 = 0.02;
 /// The positions along the hole for the wall check, as parts of its length.
 const RAY_AT: [f32; 5] = [0.1, 0.3, 0.5, 0.7, 0.9];
 
-/// A round surface with its axis near the bed plane: a hole or a pin.
+/// Which round surfaces `rounds_with` finds.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Lean {
+    /// The axis is near the bed plane.
+    Flat,
+    /// The axis is near the z axis.
+    Upright,
+}
+
+/// A round surface with its axis near the bed plane or near the z axis: a
+/// hole or a pin.
 #[derive(Clone, Debug)]
 pub struct Round {
     /// The direction of the axis (unit vector).
     pub axis: Vec3,
     /// "Up" in the plane perpendicular to the axis: +Z projected on that
-    /// plane (unit vector).
+    /// plane (unit vector). For an axis near the z axis: +Y projected on
+    /// that plane.
     pub up: Vec3,
     /// `up` x `axis`. (side, up, axis) is a right-handed frame.
     pub side: Vec3,
@@ -144,6 +155,25 @@ impl Round {
             (Some(l), Some(r)) => l.dot(r).clamp(-1.0, 1.0).acos().to_degrees() <= 90.5,
             _ => false,
         }
+    }
+
+    /// The directions from the center to the flat faces, in degrees from
+    /// `side` to `up`, sorted, with no doubles.
+    pub fn face_angles(&self) -> Vec<f32> {
+        let mut a: Vec<f32> = self
+            .segments
+            .iter()
+            .map(|&(p, q)| {
+                let n = (q - p).perp();
+                angle_deg(if n.dot(p + q) < 0.0 { -n } else { n })
+            })
+            .collect();
+        a.sort_by(f32::total_cmp);
+        a.dedup_by(|b, a| (*b - *a).abs() < 0.5);
+        if a.len() > 1 && (a[0] + 360.0 - a[a.len() - 1]) < 0.5 {
+            a.pop();
+        }
+        a
     }
 
     /// The matrix from the local frame of the cut (x = side, y = up,
@@ -263,7 +293,7 @@ fn above(mesh: &Mesh, h: &Round, min_wall: f32) -> Above {
 
 /// The distances along a ray to the faces of `mesh`, sorted, with no
 /// doubles (a ray through an edge hits two triangles).
-fn hits(mesh: &Mesh, origin: Vec3, dir: Vec3) -> Vec<f32> {
+pub(super) fn hits(mesh: &Mesh, origin: Vec3, dir: Vec3) -> Vec<f32> {
     let mut t: Vec<f32> = (0..mesh.triangles.len())
         .filter_map(|i| ray_triangle(origin, dir, mesh.tri(i)))
         .filter(|&t| t > 1e-4)
@@ -330,6 +360,16 @@ struct Piece {
 /// Finds the round surfaces (holes and pins) of `mesh` with an axis near
 /// the bed plane.
 pub fn rounds(mesh: &Mesh) -> Vec<Round> {
+    rounds_with(mesh, Lean::Flat)
+}
+
+/// Finds the round surfaces (holes and pins) of `mesh` with an axis near
+/// the z axis. The axis points up.
+pub fn upright_rounds(mesh: &Mesh) -> Vec<Round> {
+    rounds_with(mesh, Lean::Upright)
+}
+
+fn rounds_with(mesh: &Mesh, lean: Lean) -> Vec<Round> {
     let n = mesh.triangles.len();
     let normals: Vec<Vec3> = (0..n).map(|i| mesh.normal(i)).collect();
 
@@ -358,6 +398,7 @@ pub fn rounds(mesh: &Mesh) -> Vec<Round> {
 
     let cos_turn = MAX_TURN_DEG.to_radians().cos();
     let max_dz = (MAX_TILT_DEG + 0.5).to_radians().sin();
+    let min_dz = (MAX_TILT_DEG + 0.5).to_radians().cos();
     let mut flat = Sets::new(n);
     let mut lines = Vec::new();
     for (key, (ta, tb)) in pairs {
@@ -375,7 +416,12 @@ pub fn rounds(mesh: &Mesh) -> Vec<Round> {
         }
         let e = mesh.vertices[key.1 as usize] - mesh.vertices[key.0 as usize];
         let len = e.length();
-        if len < 1e-3 || (e.z / len).abs() > max_dz {
+        let dz = (e.z / len.max(1e-9)).abs();
+        let off = match lean {
+            Lean::Flat => dz > max_dz,
+            Lean::Upright => dz < min_dz,
+        };
+        if len < 1e-3 || off {
             continue;
         }
         lines.push(Line {
@@ -428,10 +474,16 @@ pub fn rounds(mesh: &Mesh) -> Vec<Round> {
             })
             .sum();
         let axis = sum.normalize();
-        if axis.z.abs() > MAX_TILT_DEG.to_radians().sin() {
-            continue;
-        }
-        let up = (Vec3::Z - axis * axis.z).normalize();
+        let tilt = MAX_TILT_DEG.to_radians();
+        let (axis, up) = match lean {
+            Lean::Flat if axis.z.abs() > tilt.sin() => continue,
+            Lean::Flat => (axis, (Vec3::Z - axis * axis.z).normalize()),
+            Lean::Upright if axis.z.abs() < tilt.cos() => continue,
+            Lean::Upright => {
+                let axis = if axis.z < 0.0 { -axis } else { axis };
+                (axis, (Vec3::Y - axis * axis.y).normalize())
+            }
+        };
         let side = up.cross(axis);
         let to2d = |p: Vec3| Vec2::new(p.dot(side), p.dot(up));
 

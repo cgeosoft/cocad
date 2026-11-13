@@ -419,9 +419,9 @@ impl Solid {
                     (a.min(b).min(c) - margin, a.max(b).max(c) + margin)
                 })
                 .collect();
-            let (lo, hi) = boxes
-                .iter()
-                .fold((DVec3::MAX, DVec3::MIN), |(l, h), b| (l.min(b.0), h.max(b.1)));
+            let (lo, hi) = boxes.iter().fold((DVec3::MAX, DVec3::MIN), |(l, h), b| {
+                (l.min(b.0), h.max(b.1))
+            });
             let mut grid = Grid::new(lo, hi, boxes.len());
             for (i, b) in boxes.iter().enumerate() {
                 grid.insert(b.0, b.1, i as u32);
@@ -464,9 +464,13 @@ impl Grid {
         } else {
             (used.iter().product::<f64>() / count).powf(1.0 / used.len() as f64)
         };
-        let n = size
-            .to_array()
-            .map(|s| if s > tiny { (s / h).ceil().clamp(1.0, 256.0) as usize } else { 1 });
+        let n = size.to_array().map(|s| {
+            if s > tiny {
+                (s / h).ceil().clamp(1.0, 256.0) as usize
+            } else {
+                1
+            }
+        });
         let cell = DVec3::new(
             size.x.max(tiny) / n[0] as f64,
             size.y.max(tiny) / n[1] as f64,
@@ -698,7 +702,8 @@ pub fn layout(sizes: &[Vec2], area: &Area, gap: f32) -> Vec<Placed> {
     }
     let mut plates: Vec<Plate> = Vec::new();
     // Plate, lower left corner, size, turned.
-    let mut spots: Vec<(usize, Vec2, Vec2, bool)> = vec![(0, Vec2::ZERO, Vec2::ZERO, false); sizes.len()];
+    let mut spots: Vec<(usize, Vec2, Vec2, bool)> =
+        vec![(0, Vec2::ZERO, Vec2::ZERO, false); sizes.len()];
     let mut placed = vec![false; sizes.len()];
     for it in &items {
         let turned_size = Vec2::new(it.size.y, it.size.x);
@@ -824,7 +829,11 @@ mod tests {
         let a = tripod();
         let s = sig(&a);
         assert!(s.hand.iter().any(|v| v.abs() > 1e-2), "{s:?}");
-        for m in [tilt(), Mat4::from_rotation_z(std::f32::consts::FRAC_PI_2), Mat4::from_translation(Vec3::splat(100.0))] {
+        for m in [
+            tilt(),
+            Mat4::from_rotation_z(std::f32::consts::FRAC_PI_2),
+            Mat4::from_translation(Vec3::splat(100.0)),
+        ] {
             let t = sig(&transformed(&a, m));
             assert!(same(&s, &t), "{s:?}\n{t:?}");
         }
@@ -835,7 +844,10 @@ mod tests {
         let a = tripod();
         let m = transformed(&a, mirror());
         assert!(!same(&sig(&a), &sig(&m)));
-        assert!(!same(&sig(&transformed(&a, tilt())), &sig(&transformed(&m, tilt()))));
+        assert!(!same(
+            &sig(&transformed(&a, tilt())),
+            &sig(&transformed(&m, tilt()))
+        ));
         // The mirror image of a part with a mirror plane is the same part.
         let b = bracket();
         assert!(same(&sig(&b), &sig(&transformed(&b, tilt() * mirror()))));
@@ -890,12 +902,21 @@ mod tests {
         let a = cuboid(Vec3::ZERO, Vec3::splat(10.0));
         let at = |lo: Vec3, hi: Vec3| cuboid(lo, hi);
         // Share volume, with faces in the same planes.
-        assert!(overlap(&a, &at(Vec3::new(5.0, 0.0, 0.0), Vec3::new(15.0, 10.0, 10.0))));
+        assert!(overlap(
+            &a,
+            &at(Vec3::new(5.0, 0.0, 0.0), Vec3::new(15.0, 10.0, 10.0))
+        ));
         // Share volume, in general position.
         assert!(overlap(&a, &at(Vec3::splat(7.0), Vec3::splat(17.0))));
         // Share one face, or a part of a face.
-        assert!(!overlap(&a, &at(Vec3::new(10.0, 0.0, 0.0), Vec3::new(20.0, 10.0, 10.0))));
-        assert!(!overlap(&a, &at(Vec3::new(10.0, 5.0, 0.0), Vec3::new(20.0, 15.0, 10.0))));
+        assert!(!overlap(
+            &a,
+            &at(Vec3::new(10.0, 0.0, 0.0), Vec3::new(20.0, 10.0, 10.0))
+        ));
+        assert!(!overlap(
+            &a,
+            &at(Vec3::new(10.0, 5.0, 0.0), Vec3::new(20.0, 15.0, 10.0))
+        ));
         // Apart.
         assert!(!overlap(&a, &at(Vec3::splat(11.0), Vec3::splat(20.0))));
         // One inside the other.
@@ -940,7 +961,11 @@ mod tests {
 
     /// The footprint rectangle (min, max) of a placed part.
     fn rect(p: &Placed, size: Vec2) -> (Vec2, Vec2) {
-        let s = if p.turned { Vec2::new(size.y, size.x) } else { size };
+        let s = if p.turned {
+            Vec2::new(size.y, size.x)
+        } else {
+            size
+        };
         (p.center - s * 0.5, p.center + s * 0.5)
     }
 
@@ -1005,7 +1030,11 @@ mod tests {
         // One part alone is centered on its plate.
         assert!((out[4].center - Vec2::splat(50.0)).length() < 1e-3);
 
-        let sizes = [Vec2::new(120.0, 10.0), Vec2::new(20.0, 20.0), Vec2::new(10.0, 101.0)];
+        let sizes = [
+            Vec2::new(120.0, 10.0),
+            Vec2::new(20.0, 20.0),
+            Vec2::new(10.0, 101.0),
+        ];
         let out = check_layout(&sizes, &area, 5.0);
         assert_eq!(out[0].plate, None);
         assert_eq!(out[1].plate, Some(0));

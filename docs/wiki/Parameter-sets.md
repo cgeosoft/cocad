@@ -6,10 +6,13 @@ A parameter set is a named group of values for one model. For example, a box mod
 
 ## Where to find them
 
-The top of the **Parameters** panel has two items:
+The top of the **Parameters** panel has one row for the sets:
 
-- A **card** with the name of the sets file. All sets of a model are in one file.
-- A **list** of the sets, below the card.
+- A **list** of the sets.
+- The **disk button** that saves the values.
+- The **gear button** with **New set…** and **Delete**.
+
+The sets of a model are in its definition file: `box.yml` next to `box.scad`. The file also holds the title, the description and the part names of the model. See [Model definition](Model-definition).
 
 ## Usual tasks
 
@@ -20,8 +23,6 @@ The top of the **Parameters** panel has two items:
 | Save your values as a new set | Click the gear button, then **New set…**. Type a name. |
 | Save your changes to the selected set | Click the disk button. |
 | Delete the selected set | Click the gear button, then **Delete**. Confirm in the window that opens. |
-| Use sets from a different file | Click **Open** and select a `.json` file. |
-| Start a new sets file | Click the gear button, then **New file…**. Select a place and a name. |
 
 The disk button is orange while the set has changes that are not saved.
 
@@ -29,12 +30,11 @@ If no set is selected, the disk button asks for a name and makes a new set.
 
 ## What CoCAD remembers
 
-- CoCAD remembers the sets file of each model. If you did not select one, it uses a file with the name of the model next to the model: `box.json` for `box.scad`.
 - When you open a model, CoCAD loads the set that you used last for that model. If there is no record, it loads the first set of the file.
 - If **Model defaults** was your last selection, the values stay at the defaults of the model.
 - CoCAD also remembers your last parameter values for each model. With **Model defaults**, it loads these values. With a set, it loads them only if you did not save your changes to the set. The set then shows as edited.
 - CoCAD also remembers the settings of the right panel for each model: the tab (Model, Optimize or Render), auto build, the Optimize values, the print settings, the photo settings, part colors and explode.
-- A new sets file does not exist on disk until your first save.
+- A model without a definition file gets one at the first save of a set.
 
 ## Auto save
 
@@ -49,39 +49,33 @@ Auto save is off by default. With **Model defaults** selected, it saves nothing.
 
 ## Descriptions
 
-A sets file can tell what the model and each set are for:
+When you select a set that has a description, an **info box** below the list shows it. CoCAD only shows this text. To add it, edit the definition file in a text editor (see below).
 
-- The **card** shows the title and the description of the file below the file name.
-- When you select a set that has a description, an **info box** below the list shows it.
+## When the file changes on disk
 
-CoCAD only shows this text. You cannot edit it in CoCAD. To add it, edit the `.json` file in a text editor (see below).
+If another program changes the definition file, the list of sets updates. The active set gets the new values, unless you have changes in it that are not saved.
 
-## When the sets file changes on disk
+## The examples
 
-If another program changes the sets file, the list of sets updates. The active set gets the new values, unless you have changes in it that are not saved.
+Each example in **File > Examples** has some sets. Select them to see how the values change the model. The first set of each example has the default values.
 
 ---
 
-**For technical readers.** The file uses the format of the OpenSCAD Customizer, so OpenSCAD reads it too: `openscad -p sets.json -P big`. The [command line](Command-line) of CoCAD uses the same sets with `-P` and `-p`.
+**For technical readers.** The sets are the `sets` block of the [model definition](Model-definition):
 
-To add descriptions, add text fields to the file:
-
-```json
-{
-    "fileFormatVersion": "1",
-    "title": "Box",
-    "description": "A box with a lid.",
-    "author": "Your name",
-    "parameterSets": {
-        "big": {
-            "$title": "Big box",
-            "$description": "For the workshop. Prints in 6 hours.",
-            "width": "80"
-        }
-    }
-}
+```yaml
+sets:
+  Big:
+    description: For the workshop. Prints in 6 hours.
+    values:
+      width: 80
+      shape: round
+      offset: [0, 5]
+      lid: true
 ```
 
-- At the top level, `title` and `description` show in the card. Other text and number fields (for example `author`, `version`, `url`) show as "name: value" lines. A web address is a link.
-- In a set, a key that starts with `$` is a description field, not a parameter: `$title`, `$description` and others such as `$note`. OpenSCAD ignores these keys, because no Customizer parameter has a name that starts with `$`.
-- When CoCAD saves a set, the `$` fields of the set stay.
+- A parameter that is not in the set keeps the default of the model.
+- When CoCAD saves a set, it writes all parameters of the model to the set. The description of the set stays.
+- CoCAD writes only the `sets` block again. The other blocks of the file and their comments stay as they are. Comments in the `sets` block are lost.
+- The [command line](Command-line) uses the same sets with `-P`. `cocad sets model.scad --json` writes the sets in the format of the OpenSCAD Customizer, for `openscad -p`.
+- A model without a `.yml` file can have a `.json` file in the format of the OpenSCAD Customizer (from CoCAD 0.7 or OpenSCAD). CoCAD reads its sets and its text. The first save writes the `.yml` file with all of it. The `.json` file stays as it is.

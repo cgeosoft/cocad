@@ -1,6 +1,7 @@
 //! The egui application: parameter panel, 3D view, export and slice preview.
 
 use crate::assembly::Assembly;
+use crate::definition;
 use crate::examples;
 use crate::export::{self, Format, Meta, Slicer};
 use crate::mesh::{Bounds, Mesh};
@@ -26,7 +27,9 @@ mod optimize_tab;
 mod remote;
 mod section;
 mod select;
+mod start;
 mod state;
+mod thumb;
 mod tour;
 mod view3d;
 
@@ -84,24 +87,6 @@ impl Mode {
         }
     }
 
-    /// The names of the cards that can close, in tab order. The names are
-    /// the card titles, and the config file stores them (`closed_cards`).
-    fn cards(self) -> &'static [&'static str] {
-        match self {
-            Mode::Model => &["Build", "Parts", "Explode", "Section", "Mesh"],
-            Mode::Optimize => &[
-                "Plate",
-                "Orientation",
-                "Print fixes",
-                "Check",
-                "Layers",
-                "Printer",
-                "Print settings",
-            ],
-            Mode::Render => &["Material", "Parts", "Explode", "Scene", "Quality"],
-        }
-    }
-
     /// The key that opens the tab, and the index of its letter in the
     /// label. The same key again goes back to the Model tab.
     fn key(self) -> Option<(egui::Key, usize)> {
@@ -138,7 +123,8 @@ const VIEWS: [(&str, f32, f32); 4] = [
 
 const REPO: &str = "https://github.com/cgeosoft/cocad";
 
-const SHORTCUTS: [(&str, &str); 16] = [
+const SHORTCUTS: [(&str, &str); 17] = [
+    ("Ctrl+N", "New model"),
     ("Ctrl+O", "Open a file"),
     ("Ctrl+,", "Settings"),
     ("Ctrl+Q", "Quit"),
@@ -281,9 +267,12 @@ struct RenderJob {
 }
 
 /// Background render of each part, for the parts of the 3D view.
+type PartsResult = Result<(Option<Assembly>, Vec<String>), String>;
+
 struct PartsJob {
     /// `None`: the model has no parts, and the shells of the mesh stay.
-    rx: Receiver<Result<Option<Assembly>, String>>,
+    /// The notes go to the OpenSCAD output.
+    rx: Receiver<PartsResult>,
     cancel: Arc<AtomicBool>,
     /// The mesh revision that the parts are for.
     mesh_rev: u64,
@@ -353,20 +342,26 @@ pub struct App {
     photo: PhotoSettings,
     photo_job: Option<pathtrace::Job>,
     photo_key: Option<PhotoKey>,
+    /// The user clicked Render. The render starts when the view rests.
+    photo_on: bool,
     /// Wanted key and when it last changed; the render starts when it settles.
     photo_want: Option<(PhotoKey, Instant)>,
     photo_tex: Option<(egui::TextureHandle, u32)>,
     photo_started: Instant,
+    /// The time of the render when it got all its samples.
+    photo_done: Option<Duration>,
     themed: bool,
     /// The window title that was sent last. A title command asks for a repaint.
     title: String,
-    /// Parameter sets in `<model>.json`.
+    /// The model definition `<model>.yml`: text, parts and parameter sets.
+    def: definition::Definition,
+    def_file: PathBuf,
+    /// The time of the definition file that `def` was read from.
+    def_mtime: Option<SystemTime>,
+    /// The names of the parameter sets of `def`.
     sets: Vec<String>,
-    sets_file: PathBuf,
-    sets_mtime: Option<SystemTime>,
-    /// Metadata of the sets file, and the (file, mtime) it was read for.
-    sets_info: presets::Info,
-    sets_info_key: Option<(PathBuf, Option<SystemTime>)>,
+    /// Problems of the definition, for the console.
+    def_notes: Vec<String>,
     active_set: Option<String>,
     set_edited: bool,
     /// Name being typed for a new set.
@@ -394,6 +389,10 @@ pub struct App {
     menu_bar_rect: egui::Rect,
     /// The Examples row while its submenu is open.
     examples_row: Option<egui::Rect>,
+    /// Height of the start page content in the last frame, to center it.
+    start_height: f32,
+    /// The tab of the start page card that the user picked.
+    start_tab: Option<start::StartTab>,
     recent: Vec<PathBuf>,
     show_about: bool,
     /// Welcome tour, while it is open.
@@ -408,6 +407,12 @@ pub struct App {
     update: update::Checker,
     /// The window with the changes of the new versions, while it is open.
     show_changes: bool,
+    /// The model opened and needs a thumbnail after its first build.
+    thumb_due: bool,
+    /// Thumbnails to draw in the next frame.
+    thumb_jobs: Vec<thumb::Job>,
+    /// Thumbnails and titles of the start page.
+    start_cache: thumb::StartCache,
 }
 
 /// The boxes of the privacy question.
@@ -515,16 +520,18 @@ impl App {
             },
             photo_job: None,
             photo_key: None,
+            photo_on: false,
             photo_want: None,
             photo_tex: None,
             photo_started: Instant::now(),
+            photo_done: None,
             themed: false,
             title: String::new(),
+            def: definition::Definition::default(),
+            def_file: PathBuf::new(),
+            def_mtime: None,
             sets: Vec::new(),
-            sets_file: PathBuf::new(),
-            sets_info: presets::Info::default(),
-            sets_info_key: None,
-            sets_mtime: None,
+            def_notes: Vec::new(),
             active_set: None,
             set_edited: false,
             new_set: None,
@@ -553,6 +560,8 @@ impl App {
             menu_at: egui::Pos2::ZERO,
             menu_bar_rect: egui::Rect::NOTHING,
             examples_row: None,
+            start_height: 0.0,
+            start_tab: None,
             recent: recent::load(),
             show_about: false,
             tour: tour::first_start().then(tour::Tour::new),
@@ -560,6 +569,9 @@ impl App {
             pending: Vec::new(),
             update: update::Checker::new(),
             show_changes: false,
+            thumb_due: false,
+            thumb_jobs: Vec::new(),
+            start_cache: thumb::StartCache::default(),
         };
         app.sync_server(&cc.egui_ctx);
         app.check_openscad();
@@ -570,6 +582,8 @@ impl App {
     }
 
     fn open(&mut self, path: PathBuf) {
+        // The model that closes gets a new thumbnail.
+        self.queue_thumb();
         self.flush_autosave();
         self.save_state();
         match std::fs::read_to_string(&path) {
@@ -577,9 +591,8 @@ impl App {
                 let saved = state::load(&path);
                 self.params = params::parse(&src);
                 self.mtime = mtime(&path);
-                self.sets_file = presets::file_for(&path);
-                self.sets = presets::names(&self.sets_file);
-                self.sets_mtime = mtime(&self.sets_file);
+                self.def_file = definition::path_for(&path);
+                self.load_def();
                 self.active_set = None;
                 self.set_edited = false;
                 self.confirm_delete = false;
@@ -612,6 +625,7 @@ impl App {
                 }
                 self.slice_rev += 1;
                 self.fit_pending = true;
+                self.thumb_due = true;
                 self.error = None;
                 self.recent = recent::add(self.file.as_ref().unwrap());
                 telemetry::event(Event::ModelOpened {
@@ -632,6 +646,7 @@ impl App {
             return;
         };
         let mut fresh = params::parse(&src);
+        self.def.apply_parts(&mut fresh);
         for p in &mut fresh {
             if let Some(old) = self.params.iter().find(|o| o.name == p.name && o.changed())
                 && std::mem::discriminant(&old.value) == std::mem::discriminant(&p.value)
@@ -645,19 +660,65 @@ impl App {
         self.start_render();
     }
 
-    /// Re-reads the sets file after a change. The active set takes the new
-    /// values, unless it has edits. A file that cannot be parsed, for example
-    /// during a write, stays unread and the next poll tries it again.
+    /// The time of the file that the definition comes from: `<model>.yml`,
+    /// else the `.json` file of the OpenSCAD Customizer.
+    fn def_source_mtime(&self) -> Option<SystemTime> {
+        definition::source(&self.def_file).and_then(|p| mtime(&p))
+    }
+
+    /// Reads the definition of the open model, and gives its parts to the
+    /// part parameter. A file that cannot be read gives an empty definition.
+    /// The problems go to the console, and a new problem to a message.
+    fn load_def(&mut self) {
+        self.def_mtime = self.def_source_mtime();
+        let name = (definition::source(&self.def_file).as_deref())
+            .and_then(Path::file_name)
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned();
+        let mut notes = Vec::new();
+        self.def = match definition::load(&self.def_file) {
+            Ok(d) => d,
+            Err(e) => {
+                notes.push(format!("{e:#}"));
+                definition::Definition::default()
+            }
+        };
+        let warnings = self.def.warnings.clone();
+        notes.extend(
+            (warnings.into_iter())
+                .chain(self.def.apply_parts(&mut self.params))
+                .map(|w| format!("{name}: {w}")),
+        );
+        if notes != self.def_notes
+            && let Some(first) = notes.first()
+        {
+            self.toast = Some((first.clone(), Instant::now()));
+        }
+        self.def_notes = notes;
+        self.sets = self.def.set_names();
+    }
+
+    /// Re-reads the definition after a change. The parts follow it. The
+    /// active set takes the new values, unless it has edits. A file that
+    /// cannot be parsed, for example during a write, stays unread and the
+    /// next poll tries it again.
     fn reload_sets(&mut self) {
-        let m = mtime(&self.sets_file);
-        if m == self.sets_mtime {
+        let m = self.def_source_mtime();
+        if m == self.def_mtime {
             return;
         }
-        let Ok(names) = presets::try_names(&self.sets_file) else {
+        if definition::load(&self.def_file).is_err() {
             return;
+        }
+        let parts = |params: &[Param]| {
+            crate::part_param::selector(params).map(|(p, l)| (p.name.clone(), l.clone()))
         };
-        self.sets_mtime = m;
-        self.sets = names;
+        let before = parts(&self.params);
+        self.load_def();
+        if parts(&self.params) != before {
+            self.dirty_since = Some(Instant::now());
+        }
         let Some(name) = self.active_set.clone() else {
             return;
         };
@@ -668,7 +729,7 @@ impl App {
             self.toast = Some((format!("Set {name} is not in the file"), Instant::now()));
         } else if !self.set_edited {
             let before: Vec<_> = self.params.iter().map(|p| p.value.clone()).collect();
-            let skipped = presets::apply(&self.sets_file, &name, &mut self.params);
+            let skipped = presets::apply(&self.def_file, &name, &mut self.params);
             if self.params.iter().map(|p| &p.value).ne(before.iter()) {
                 let text = match skipped {
                     Ok(s) if !s.is_empty() => format!("Skipped: {}", s.join(", ")),
@@ -681,22 +742,17 @@ impl App {
         }
     }
 
-    /// Loads a set of the sets file when a model opens: the set that was
+    /// Loads a set of the definition when a model opens: the set that was
     /// active last, else the first set. See `presets::autoload`.
     fn autoload_set(&mut self, scad: &Path) {
         let Some(name) = presets::autoload(scad, &self.sets) else {
             return;
         };
-        let file = self
-            .sets_file
-            .file_name()
-            .unwrap_or_default()
-            .to_string_lossy();
-        let text = match presets::apply(&self.sets_file, &name, &mut self.params) {
+        let text = match presets::apply(&self.def_file, &name, &mut self.params) {
             Ok(skipped) if !skipped.is_empty() => {
                 format!("Loaded set {name}. Skipped: {}", skipped.join(", "))
             }
-            Ok(_) => format!("Loaded set {name} from {file}"),
+            Ok(_) => format!("Loaded set {name}"),
             Err(e) => {
                 self.toast = Some((e.to_string(), Instant::now()));
                 return;
@@ -735,10 +791,10 @@ impl App {
         let Some(name) = self.active_set.clone() else {
             return;
         };
-        match presets::save(&self.sets_file, &name, &self.params) {
+        match presets::save(&self.def_file, &name, &self.params) {
             Ok(()) => {
                 self.set_edited = false;
-                self.sets_mtime = mtime(&self.sets_file);
+                self.load_def();
             }
             Err(e) => {
                 self.toast = Some((format!("Cannot save set {name}: {e}"), Instant::now()));
@@ -797,7 +853,8 @@ impl App {
             // The shells and the checks can take a moment for a large mesh.
             let r = r.map(|out| {
                 let mesh = Arc::new(out.mesh);
-                let mut assembly = Assembly::shells(&mesh);
+                let label = crate::part_param::shown_label(&params);
+                let mut assembly = Assembly::shells(&mesh, label.as_deref());
                 // One shown part of a multicolor model: all shells take its color.
                 if let Some(color) = crate::parts::shown_color(&params, &out.log) {
                     assembly.paint_all(color);
@@ -830,16 +887,14 @@ impl App {
         self.assembly = assembly.map(Arc::new);
         self.assembly_rev += 1;
         let parts = self.assembly.as_ref().and_then(|a| a.bounds(&[]));
-        self.view3d.section.set_bounds(parts);
+        (self.view3d.section).set_bounds(section::Space::Model, parts);
     }
 
-    /// Finds the parts of the new mesh in the background. The parts then
-    /// replace the shells of the mesh. With all parts of a multicolor model
-    /// shown, each part of the `cocad_part` list builds. A model without
-    /// that list divides at its module instances (see `csg_split.rs`). A
-    /// model that shows one part of its list keeps the shells, in the color
-    /// of that part. In all three cases, the `%` subtrees of the model
-    /// build as reference parts. Call it after `self.log` has the log of
+    /// Finds the parts of the new mesh in the background, with
+    /// `csg_split::find_parts`: a multicolor part list, a part list or the
+    /// module split. The parts then replace the shells of the mesh. A model
+    /// that shows one part of its multicolor list keeps the shells,
+    /// in the color of that part. Call it after `self.log` has the log of
     /// the build.
     fn color_parts(&mut self, params: Vec<Param>) {
         self.cancel_parts();
@@ -849,39 +904,27 @@ impl App {
         let cfg = self.cfg.clone();
         // The same values as the main build.
         let defines = params::defines(&params);
-        if crate::parts::needs_render(&params) {
-            self.start_parts_job(false, None, "Building the named parts…", move |cancel| {
-                let parts = crate::parts::render(&cfg, &file, &params, cancel)?;
-                let references =
-                    crate::csg_split::render_references(&cfg, &file, &defines, cancel)?;
-                Ok(Some(crate::csg_split::Split { parts, references }))
-            });
-        } else if crate::parts::names(&params).is_empty() {
-            self.start_parts_job(true, None, "Finding the parts…", move |cancel| {
-                crate::csg_split::render(&cfg, &file, &defines, cancel)
-            });
+        let paint = crate::parts::shown_color(&params, &self.log);
+        let note = if crate::parts::needs_render(&params) {
+            "Building the named parts…"
+        } else if crate::part_param::needs_render(&params) {
+            "Building the parts…"
         } else {
-            let paint = crate::parts::shown_color(&params, &self.log);
-            self.start_parts_job(true, paint, "Finding the parts…", move |cancel| {
-                let references =
-                    crate::csg_split::render_references(&cfg, &file, &defines, cancel)?;
-                Ok((!references.is_empty()).then(|| crate::csg_split::Split {
-                    parts: Vec::new(),
-                    references,
-                }))
-            });
-        }
+            "Finding the parts…"
+        };
+        self.start_parts_job(paint, note, move |cancel| {
+            crate::csg_split::find_parts(&cfg, &file, &params, &defines, cancel)
+        });
     }
 
     /// Starts a background job that renders the parts of the current mesh
     /// one by one. When it is done, its parts replace the shells of the mesh
-    /// in the 3D view (see `Assembly::from_parts`). With `split_shells`, each
-    /// shell of a part is one part. When `render` gives `None`, the shells
-    /// stay. `paint` gives all printed parts one color. A new build or file
-    /// cancels the job. The Parts card shows `note` while the job runs.
+    /// in the 3D view (see `Assembly::from_parts`). When `render` gives
+    /// `None`, the shells stay. `paint` gives all printed parts one color. A
+    /// new build or file cancels the job. The Parts card shows `note` while
+    /// the job runs.
     fn start_parts_job(
         &mut self,
-        split_shells: bool,
         paint: Option<[u8; 3]>,
         note: &'static str,
         render: impl FnOnce(&Arc<AtomicBool>) -> anyhow::Result<Option<crate::csg_split::Split>>
@@ -897,15 +940,15 @@ impl App {
         let c = cancel.clone();
         std::thread::spawn(move || {
             let r = render(&c)
-                .map(|found| {
-                    found.map(|s| {
-                        let mut a =
-                            Assembly::from_parts(&mesh, &s.parts, split_shells, &s.references);
+                .map(|found| match found {
+                    Some(s) => {
+                        let mut a = Assembly::from_split(&mesh, &s);
                         if let Some(color) = paint {
                             a.paint_all(color);
                         }
-                        a
-                    })
+                        (Some(a), s.notes)
+                    }
+                    None => (None, Vec::new()),
                 })
                 .map_err(|e| format!("{e:#}"));
             let _ = tx.send(r);
@@ -977,9 +1020,17 @@ impl App {
             let rev = job.mesh_rev;
             self.parts_job = None;
             match r {
-                Ok(Some(assembly)) if rev == self.mesh_rev => {
-                    self.set_assembly(Some(assembly));
-                    ctx.request_repaint();
+                Ok((assembly, notes)) if rev == self.mesh_rev => {
+                    for n in notes {
+                        if !self.log.trim_end().is_empty() {
+                            self.log.push_str("\n\n");
+                        }
+                        self.log.push_str(&format!("{n}\n"));
+                    }
+                    if let Some(assembly) = assembly {
+                        self.set_assembly(Some(assembly));
+                        ctx.request_repaint();
+                    }
                 }
                 // The main render worked, so a failed part render only goes
                 // to the log. The shells stay.
@@ -1254,9 +1305,8 @@ impl App {
         self.menu_bar_rect = ui.max_rect();
         ui.horizontal_centered(|ui| {
             ui.spacing_mut().item_spacing.x = 2.0;
-            let (r, _) = ui.allocate_exact_size(Vec2::splat(16.0), egui::Sense::hover());
-            ui.painter().rect_filled(r, 4.0, ui::ACCENT);
-            ui.painter().rect_filled(r.shrink(4.5), 1.0, ui::c().bg);
+            let (r, _) = ui.allocate_exact_size(Vec2::splat(18.0), egui::Sense::hover());
+            ui::paint_app_mark(ui.painter(), r);
             ui.add_space(6.0);
             for (menu, label) in MENUS {
                 let open = self.menu == Some(menu);
@@ -1360,6 +1410,9 @@ impl App {
     }
 
     fn file_menu(&mut self, ui: &mut egui::Ui) {
+        if ui::menu_item(ui, "New model…", "Ctrl+N", true, false).clicked() {
+            self.new_model();
+        }
         if ui::menu_item(ui, "Open…", "Ctrl+O", true, false).clicked() {
             self.pick_file();
         }
@@ -1702,20 +1755,22 @@ impl App {
                     .max_height(height)
                     .auto_shrink([false, true])
                     .show(ui, |ui| {
-                        for release in self.update.releases() {
-                            let mut title = release.version.to_string();
-                            if release.version == installed {
-                                title.push_str(" (installed)");
+                        ui::bar_room(ui, |ui| {
+                            for release in self.update.releases() {
+                                let mut title = release.version.to_string();
+                                if release.version == installed {
+                                    title.push_str(" (installed)");
+                                }
+                                ui.label(RichText::new(title).strong());
+                                for change in &release.changes {
+                                    ui.label(format!("•  {change}"));
+                                }
+                                if release.changes.is_empty() {
+                                    ui.label(ui::dim("No notes for this version."));
+                                }
+                                ui.add_space(10.0);
                             }
-                            ui.label(RichText::new(title).strong());
-                            for change in &release.changes {
-                                ui.label(format!("•  {change}"));
-                            }
-                            if release.changes.is_empty() {
-                                ui.label(ui::dim("No notes for this version."));
-                            }
-                            ui.add_space(10.0);
-                        }
+                        });
                     });
                 ui.add_space(8.0);
                 let row = Vec2::new(ui.available_width(), 34.0);
@@ -1772,9 +1827,15 @@ impl App {
     /// `note` shows in the header while the card is closed. Returns true
     /// when the card is open.
     fn card_head(&mut self, ui: &mut egui::Ui, name: &str, note: &str) -> bool {
+        self.card_head_info(ui, name, note, "")
+    }
+
+    /// `card_head` with an info icon after the name. The icon shows `info`
+    /// on hover.
+    fn card_head_info(&mut self, ui: &mut egui::Ui, name: &str, note: &str, info: &str) -> bool {
         let open = !self.card_closed(name);
         let note = if open { "" } else { note };
-        if ui::fold_header(ui, name, open, note).clicked() {
+        if ui::fold_header(ui, name, open, note, info).clicked() {
             self.set_cards_closed(&[name], open);
         }
         let open = !self.card_closed(name);
@@ -1801,92 +1862,61 @@ impl App {
         }
     }
 
-    /// The first row of a tab: a short hint, and a button that opens or
-    /// closes all cards of the tab.
-    fn panel_head(&mut self, ui: &mut egui::Ui, hint: &str) {
-        let cards = self.mode.cards();
-        let all_closed = cards.iter().all(|c| self.card_closed(c));
-        let row = Vec2::new(ui.available_width(), 28.0);
-        let rtl = egui::Layout::right_to_left(egui::Align::Center);
-        ui.allocate_ui_with_layout(row, rtl, |ui| {
-            let (icon, label, hover) = if all_closed {
-                (ui::Icon::Expand, "Expand", "Open all cards")
-            } else {
-                (ui::Icon::Collapse, "Collapse", "Close all cards")
-            };
-            if ui::icon_text_button(ui, icon, label, 28.0)
-                .on_hover_text(hover)
-                .clicked()
-            {
-                self.set_cards_closed(cards, !all_closed);
-            }
-            let ltr = egui::Layout::left_to_right(egui::Align::Center);
-            ui.with_layout(ltr, |ui| {
-                ui.add(egui::Label::new(ui::dim(hint)).truncate());
-            });
-        });
-        ui.add_space(4.0);
-    }
-
     fn model_panel(&mut self, ui: &mut egui::Ui) {
-        self.panel_head(ui, "Build the model and look at its parts.");
-        egui::ScrollArea::vertical()
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
+        ui::scroll(ui, ui::PANEL_PAD, |ui| {
+            ui::card(ui, |ui| {
+                let note = if self.job.is_some() {
+                    "Building".to_string()
+                } else if self.error.is_some() {
+                    "Error".to_string()
+                } else {
+                    self.last_time
+                        .map(|t| format!("{:.2} s", t.as_secs_f32()))
+                        .unwrap_or_default()
+                };
+                if !self.card_head(ui, "Build", &note) {
+                    return;
+                }
+                // Auto build and Build on one row.
+                ui.horizontal(|ui| {
+                    ui.label("Auto build");
+                    ui::toggle(ui, &mut self.auto_render)
+                        .on_hover_text("Build when a parameter changes");
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let build = egui::Button::new("Build").min_size(Vec2::new(110.0, 30.0));
+                        if ui
+                            .add_enabled(self.file.is_some(), build)
+                            .on_hover_text("Build the model now (F5)")
+                            .clicked()
+                        {
+                            self.start_render();
+                        }
+                    });
+                });
+            });
+            ui.add_space(4.0);
+            self.parts_card(ui);
+            self.explode_card(ui);
+            if let (Some(i), Some(mesh)) = (&self.info, &self.mesh) {
+                let size = i.bounds.size();
+                let tris = mesh.triangles.len();
+                let (volume, open_edges) = (i.volume, i.open_edges);
+                let note = format!("{:.1} × {:.1} × {:.1} mm", size.x, size.y, size.z);
                 ui::card(ui, |ui| {
-                    let note = if self.job.is_some() {
-                        "Building".to_string()
-                    } else if self.error.is_some() {
-                        "Error".to_string()
-                    } else {
-                        self.last_time
-                            .map(|t| format!("{:.2} s", t.as_secs_f32()))
-                            .unwrap_or_default()
-                    };
-                    if !self.card_head(ui, "Build", &note) {
+                    if !self.card_head(ui, "Mesh", &note) {
                         return;
                     }
-                    ui.horizontal(|ui| {
-                        ui.label("Auto build");
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            ui::toggle(ui, &mut self.auto_render)
-                                .on_hover_text("Build when a parameter changes");
-                        });
-                    });
-                    let build =
-                        egui::Button::new("Build").min_size(Vec2::new(ui.available_width(), 34.0));
-                    if ui
-                        .add_enabled(self.file.is_some(), build)
-                        .on_hover_text("F5")
-                        .clicked()
-                    {
-                        self.start_render();
-                    }
+                    info_row(
+                        ui,
+                        "Size",
+                        &format!("{:.1} × {:.1} × {:.1} mm", size.x, size.y, size.z),
+                    );
+                    info_row(ui, "Volume", &format!("{:.2} cm³", volume / 1000.0));
+                    info_row(ui, "Triangles", &tris.to_string());
+                    info_row(ui, "Open edges", &open_edges.to_string());
                 });
-                ui.add_space(4.0);
-                self.parts_card(ui);
-                self.explode_card(ui);
-                self.section_card(ui);
-                if let (Some(i), Some(mesh)) = (&self.info, &self.mesh) {
-                    let size = i.bounds.size();
-                    let tris = mesh.triangles.len();
-                    let (volume, open_edges) = (i.volume, i.open_edges);
-                    let note = format!("{:.1} × {:.1} × {:.1} mm", size.x, size.y, size.z);
-                    ui::card(ui, |ui| {
-                        if !self.card_head(ui, "Mesh", &note) {
-                            return;
-                        }
-                        info_row(
-                            ui,
-                            "Size",
-                            &format!("{:.1} × {:.1} × {:.1} mm", size.x, size.y, size.z),
-                        );
-                        info_row(ui, "Volume", &format!("{:.2} cm³", volume / 1000.0));
-                        info_row(ui, "Triangles", &tris.to_string());
-                        info_row(ui, "Open edges", &open_edges.to_string());
-                    });
-                }
-            });
+            }
+        });
     }
 
     /// The default print area from Settings > Printer, for a model that
@@ -1895,10 +1925,10 @@ impl App {
         self.cfg.bed
     }
 
-    /// The fixed card at the bottom of the Optimize tab. Export 3MF writes
-    /// the current plate; the arrow opens a menu above it with the other
-    /// exports. The card does not close.
-    fn export_card(&mut self, ui: &mut egui::Ui) {
+    /// The bar at the bottom of the Optimize tab. Export 3MF writes the
+    /// current plate; the arrow opens a menu above it with the other
+    /// exports.
+    fn export_bar(&mut self, ui: &mut egui::Ui) {
         let plates = self.current_plates();
         let parts_ready = self.parts_job.is_none();
         let can_export = self.can_export();
@@ -1914,12 +1944,12 @@ impl App {
         let summary = self.export_summary();
         let mut pick: Option<(Format, bool)> = None;
         let mut slicer_pick = None;
-        ui::card(ui, |ui| {
-            ui::section(ui, "Export");
-            ui.add(egui::Label::new(ui::dim(summary)).wrap());
+        ui.scope(|ui| {
             let (main, arrow) = ui::split_button(ui, "Export 3MF", plate_ok, can_export);
             let main = if plate_ok {
-                main.on_hover_text("The current plate as 3MF: one object for each part")
+                main.on_hover_text(format!(
+                    "The current plate as 3MF: one object for each part.\n{summary}"
+                ))
             } else {
                 main.on_disabled_hover_text(why)
             };
@@ -1957,7 +1987,8 @@ impl App {
                                 pick = Some((Format::ThreeMf, true));
                             }
                             let all_stl = format!("STL: all {n} plates");
-                            if ui::menu_item(ui, &all_stl, "a file each", plate_ok, false).clicked() {
+                            if ui::menu_item(ui, &all_stl, "a file each", plate_ok, false).clicked()
+                            {
                                 pick = Some((Format::Stl, true));
                             }
                         }
@@ -2008,47 +2039,68 @@ impl App {
     }
 
     fn param_panel(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
-            ui.heading("Parameters");
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.spacing_mut().item_spacing.x = 6.0;
-                let all_closed = !self.params.is_empty()
-                    && self
-                        .params
-                        .iter()
-                        .all(|p| self.collapsed.contains(&p.group));
-                let (icon, label, hover) = if all_closed {
-                    (ui::Icon::Expand, "Expand", "Open all groups")
-                } else {
-                    (ui::Icon::Collapse, "Collapse", "Close all groups")
-                };
-                if ui::icon_text_button(ui, icon, label, 28.0)
-                    .on_hover_text(hover)
-                    .clicked()
-                {
-                    if all_closed {
-                        self.collapsed.clear();
-                    } else {
-                        self.collapsed = self.params.iter().map(|p| p.group.clone()).collect();
-                    }
+        // The scroll area goes to the edges of the panel, so that its scroll
+        // bar is in the side margin and not on the cards. The rows above it
+        // get the side margin here.
+        let has_model = egui::Frame::NONE
+            .inner_margin(egui::Margin::symmetric(ui::PANEL_PAD, 0))
+            .show(ui, |ui| self.param_head(ui))
+            .inner;
+        if !has_model {
+            return;
+        }
+        let mut changed = false;
+        // The resize handle of the panel is at its right edge.
+        ui.spacing_mut().scroll.bar_outer_margin = ui::BAR_INSET;
+        ui::scroll(ui, ui::PANEL_PAD, |ui| {
+            let mut groups: Vec<String> = Vec::new();
+            for p in &self.params {
+                if !groups.contains(&p.group) {
+                    groups.push(p.group.clone());
                 }
-                let any = self.params.iter().any(|p| p.changed());
-                let reset = ui
-                    .add_enabled_ui(any, |ui| {
-                        ui::icon_text_button(ui, ui::Icon::Reset, "Reset all", 28.0)
-                            .on_hover_text("Set all values back to the model defaults")
-                    })
-                    .inner;
-                if reset.clicked() {
-                    for p in &mut self.params {
-                        p.value = p.default.clone();
+            }
+            for g in groups {
+                let open = !self.collapsed.contains(&g);
+                let edited = self
+                    .params
+                    .iter()
+                    .filter(|p| p.group == g && p.changed())
+                    .count();
+                ui::card(ui, |ui| {
+                    if ui::group_header(ui, &g, open, edited).clicked() {
+                        if open {
+                            self.collapsed.insert(g.clone());
+                        } else {
+                            self.collapsed.remove(&g);
+                        }
                     }
-                    self.dirty_since = Some(Instant::now());
-                    self.mark_set_edited();
-                }
-            });
+                    if open {
+                        ui.add_space(6.0);
+                        for p in self.params.iter_mut().filter(|p| p.group == g) {
+                            changed |= param_row(ui, p);
+                        }
+                    }
+                });
+                ui.add_space(4.0);
+            }
+
+            let defs = params::defines(&self.params);
+            if !defs.is_empty() && ui.add(ui::ghost("Copy as -D arguments", false)).clicked() {
+                let s: Vec<String> = defs.iter().map(|d| format!("-D '{d}'")).collect();
+                ui.ctx().copy_text(s.join(" "));
+                self.toast = Some(("Copied -D arguments".into(), Instant::now()));
+            }
+            ui.add_space(12.0);
         });
-        ui.add_space(4.0);
+        if changed {
+            self.dirty_since = Some(Instant::now());
+            self.mark_set_edited();
+        }
+    }
+
+    /// The rows above the parameter groups: the model card and the
+    /// parameter sets. False when no model is open.
+    fn param_head(&mut self, ui: &mut egui::Ui) -> bool {
         if self.file.is_none() {
             ui::card(ui, |ui| {
                 ui.label("Open a .scad file, or drop one on the window.");
@@ -2056,8 +2108,10 @@ impl App {
                     self.pick_file();
                 }
             });
-            return;
+            return false;
         }
+        self.model_card(ui);
+        ui.add_space(4.0);
         if !self.params.is_empty() {
             self.sets_bar(ui);
             ui.add_space(4.0);
@@ -2067,122 +2121,165 @@ impl App {
                 ui.label(ui::dim("No Customizer parameters in this file."))
             });
         }
+        true
+    }
 
-        let mut changed = false;
-        egui::ScrollArea::vertical()
-            .auto_shrink([false, false])
+    /// A card with the name and the description of the model, from its
+    /// definition. Without a title, the name is the file name. The info
+    /// button opens a window with all fields of the definition.
+    fn model_card(&mut self, ui: &mut egui::Ui) {
+        let Some(file) = &self.file else {
+            return;
+        };
+        let meta = &self.def.meta;
+        let stem = file.file_stem().unwrap_or_default().to_string_lossy();
+        let name = meta.title.clone().unwrap_or_else(|| stem.into_owned());
+        let id = egui::Id::new("model-info");
+        let mut show = ui.ctx().data(|d| d.get_temp::<bool>(id).unwrap_or(false));
+        egui::Frame::NONE
+            .fill(ui::c().card)
+            .corner_radius(12)
+            .inner_margin(egui::Margin {
+                left: 16,
+                right: 8,
+                top: 8,
+                bottom: 8,
+            })
             .show(ui, |ui| {
-                let mut groups: Vec<String> = Vec::new();
-                for p in &self.params {
-                    if !groups.contains(&p.group) {
-                        groups.push(p.group.clone());
-                    }
-                }
-                for g in groups {
-                    let open = !self.collapsed.contains(&g);
-                    let edited = self
-                        .params
-                        .iter()
-                        .filter(|p| p.group == g && p.changed())
-                        .count();
-                    ui::card(ui, |ui| {
-                        if ui::group_header(ui, &g, open, edited).clicked() {
-                            if open {
-                                self.collapsed.insert(g.clone());
-                            } else {
-                                self.collapsed.remove(&g);
-                            }
+                ui.set_width(ui.available_width());
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 8.0;
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
+                        if ui::icon_button(ui, ui::Icon::Info, 28.0, show)
+                            .on_hover_text("Model info")
+                            .clicked()
+                        {
+                            show = !show;
                         }
-                        if open {
-                            ui.add_space(6.0);
-                            for p in self.params.iter_mut().filter(|p| p.group == g) {
-                                changed |= param_row(ui, p);
+                        ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
+                            ui.spacing_mut().item_spacing.y = 2.0;
+                            ui.add_space(4.0);
+                            ui.add(
+                                egui::Label::new(RichText::new(&name).size(15.0).strong())
+                                    .truncate(),
+                            );
+                            if let Some(d) = &meta.description {
+                                ui.add(
+                                    egui::Label::new(
+                                        RichText::new(d).size(12.5).color(ui::c().dim),
+                                    )
+                                    .wrap(),
+                                );
                             }
-                        }
+                            ui.add_space(4.0);
+                        });
                     });
-                    ui.add_space(4.0);
-                }
-
-                let defs = params::defines(&self.params);
-                if !defs.is_empty() && ui.add(ui::ghost("Copy as -D arguments", false)).clicked() {
-                    let s: Vec<String> = defs.iter().map(|d| format!("-D '{d}'")).collect();
-                    ui.ctx().copy_text(s.join(" "));
-                    self.toast = Some(("Copied -D arguments".into(), Instant::now()));
-                }
-                ui.add_space(12.0);
+                });
             });
-        if changed {
+        if show {
+            let frame = egui::Frame::NONE
+                .fill(ui::c().panel)
+                .corner_radius(14)
+                .inner_margin(egui::Margin::same(20))
+                .stroke(egui::Stroke::new(1.0_f32, ui::c().line));
+            let modal = egui::Modal::new(id).frame(frame).show(ui.ctx(), |ui| {
+                ui.set_width(420.0);
+                ui.heading(&name);
+                if let Some(d) = &meta.description {
+                    ui.add(egui::Label::new(RichText::new(d).color(ui::c().dim)).wrap());
+                }
+                ui.add_space(4.0);
+                egui::Grid::new("model-info-grid")
+                    .num_columns(2)
+                    .spacing([16.0, 8.0])
+                    .show(ui, |ui| {
+                        for (k, v) in &meta.other {
+                            ui.label(ui::dim(humanize(k)));
+                            if v.starts_with("https://") || v.starts_with("http://") {
+                                ui.hyperlink_to(v, v);
+                            } else {
+                                ui.add(egui::Label::new(v).wrap());
+                            }
+                            ui.end_row();
+                        }
+                        ui.label(ui::dim("File"));
+                        ui.add(egui::Label::new(file.display().to_string()).wrap());
+                        ui.end_row();
+                        if let Some(src) = definition::source(&self.def_file) {
+                            ui.label(ui::dim("Definition"));
+                            ui.add(egui::Label::new(src.display().to_string()).wrap());
+                            ui.end_row();
+                        }
+                        ui.label(ui::dim("Parameters"));
+                        ui.label(self.params.len().to_string());
+                        ui.end_row();
+                        ui.label(ui::dim("Sets"));
+                        ui.label(self.sets.len().to_string());
+                        ui.end_row();
+                    });
+                ui.add_space(8.0);
+                let row = Vec2::new(ui.available_width(), 34.0);
+                let rtl = egui::Layout::right_to_left(egui::Align::Center);
+                ui.allocate_ui_with_layout(row, rtl, |ui| {
+                    ui.spacing_mut().button_padding = Vec2::new(16.0, 7.0);
+                    ui.add(ui::primary("Close")).clicked()
+                })
+                .inner
+            });
+            if modal.inner || modal.should_close() {
+                show = false;
+            }
+        }
+        ui.ctx().data_mut(|d| d.insert_temp(id, show));
+    }
+
+    /// Sets all values back to the model defaults.
+    fn reset_all_button(&mut self, ui: &mut egui::Ui, size: f32) {
+        let any = self.params.iter().any(|p| p.changed());
+        let reset = ui
+            .add_enabled_ui(any, |ui| {
+                ui::icon_button(ui, ui::Icon::Reset, size, false)
+                    .on_hover_text("Reset all: set all values back to the model defaults")
+            })
+            .inner;
+        if reset.clicked() {
+            for p in &mut self.params {
+                p.value = p.default.clone();
+            }
             self.dirty_since = Some(Instant::now());
             self.mark_set_edited();
         }
     }
 
-    /// The sets file card (name, Open and the gear menu) and below it the
-    /// set list with Save. The set list sits directly above the parameter
-    /// groups, because the set gives their values.
-    fn sets_bar(&mut self, ui: &mut egui::Ui) {
-        let Some(file) = self.file.clone() else {
-            return;
+    /// Closes all parameter groups, or opens all when all are closed.
+    fn fold_button(&mut self, ui: &mut egui::Ui, size: f32) {
+        let all_closed = !self.params.is_empty()
+            && self.params.iter().all(|p| self.collapsed.contains(&p.group));
+        let (icon, hover) = if all_closed {
+            (ui::Icon::Expand, "Open all groups")
+        } else {
+            (ui::Icon::Collapse, "Close all groups")
         };
-        let path = self.sets_file.clone();
-        let mut msg: Option<String> = None;
-        let mut switch_to: Option<PathBuf> = None;
-        let dir = path
-            .parent()
-            .filter(|d| d.is_dir())
-            .or(file.parent())
-            .map(|d| d.to_path_buf());
-        let mut gear_rect = egui::Rect::NOTHING;
-        let key = (path.clone(), mtime(&path));
-        if self.sets_info_key.as_ref() != Some(&key) {
-            self.sets_info = presets::info(&path);
-            self.sets_info_key = Some(key);
+        if ui::icon_button(ui, icon, size, false).on_hover_text(hover).clicked() {
+            if all_closed {
+                self.collapsed.clear();
+            } else {
+                self.collapsed = self.params.iter().map(|p| p.group.clone()).collect();
+            }
         }
-        let file_meta = self.sets_info.file.clone();
-        ui::card(ui, |ui| {
-            ui.horizontal(|ui| {
-                let name = path
-                    .file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .into_owned();
-                let text = if path.exists() {
-                    name
-                } else {
-                    format!("{name} (new)")
-                };
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.spacing_mut().item_spacing.x = 6.0;
-                    let gear = ui::icon_button(ui, ui::Icon::Gear, 28.0, self.sets_menu)
-                        .on_hover_text("New set, new file, delete");
-                    if gear.clicked() {
-                        self.sets_menu = !self.sets_menu;
-                    }
-                    gear_rect = gear.rect;
-                    if ui::icon_text_button(ui, ui::Icon::Open, "Open", 28.0)
-                        .on_hover_text("Open a sets file (.json)")
-                        .clicked()
-                    {
-                        let mut d = rfd::FileDialog::new().add_filter("Parameter sets", &["json"]);
-                        if let Some(dir) = &dir {
-                            d = d.set_directory(dir);
-                        }
-                        switch_to = d.pick_file();
-                    }
-                    // The name gets the space the buttons leave, cut short when needed.
-                    ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                        ui.add(
-                            egui::Label::new(RichText::new(text).size(13.0).color(ui::c().dim))
-                                .truncate(),
-                        )
-                        .on_hover_text(path.display().to_string());
-                    });
-                });
-            });
-            meta_text(ui, &file_meta);
-        });
-        ui.add_space(4.0);
+    }
 
+    /// The set list with Save and the set menu, and the description of the
+    /// active set. The list sits directly above the parameter groups,
+    /// because the set gives their values. The sets are in the definition
+    /// `<model>.yml` next to the model.
+    fn sets_bar(&mut self, ui: &mut egui::Ui) {
+        if self.file.is_none() {
+            return;
+        }
+        let path = self.def_file.clone();
+        let mut msg: Option<String> = None;
+        let mut gear_rect = egui::Rect::NOTHING;
         let mut pick: Option<Option<String>> = None;
         let mut new_set = false;
         ui.horizontal(|ui| {
@@ -2192,13 +2289,14 @@ impl App {
                 Some(n) => n.clone(),
                 None => "Model defaults".into(),
             };
-            // Height of a button row. The Save button is a square of this size.
+            // Height of a button row. Save and the menu are squares of this size.
             let sp = ui.spacing();
             let row = (ui.text_style_height(&egui::TextStyle::Button) + 2.0 * sp.button_padding.y)
                 .max(sp.interact_size.y);
             // Show 4.5 rows. The half row tells the user that the list scrolls.
             let list_height = 4.0 * (row + sp.item_spacing.y) + 0.5 * row;
-            let width = ui.available_width() - row - sp.item_spacing.x;
+            // Save, the set menu, Reset all and Collapse are squares.
+            let width = ui.available_width() - 4.0 * (row + sp.item_spacing.x);
             // egui keeps the popup size of the first open. A new id for each
             // number of sets lets the popup take the new size.
             egui::ComboBox::from_id_salt(("sets", self.sets.len()))
@@ -2220,7 +2318,12 @@ impl App {
                             pick = Some(Some(n.clone()));
                         }
                     }
-                });
+                })
+                .response
+                .on_hover_text(format!(
+                    "Parameter sets in {}",
+                    path.file_name().unwrap_or_default().to_string_lossy()
+                ));
             let edited = self.set_edited && self.active_set.is_some();
             let save = ui::icon_button(ui, ui::Icon::Save, row, edited).on_hover_text(match &self
                 .active_set
@@ -2236,16 +2339,23 @@ impl App {
                             self.autosave_at = None;
                             msg = Some(format!("Saved {n}"));
                         }
-                        Err(e) => msg = Some(e.to_string()),
+                        Err(e) => msg = Some(format!("{e:#}")),
                     },
                     None => new_set = true,
                 }
             }
+            let gear = ui::icon_button(ui, ui::Icon::Gear, row, self.sets_menu)
+                .on_hover_text("New set, delete set");
+            if gear.clicked() {
+                self.sets_menu = !self.sets_menu;
+            }
+            gear_rect = gear.rect;
+            self.reset_all_button(ui, row);
+            self.fold_button(ui, row);
         });
-        if let Some(meta) = self
-            .active_set
-            .as_deref()
-            .and_then(|n| self.sets_info.set(n))
+        if let Some(d) = (self.active_set.as_deref())
+            .and_then(|n| self.def.set(n))
+            .and_then(|s| s.description.clone())
         {
             ui.add_space(4.0);
             egui::Frame::NONE
@@ -2254,12 +2364,11 @@ impl App {
                 .inner_margin(egui::Margin::symmetric(10, 8))
                 .show(ui, |ui| {
                     ui.set_width(ui.available_width());
-                    meta_text(ui, meta);
+                    ui.add(egui::Label::new(RichText::new(d).size(12.5).color(ui::c().dim)).wrap());
                 });
         }
 
-        // The gear menu, under the gear button, right aligned.
-        let mut new_file = false;
+        // The set menu, under the gear button, right aligned.
         let mut delete = false;
         if self.sets_menu {
             let ctx = ui.ctx().clone();
@@ -2271,9 +2380,6 @@ impl App {
                     ui::menu_frame_width(ui, 200.0, |ui| {
                         new_set |= ui::menu_item(ui, "New set…", "", true, false)
                             .on_hover_text("Save the values as a new set")
-                            .clicked();
-                        new_file = ui::menu_item(ui, "New file…", "", true, false)
-                            .on_hover_text("Choose where to save a new sets file")
                             .clicked();
                         ui::menu_separator(ui);
                         let (text, on) = match &self.active_set {
@@ -2292,7 +2398,7 @@ impl App {
                         .is_some_and(|p| !area.response.rect.contains(p) && !gear_rect.contains(p))
             });
             let escape = ctx.input(|i| i.key_pressed(egui::Key::Escape));
-            if new_set || new_file || delete || outside || escape {
+            if new_set || delete || outside || escape {
                 self.sets_menu = false;
             }
         }
@@ -2310,7 +2416,7 @@ impl App {
                         msg = Some(format!("Skipped: {}", skipped.join(", ")));
                     }
                     Ok(_) => {}
-                    Err(e) => msg = Some(e.to_string()),
+                    Err(e) => msg = Some(format!("{e:#}")),
                 },
             }
             self.set_active(choice);
@@ -2321,38 +2427,12 @@ impl App {
             self.new_set = Some(String::new());
             self.confirm_delete = false;
         }
-        if new_file {
-            let mut d = rfd::FileDialog::new()
-                .add_filter("Parameter sets", &["json"])
-                .set_file_name(path.file_name().unwrap_or_default().to_string_lossy());
-            if let Some(dir) = &dir {
-                d = d.set_directory(dir);
-            }
-            switch_to = d.save_file();
-        }
         if delete {
             self.confirm_delete = true;
             self.new_set = None;
         }
-        if let Some(p) = switch_to {
-            self.flush_autosave();
-            if let Err(e) = presets::remember(&file, &p) {
-                msg = Some(format!("Cannot remember the sets file: {e}"));
-            }
-            self.sets_file = p.clone();
-            self.sets_mtime = mtime(&p);
-            self.active_set = None;
-            self.set_edited = false;
-            self.confirm_delete = false;
-            self.new_set = None;
-            let n = presets::names(&p).len();
-            msg = msg.or(Some(format!(
-                "{n} sets in {}",
-                p.file_name().unwrap_or_default().to_string_lossy()
-            )));
-        }
         if msg.is_some() {
-            self.sets = presets::names(&self.sets_file);
+            self.load_def();
         }
         if let Some(m) = msg {
             self.toast = Some((m, Instant::now()));
@@ -2374,7 +2454,7 @@ impl App {
             return;
         };
         let file = self
-            .sets_file
+            .def_file
             .file_name()
             .unwrap_or_default()
             .to_string_lossy()
@@ -2422,13 +2502,13 @@ impl App {
         cancel |= modal.should_close();
         let name = name.trim().to_string();
         if submit && !name.is_empty() {
-            match presets::save(&self.sets_file, &name, &self.params) {
+            match presets::save(&self.def_file, &name, &self.params) {
                 Ok(()) => {
+                    self.load_def();
                     self.toast = Some((format!("Saved {name}"), Instant::now()));
-                    self.sets = presets::names(&self.sets_file);
                     self.set_active(Some(name));
                 }
-                Err(e) => self.toast = Some((e.to_string(), Instant::now())),
+                Err(e) => self.toast = Some((format!("{e:#}"), Instant::now())),
             }
         } else if !cancel {
             self.new_set = Some(name);
@@ -2445,7 +2525,7 @@ impl App {
             return;
         };
         let file = self
-            .sets_file
+            .def_file
             .file_name()
             .unwrap_or_default()
             .to_string_lossy()
@@ -2471,14 +2551,14 @@ impl App {
             });
         cancel |= modal.should_close();
         if delete {
-            match presets::delete(&self.sets_file, &n) {
+            match presets::delete(&self.def_file, &n) {
                 Ok(()) => {
+                    self.load_def();
                     self.toast = Some((format!("Deleted {n}"), Instant::now()));
-                    self.sets = presets::names(&self.sets_file);
                     self.set_active(None);
                 }
                 Err(e) => {
-                    self.toast = Some((e.to_string(), Instant::now()));
+                    self.toast = Some((format!("{e:#}"), Instant::now()));
                     self.confirm_delete = false;
                 }
             }
@@ -2663,8 +2743,16 @@ impl App {
             size,
             samples: self.photo.samples,
         };
-        if self.photo_key != Some(key) {
-            // Wait until the camera and settings rest, then start again.
+        // A render that no longer matches the view or the settings stops,
+        // and the frame shows the 3D view again.
+        if self.photo_key.is_some_and(|k| k != key) {
+            self.stop_photo();
+            self.photo_job = None;
+            self.photo_key = None;
+            self.photo_tex = None;
+        }
+        if self.photo_on && self.photo_key.is_none() {
+            // Wait until the camera and the settings rest, then start.
             match self.photo_want {
                 Some((k, at)) if k == key => {
                     if at.elapsed() > Duration::from_millis(250)
@@ -2681,13 +2769,11 @@ impl App {
                         self.photo_key = Some(key);
                         self.photo_tex = None;
                         self.photo_started = Instant::now();
+                        self.photo_done = None;
                         self.photo_want = None;
                     }
                 }
-                _ => {
-                    self.photo_job = None;
-                    self.photo_want = Some((key, Instant::now()));
-                }
+                _ => self.photo_want = Some((key, Instant::now())),
             }
             ui.ctx().request_repaint_after(Duration::from_millis(60));
         }
@@ -2710,7 +2796,12 @@ impl App {
                 }
             }
             if f.samples < self.photo.samples {
-                ui.ctx().request_repaint_after(Duration::from_millis(120));
+                if self.photo_on {
+                    ui.ctx().request_repaint_after(Duration::from_millis(120));
+                }
+            } else if self.photo_done.is_none() {
+                self.photo_done = Some(self.photo_started.elapsed());
+                self.photo_on = false;
             }
         }
         // Dim the view outside the frame, then draw the render into it.
@@ -2759,6 +2850,25 @@ impl App {
         );
     }
 
+    /// Starts a new render of the view in the frame (the Render button).
+    fn start_photo(&mut self) {
+        self.photo_job = None;
+        self.photo_key = None;
+        self.photo_tex = None;
+        self.photo_want = None;
+        self.photo_done = None;
+        self.photo_on = true;
+    }
+
+    /// Stops the render. The image keeps the samples that are done.
+    fn stop_photo(&mut self) {
+        self.photo_on = false;
+        self.photo_want = None;
+        if let Some(job) = &self.photo_job {
+            job.stop();
+        }
+    }
+
     fn photo_samples(&self) -> u32 {
         self.photo_job
             .as_ref()
@@ -2788,195 +2898,326 @@ impl App {
         self.toast = Some((msg, Instant::now()));
     }
 
-    /// The fixed card at the bottom of the Render tab: the progress of the
-    /// render and Save PNG. It does not close.
-    fn render_card(&mut self, ui: &mut egui::Ui) {
+    /// The bar at the bottom of the Render tab: the progress, Render and
+    /// Save PNG. The tab starts no render by itself.
+    fn render_bar(&mut self, ui: &mut egui::Ui) {
         let samples = self.photo_samples();
         let target = self.photo.samples;
-        ui::card(ui, |ui| {
-            ui::section(ui, "Render");
-            let waiting = self.photo_job.is_none() && self.mesh.is_some();
-            ui.horizontal(|ui| {
-                ui.label(RichText::new(format!("{samples}")).size(22.0));
-                ui.label(ui::dim(format!(
-                    "of {target} samples   ·   {} × {} px",
-                    self.photo.width, self.photo.height
-                )));
+        let built = self.mesh.is_some();
+        let running = self.photo_on;
+        // The samples and the state of the render on one row. The image
+        // size is in the header of the Quality card.
+        let status = if !built {
+            String::new()
+        } else if running && self.photo_job.is_none() {
+            "Waiting for the view to rest".to_string()
+        } else if running {
+            format!("{:.0} s", self.photo_started.elapsed().as_secs_f32())
+        } else if let Some(t) = self.photo_done.filter(|_| self.photo_job.is_some()) {
+            format!("Done in {:.0} s", t.as_secs_f32())
+        } else if self.photo_job.is_some() {
+            "Stopped".to_string()
+        } else {
+            String::new()
+        };
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(format!("{samples}")).size(22.0));
+            ui.label(ui::dim(format!("of {target} samples")));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.label(ui::dim(status));
             });
-            ui.add(
-                egui::ProgressBar::new(samples as f32 / target.max(1) as f32)
-                    .desired_height(6.0)
-                    .fill(ui::ACCENT),
-            );
-            let status = if waiting {
-                "Waiting for the view to rest…".to_string()
-            } else if samples >= target {
-                format!(
-                    "Done in {:.0} s",
-                    self.photo_started.elapsed().as_secs_f32()
-                )
-            } else {
-                format!("{:.0} s", self.photo_started.elapsed().as_secs_f32())
-            };
-            ui.label(ui::dim(status));
-            ui.add_space(4.0);
-            let w = ui.available_width();
-            let save = ui
-                .add_enabled_ui(samples > 0, |ui| {
-                    ui.add_sized(Vec2::new(w, 34.0), ui::primary("Save PNG"))
-                })
-                .inner;
-            if save.on_hover_text("Save the image at its full size").clicked() {
-                self.save_photo();
-            }
         });
+        ui.add(
+            egui::ProgressBar::new(samples as f32 / target.max(1) as f32)
+                .desired_height(6.0)
+                .fill(ui::ACCENT),
+        );
+        ui.add_space(4.0);
+        let w = ui.available_width();
+        let size = Vec2::new(w, 34.0);
+        let (label, hover) = if running {
+            (
+                "Stop",
+                "Stop the render. You can save the samples that are done.",
+            )
+        } else {
+            (
+                "Render",
+                "Path-trace the view in the frame on all CPU cores",
+            )
+        };
+        let go = ui
+            .add_enabled_ui(built, |ui| ui.add_sized(size, ui::primary(label)))
+            .inner;
+        if go
+            .on_hover_text(hover)
+            .on_disabled_hover_text("Build the model first")
+            .clicked()
+        {
+            if running {
+                self.stop_photo();
+            } else {
+                self.start_photo();
+            }
+        }
+        let save = ui
+            .add_enabled_ui(samples > 0, |ui| {
+                ui.add_sized(size, egui::Button::new("Save PNG").corner_radius(8))
+            })
+            .inner;
+        if save
+            .on_hover_text("Save the image at its full size")
+            .clicked()
+        {
+            self.save_photo();
+        }
     }
 
-    fn render_panel(&mut self, ui: &mut egui::Ui) {
-        self.panel_head(ui, "Path-traced render of the current view.");
-        egui::ScrollArea::vertical()
-            .auto_shrink([false, false])
+    /// The "Material" card of the Render tab: the color and the finish. A
+    /// model with two or more parts has one color for all parts, or a color
+    /// for each part. The second choice is the "Part colors" switch of the
+    /// Parts card in the Model tab.
+    fn material_card(&mut self, ui: &mut egui::Ui) {
+        let parts =
+            (self.assembly.clone()).filter(|a| a.parts.iter().filter(|p| !p.reference).count() > 1);
+        let each = parts.is_some() && self.view3d.part_colors;
+        let finish = match self.photo.finish {
+            "matte" => "Matte",
+            "gloss" => "Gloss",
+            _ => "Satin",
+        };
+        let note = if each {
+            format!("{finish}, part colors")
+        } else {
+            let name =
+                (SWATCHES.iter().find(|s| s.1 == self.photo.color)).map_or("custom color", |s| s.0);
+            format!("{finish}, {}", name.to_lowercase())
+        };
+        ui::card(ui, |ui| {
+            let info = if parts.is_some() {
+                "One color: all parts have the same color.\n\nEach part: each part has its own \
+                 color. Click a row or a part in the view to select it, then click a swatch. With \
+                 no part selected, a swatch sets all parts.\n\nThe finish is the same for all \
+                 parts. The colors are for the view and the photo. The export does not change."
+            } else {
+                "The color and the finish of the plastic in the photo. The export does not change."
+            };
+            if !self.card_head_info(ui, "Material", &note, info) {
+                return;
+            }
+            if let Some(a) = &parts {
+                ui.label("Color");
+                let mut on = self.view3d.part_colors;
+                ui::segmented(ui, &mut on, &[(false, "One color"), (true, "Each part")]);
+                self.view3d.part_colors = on;
+                ui.add_space(6.0);
+                if on {
+                    self.part_color_list(ui, a);
+                } else if let Some(c) = swatch_row(ui, Some(self.photo.color)) {
+                    self.photo.color = c;
+                }
+            } else if let Some(c) = swatch_row(ui, Some(self.photo.color)) {
+                self.photo.color = c;
+            }
+            ui.add_space(6.0);
+            let p = &mut self.photo;
+            ui.label("Finish");
+            let mut finish = p.finish;
+            ui::segmented(
+                ui,
+                &mut finish,
+                &[("matte", "Matte"), ("satin", "Satin"), ("gloss", "Gloss")],
+            );
+            p.finish = finish;
+            ui.horizontal(|ui| {
+                ui.label("Print layer lines");
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui::toggle(ui, &mut p.layer_lines);
+                });
+            });
+        });
+        ui.add_space(4.0);
+    }
+
+    /// The colors of the parts in the Material card: the swatches for the
+    /// selected part, or for all parts when no part is selected, and a list
+    /// with one row for each part. A click on a row selects the part.
+    fn part_color_list(&mut self, ui: &mut egui::Ui, a: &crate::assembly::Assembly) {
+        let v = &mut self.view3d;
+        let sel = v.sel.part().map(str::to_string);
+        let target = sel
+            .as_deref()
+            .and_then(|n| a.parts.iter().position(|p| p.name == n));
+        let current = target.map(|i| v.color_on(i, &a.parts[i]));
+        let hint = match target {
+            Some(i) => format!("Swatches set: {}", a.parts[i].name),
+            None => "Swatches set: all parts".to_string(),
+        };
+        ui.label(ui::dim(hint));
+        if let Some(c) = swatch_row(ui, current) {
+            for (i, p) in a.parts.iter().enumerate() {
+                if !p.reference && target.is_none_or(|t| t == i) {
+                    v.set_color(p, c);
+                }
+            }
+        }
+        ui.add_space(6.0);
+        const ROW: f32 = 28.0;
+        let rows: Vec<usize> = (0..a.parts.len())
+            .filter(|&i| !a.parts[i].reference)
+            .collect();
+        egui::Frame::NONE
+            .fill(ui::c().input.gamma_multiply(0.5))
+            .corner_radius(8)
+            // No margin at the right: the rows leave room for the scroll bar.
+            .inner_margin(egui::Margin {
+                right: 0,
+                ..egui::Margin::same(8)
+            })
             .show(ui, |ui| {
-                let part_colors = self.view3d.part_colors;
-                ui::card(ui, |ui| {
-                    let note = match self.photo.finish {
-                        "matte" => "Matte",
-                        "gloss" => "Gloss",
-                        _ => "Satin",
-                    };
-                    if !self.card_head(ui, "Material", note) {
-                        return;
-                    }
-                    let p = &mut self.photo;
-                    ui.horizontal_wrapped(|ui| {
-                        ui.spacing_mut().item_spacing = Vec2::new(8.0, 8.0);
-                        for (name, c) in SWATCHES {
-                            let (r, resp) =
-                                ui.allocate_exact_size(Vec2::splat(26.0), egui::Sense::click());
-                            let col = Color32::from_rgb(c[0], c[1], c[2]);
-                            ui.painter().circle_filled(r.center(), 12.0, col);
-                            // Outline, so black and white swatches show on both themes.
-                            ui.painter().circle_stroke(
-                                r.center(),
-                                12.0,
-                                egui::Stroke::new(1.0_f32, ui::c().line),
-                            );
-                            if p.color == c {
-                                ui.painter().circle_stroke(
-                                    r.center(),
-                                    12.5,
-                                    egui::Stroke::new(2.0_f32, ui::c().text),
+                // show_rows counts the item spacing in the row height.
+                ui.spacing_mut().item_spacing.y = 0.0;
+                egui::ScrollArea::vertical()
+                    .id_salt("part_color_list")
+                    .max_height(ROW * 8.0)
+                    .auto_shrink([false, true])
+                    .show_rows(ui, ROW, rows.len(), |ui, range| {
+                        ui::bar_room(ui, |ui| {
+                            for &i in &rows[range] {
+                                let p = &a.parts[i];
+                                let size = Vec2::new(ui.available_width(), ROW);
+                                let (rect, resp) =
+                                    ui.allocate_exact_size(size, egui::Sense::click());
+                                let picked = sel.as_deref() == Some(p.name.as_str());
+                                if picked {
+                                    ui.painter().rect_filled(rect, 6.0, ui::c().selection);
+                                } else if resp.hovered() {
+                                    ui.painter().rect_filled(rect, 6.0, ui::c().input);
+                                }
+                                let mut row = ui.new_child(
+                                    egui::UiBuilder::new()
+                                        .max_rect(rect.shrink2(Vec2::new(8.0, 0.0)))
+                                        .layout(egui::Layout::left_to_right(egui::Align::Center)),
                                 );
-                            }
-                            if resp.on_hover_text(name).clicked() {
-                                p.color = c;
-                            }
-                        }
-                        ui.color_edit_button_srgb(&mut p.color);
-                    });
-                    if part_colors {
-                        ui.label(ui::dim("Part colors are on. Each part has its own color."));
-                    }
-                    ui.add_space(4.0);
-                    ui.label("Finish");
-                    let mut finish = p.finish;
-                    ui::segmented(
-                        ui,
-                        &mut finish,
-                        &[("matte", "Matte"), ("satin", "Satin"), ("gloss", "Gloss")],
-                    );
-                    p.finish = finish;
-                    ui.horizontal(|ui| {
-                        ui.label("Print layer lines");
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            ui::toggle(ui, &mut p.layer_lines);
-                        });
-                    });
-                });
-                ui.add_space(4.0);
-                self.parts_card(ui);
-                self.explode_card(ui);
-                ui::card(ui, |ui| {
-                    let note = match self.photo.studio {
-                        pathtrace::Studio::Light => "Light studio",
-                        pathtrace::Studio::Dark => "Dark studio",
-                    };
-                    if !self.card_head(ui, "Scene", note) {
-                        return;
-                    }
-                    let p = &mut self.photo;
-                    ui.label("Studio");
-                    let mut studio = p.studio;
-                    ui::segmented(
-                        ui,
-                        &mut studio,
-                        &[
-                            (pathtrace::Studio::Dark, "Dark"),
-                            (pathtrace::Studio::Light, "Light"),
-                        ],
-                    );
-                    p.studio = studio;
-                    ui.add_space(4.0);
-                    setting(ui, "Exposure", &mut p.exposure, 0.3..=3.0, 0.05, "");
-                });
-                ui.add_space(4.0);
-                ui::card(ui, |ui| {
-                    let note = format!("{} × {}", self.photo.width, self.photo.height);
-                    if !self.card_head(ui, "Quality", &note) {
-                        return;
-                    }
-                    let p = &mut self.photo;
-                    setting(ui, "Samples", &mut p.samples, 16..=2048, 16.0, "");
-                    ui.add_space(4.0);
-                    ui.label("Resolution");
-                    let current = RESOLUTIONS
-                        .iter()
-                        .find(|r| r.1 == p.width && r.2 == p.height)
-                        .map_or("Custom".to_string(), |r| r.0.to_string());
-                    egui::ComboBox::from_id_salt("resolution")
-                        .selected_text(current)
-                        .width(ui.available_width())
-                        .show_ui(ui, |ui| {
-                            for (name, w, h) in RESOLUTIONS {
-                                let sel = p.width == w && p.height == h;
-                                if ui
-                                    .selectable_label(sel, format!("{name}   {w} × {h}"))
-                                    .clicked()
-                                {
-                                    p.width = w;
-                                    p.height = h;
+                                row.spacing_mut().interact_size = Vec2::new(28.0, 18.0);
+                                let mut color = v.color_on(i, p);
+                                if row.color_edit_button_srgb(&mut color).changed() {
+                                    v.set_color(p, color);
+                                }
+                                row.add(egui::Label::new(&p.name).truncate().selectable(false));
+                                row.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        if v.has_custom(p)
+                                            && ui
+                                                .add(ui::ghost("Reset", false))
+                                                .on_hover_text("Use the default color")
+                                                .clicked()
+                                        {
+                                            v.reset_color(p);
+                                        }
+                                    },
+                                );
+                                if resp.clicked() {
+                                    let name = (!picked).then(|| p.name.clone());
+                                    v.sel.select(name);
                                 }
                             }
                         });
-                    ui.horizontal(|ui| {
-                        ui.add(
-                            egui::DragValue::new(&mut p.width)
-                                .range(64..=8192)
-                                .speed(8)
-                                .suffix(" px"),
-                        );
-                        ui.label(ui::dim("×"));
-                        ui.add(
-                            egui::DragValue::new(&mut p.height)
-                                .range(64..=8192)
-                                .speed(8)
-                                .suffix(" px"),
-                        );
-                        if ui
-                            .add(ui::ghost("Swap", false))
-                            .on_hover_text("Landscape or portrait")
-                            .clicked()
-                        {
-                            std::mem::swap(&mut p.width, &mut p.height);
+                    });
+            });
+        let any = a.parts.iter().any(|p| v.has_custom(p));
+        if any && ui.add(ui::ghost("Reset all", false)).clicked() {
+            for p in &a.parts {
+                v.reset_color(p);
+            }
+        }
+    }
+
+    fn render_panel(&mut self, ui: &mut egui::Ui) {
+        ui::scroll(ui, ui::PANEL_PAD, |ui| {
+            self.material_card(ui);
+            self.explode_card(ui);
+            ui::card(ui, |ui| {
+                let note = match self.photo.studio {
+                    pathtrace::Studio::Light => "Light studio",
+                    pathtrace::Studio::Dark => "Dark studio",
+                };
+                if !self.card_head(ui, "Scene", note) {
+                    return;
+                }
+                let p = &mut self.photo;
+                ui.label("Studio");
+                let mut studio = p.studio;
+                ui::segmented(
+                    ui,
+                    &mut studio,
+                    &[
+                        (pathtrace::Studio::Dark, "Dark"),
+                        (pathtrace::Studio::Light, "Light"),
+                    ],
+                );
+                p.studio = studio;
+                ui.add_space(4.0);
+                setting(ui, "Exposure", &mut p.exposure, 0.3..=3.0, 0.05, "");
+            });
+            ui.add_space(4.0);
+            ui::card(ui, |ui| {
+                let note = format!("{} × {}", self.photo.width, self.photo.height);
+                let info = "More samples give a cleaner image and take more time. The render \
+                            uses all CPU cores. A change of the view or of a setting stops it.";
+                if !self.card_head_info(ui, "Quality", &note, info) {
+                    return;
+                }
+                let p = &mut self.photo;
+                setting(ui, "Samples", &mut p.samples, 16..=2048, 16.0, "");
+                ui.add_space(4.0);
+                ui.label("Resolution");
+                let current = RESOLUTIONS
+                    .iter()
+                    .find(|r| r.1 == p.width && r.2 == p.height)
+                    .map_or("Custom".to_string(), |r| r.0.to_string());
+                egui::ComboBox::from_id_salt("resolution")
+                    .selected_text(current)
+                    .width(ui.available_width())
+                    .show_ui(ui, |ui| {
+                        for (name, w, h) in RESOLUTIONS {
+                            let sel = p.width == w && p.height == h;
+                            if ui
+                                .selectable_label(sel, format!("{name}   {w} × {h}"))
+                                .clicked()
+                            {
+                                p.width = w;
+                                p.height = h;
+                            }
                         }
                     });
-                    let mp = (p.width * p.height) as f32 / 1e6;
-                    ui.label(ui::dim(format!("{mp:.1} megapixels")));
-                    ui.label(ui::dim(
-                        "Move the view to start again. The render uses all cores.",
-                    ));
+                ui.horizontal(|ui| {
+                    ui.add(
+                        egui::DragValue::new(&mut p.width)
+                            .range(64..=8192)
+                            .speed(8)
+                            .suffix(" px"),
+                    );
+                    ui.label(ui::dim("×"));
+                    ui.add(
+                        egui::DragValue::new(&mut p.height)
+                            .range(64..=8192)
+                            .speed(8)
+                            .suffix(" px"),
+                    );
+                    if ui
+                        .add(ui::ghost("Swap", false))
+                        .on_hover_text("Landscape or portrait")
+                        .clicked()
+                    {
+                        std::mem::swap(&mut p.width, &mut p.height);
+                    }
                 });
+                let mp = (p.width * p.height) as f32 / 1e6;
+                ui.label(ui::dim(format!("{mp:.1} megapixels")));
             });
+        });
     }
 
     fn viewport(&mut self, ui: &mut egui::Ui) {
@@ -3016,6 +3257,9 @@ impl App {
         if optimize {
             self.plate_click(&resp, rect);
             self.ensure_plate();
+            // The Section bar cuts the parts on the plate.
+            let plate = self.plate_mesh().0.and_then(|a| a.bounds(&[]));
+            (self.view3d.section).set_bounds(section::Space::Plate, plate);
         }
         self.select_input(&resp, rect);
         if resp.double_clicked() {
@@ -3085,6 +3329,9 @@ impl App {
         if self.mode == Mode::Render {
             self.photo_view(ui, rect);
         } else {
+            // The Render tab starts no render by itself: the user clicks Render.
+            self.photo_on = false;
+            self.photo_want = None;
             self.photo_job = None;
             self.photo_key = None;
         }
@@ -3135,14 +3382,17 @@ impl App {
             },
         );
 
-        if optimize && self.mesh.is_some() {
-            self.plate_overlay(ui, rect);
-        }
+        let taken = (optimize && self.mesh.is_some()).then(|| self.plate_overlay(ui, rect));
+        let bar = self.section_bar(ui, rect, taken);
 
-        // Layer slider, right edge.
+        // Layer slider, right edge, below the Section bar and the number
+        // above the slider.
         if slicing {
+            let top = (bar.map_or(0.0, |b| b.bottom() + 62.0))
+                .max(rect.top() + 70.0)
+                .min(rect.bottom() - 160.0);
             let strip = egui::Rect::from_min_max(
-                egui::pos2(rect.right() - m - 36.0, rect.top() + 70.0),
+                egui::pos2(rect.right() - m - 36.0, top),
                 egui::pos2(rect.right() - m, rect.bottom() - 100.0),
             );
             ui.painter()
@@ -3165,8 +3415,7 @@ impl App {
         // Empty view: say why.
         if self.mesh.is_none() && self.job.is_none() {
             let msg = match (&self.file, &self.error) {
-                (None, _) if !self.recent.is_empty() => None,
-                (None, _) => Some("Open a .scad file, or drop one here.".to_string()),
+                (None, _) => None,
                 (Some(_), Some(e)) => Some(format!("Nothing to show.  {e}")),
                 _ => None,
             };
@@ -3180,28 +3429,6 @@ impl App {
                     ui::c().text,
                     ui::glass(),
                 );
-            }
-        }
-
-        // Start view: the recent models.
-        if self.file.is_none() && !self.recent.is_empty() {
-            let size = Vec2::new(420.0, 86.0 + 29.0 * self.recent.len() as f32);
-            let area = egui::Rect::from_center_size(rect.center(), size);
-            let mut pick = None;
-            ui.scope_builder(egui::UiBuilder::new().max_rect(area), |ui| {
-                ui::card(ui, |ui| {
-                    ui.spacing_mut().item_spacing.y = 0.0;
-                    ui::section(ui, "Recent models");
-                    ui.add_space(8.0);
-                    for path in &self.recent {
-                        if recent_row(ui, path, false) {
-                            pick = Some(path.clone());
-                        }
-                    }
-                });
-            });
-            if let Some(path) = pick {
-                self.open(path);
             }
         }
 
@@ -3242,6 +3469,9 @@ impl App {
         }
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::O)) {
             self.pick_file();
+        }
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::N)) {
+            self.new_model();
         }
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::Comma)) {
             self.open_settings();
@@ -3331,14 +3561,14 @@ impl App {
         let mut save = false;
         let dirty = edit != self.cfg || self.privacy.dirty();
         let running = self.server.is_some();
+        let line = egui::Stroke::new(1.0_f32, ui::c().line);
         let frame = egui::Frame::NONE
             .fill(ui::c().panel)
             .corner_radius(14)
-            .inner_margin(egui::Margin::same(18))
-            .stroke(egui::Stroke::new(1.0_f32, ui::c().line));
+            .stroke(line);
         // A fixed size keeps the buttons in place when the page changes.
         let screen = ctx.screen_rect().size();
-        let width = (screen.x - 80.0).clamp(420.0, 604.0);
+        let width = (screen.x - 44.0).clamp(456.0, 640.0);
         let height = (screen.y - 170.0).clamp(160.0, 360.0);
         let probe = settings_probe(ctx, &edit);
         let missing = probe.as_ref().is_some_and(|p| !p.manifold);
@@ -3361,41 +3591,74 @@ impl App {
         egui::Modal::new(egui::Id::new("settings"))
             .frame(frame)
             .show(ctx, |ui| {
-                ui.set_width(width);
-                ui.horizontal(|ui| {
-                    ui.heading("Settings");
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        close |= ui
-                            .add(
-                                egui::Button::new(RichText::new("×").size(20.0).color(ui::c().dim))
-                                    .frame(false),
-                            )
-                            .on_hover_text("Close (Esc)")
-                            .clicked();
+                const PAD: i8 = ui::PANEL_PAD;
+                const NAV_W: f32 = 164.0;
+                // The page list is a column with its own background, from
+                // the top to the bottom of the window. Its size is known
+                // only at the end, so the background is set there.
+                let nav_bg = ui.painter().add(egui::Shape::Noop);
+                let ltr = egui::Layout::left_to_right(egui::Align::Center);
+                let rtl = egui::Layout::right_to_left(egui::Align::Center);
+                let down = egui::Layout::top_down(egui::Align::Min);
+                let gap = ui.spacing().item_spacing.x;
+                ui.horizontal_top(|ui| {
+                    // No gap between the columns. The columns get it back.
+                    ui.spacing_mut().item_spacing.x = 0.0;
+                    ui.vertical(|ui| {
+                        ui.spacing_mut().item_spacing.x = gap;
+                        ui.set_width(NAV_W);
+                        egui::Frame::NONE
+                            .inner_margin(egui::Margin {
+                                left: 12,
+                                right: 12,
+                                top: PAD,
+                                bottom: PAD,
+                            })
+                            .show(ui, |ui| {
+                                ui.set_width(ui.available_width());
+                                let row = Vec2::new(ui.available_width(), 28.0);
+                                ui.allocate_ui_with_layout(row, ltr, |ui| {
+                                    // The same indent as the labels of the list.
+                                    ui.add_space(10.0);
+                                    ui.heading("Settings");
+                                });
+                                ui.add_space(10.0);
+                                ui.spacing_mut().item_spacing.y = 2.0;
+                                for &(value, label, dot) in &pages {
+                                    if ui::nav_item(ui, label, page == value, dot).clicked() {
+                                        page = value;
+                                    }
+                                }
+                            });
                     });
-                });
-                ui.add_space(10.0);
-                let ltr = egui::Layout::left_to_right(egui::Align::Min);
-                ui.allocate_ui_with_layout(Vec2::new(width, height), ltr, |ui| {
-                    ui.set_min_height(height);
-                    let nav = Vec2::new(140.0, height);
-                    let down = egui::Layout::top_down(egui::Align::Min);
-                    ui.allocate_ui_with_layout(nav, down, |ui| {
-                        ui.set_width(nav.x);
-                        ui.spacing_mut().item_spacing.y = 2.0;
-                        for &(value, label, dot) in &pages {
-                            if ui::nav_item(ui, label, page == value, dot).clicked() {
-                                page = value;
-                            }
-                        }
-                    });
-                    ui.add_space(16.0);
-                    let body = Vec2::new(ui.available_width(), height);
-                    ui.allocate_ui_with_layout(body, down, |ui| {
-                        egui::ScrollArea::vertical()
-                            .id_salt("settings-page")
-                            .auto_shrink([false, false])
-                            .show(ui, |ui| match page {
+                    let title = pages.iter().find(|p| p.0 == page).map_or("", |p| p.1);
+                    ui.vertical(|ui| {
+                        ui.spacing_mut().item_spacing.x = gap;
+                        ui.set_width(width - NAV_W);
+                        ui.add_space(f32::from(PAD));
+                        egui::Frame::NONE
+                            .inner_margin(egui::Margin::symmetric(PAD, 0))
+                            .show(ui, |ui| {
+                                let row = Vec2::new(ui.available_width(), 28.0);
+                                ui.allocate_ui_with_layout(row, ltr, |ui| {
+                                    ui.heading(title);
+                                    ui.with_layout(rtl, |ui| {
+                                        let x = RichText::new("×").size(20.0).color(ui::c().dim);
+                                        close |= ui
+                                            .add(egui::Button::new(x).frame(false))
+                                            .on_hover_text("Close (Esc)")
+                                            .clicked();
+                                    });
+                                });
+                            });
+                        ui.add_space(10.0);
+                        // The page goes to the edge of the window, so that
+                        // its scroll bar is in the margin and not on the card.
+                        let body = Vec2::new(ui.available_width(), height);
+                        ui.allocate_ui_with_layout(body, down, |ui| {
+                            ui.set_min_height(height);
+                            ui.spacing_mut().scroll.bar_outer_margin = ui::BAR_INSET;
+                            ui::scroll(ui, PAD, |ui| match page {
                                 SettingsPage::Appearance => {
                                     ui::card(ui, |ui| theme_row(ui, &mut edit));
                                 }
@@ -3418,23 +3681,43 @@ impl App {
                                     ui::card(ui, |ui| privacy_settings(ui, &mut self.privacy));
                                 }
                             });
+                        });
+                        egui::Frame::NONE
+                            .inner_margin(egui::Margin {
+                                left: PAD,
+                                right: PAD,
+                                top: 0,
+                                bottom: PAD,
+                            })
+                            .show(ui, |ui| {
+                                let row = Vec2::new(ui.available_width(), 34.0);
+                                ui.allocate_ui_with_layout(row, rtl, |ui| {
+                                    ui.spacing_mut().button_padding = Vec2::new(16.0, 7.0);
+                                    save = ui
+                                        .add_enabled(dirty, ui::primary("Save"))
+                                        .on_disabled_hover_text("No changes")
+                                        .clicked();
+                                    close |= ui.add(ui::ghost("Cancel", false)).clicked();
+                                    if dirty {
+                                        ui.with_layout(ltr, |ui| {
+                                            ui.label(ui::dim("Unsaved changes").size(12.5))
+                                        });
+                                    }
+                                });
+                            });
                     });
                 });
-                ui.add_space(12.0);
-                let row = Vec2::new(ui.available_width(), 34.0);
-                let rtl = egui::Layout::right_to_left(egui::Align::Center);
-                ui.allocate_ui_with_layout(row, rtl, |ui| {
-                    ui.spacing_mut().button_padding = Vec2::new(16.0, 7.0);
-                    save = ui
-                        .add_enabled(dirty, ui::primary("Save"))
-                        .on_disabled_hover_text("No changes")
-                        .clicked();
-                    close |= ui.add(ui::ghost("Cancel", false)).clicked();
-                    if dirty {
-                        let ltr = egui::Layout::left_to_right(egui::Align::Center);
-                        ui.with_layout(ltr, |ui| ui.label(ui::dim("Unsaved changes").size(12.5)));
-                    }
-                });
+                let r = ui.min_rect();
+                let nav = egui::Rect::from_min_max(r.min, egui::pos2(r.left() + NAV_W, r.bottom()));
+                let round = egui::CornerRadius {
+                    nw: 13,
+                    sw: 13,
+                    ne: 0,
+                    se: 0,
+                };
+                ui.painter()
+                    .set(nav_bg, egui::Shape::rect_filled(nav, round, ui::c().bg));
+                ui.painter().vline(nav.right(), nav.y_range(), line);
             });
         self.settings_page = page;
         if save {
@@ -3504,9 +3787,8 @@ fn sets_settings(ui: &mut egui::Ui, edit: &mut openscad::Config) {
     );
     ui.add_space(8.0);
     ui.label(ui::dim(
-        "When you open a model, CoCAD loads the set that you used last, else the first set \
-         of the sets file. The sets file is <model>.json next to the model, or the file that \
-         you opened for the model.",
+        "When you open a model, CoCAD loads the set that you used last, else the first set. \
+         The sets are in <model>.yml next to the model.",
     ));
 }
 
@@ -3751,6 +4033,7 @@ impl eframe::App for App {
             self.themed = true;
         }
         self.poll(ctx);
+        self.send_thumbs(ctx);
         self.update.poll(ctx, self.cfg.update_check);
         self.shortcuts(ctx);
         let title = match &self.file {
@@ -3814,62 +4097,125 @@ impl eframe::App for App {
                         .stick_to_bottom(true)
                         .auto_shrink([false, false])
                         .show(ui, |ui| {
-                            let text = if self.log.is_empty() {
-                                "No OpenSCAD output yet."
-                            } else {
-                                &self.log
-                            };
-                            ui.label(RichText::new(text).monospace().color(ui::c().dim));
+                            ui::bar_room(ui, |ui| {
+                                // Problems of the definition come first.
+                                for n in &self.def_notes {
+                                    ui.label(RichText::new(format!("WARNING: {n}")).monospace());
+                                }
+                                let text = if self.log.is_empty() {
+                                    "No OpenSCAD output yet."
+                                } else {
+                                    &self.log
+                                };
+                                ui.label(RichText::new(text).monospace().color(ui::c().dim));
+                            });
                         });
                 });
         }
+        // The side panels have a border only on the side of the 3D view.
         let side = egui::Frame::NONE
             .fill(ui::c().panel)
-            .inner_margin(egui::Margin::same(18))
-            .stroke(line);
-        egui::SidePanel::left("params")
+            .inner_margin(egui::Margin::same(18));
+        let edge = |ctx: &egui::Context, x: f32, rect: egui::Rect| {
+            ctx.layer_painter(egui::LayerId::background())
+                .vline(x, rect.y_range(), line);
+        };
+        // Without a model, the start page fills the window.
+        if self.file.is_none() {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE)
+                .show(ctx, |ui| self.start_page(ui));
+            self.menu_popup(ctx);
+            self.update_notice(ctx);
+            return;
+        }
+        let params = egui::SidePanel::left("params")
             .resizable(true)
             .default_width(340.0)
             .width_range(280.0..=560.0)
-            .frame(side)
-            .show(ctx, |ui| self.param_panel(ui));
-        egui::SidePanel::right("side")
+            .frame(side.inner_margin(egui::Margin {
+                top: ui::PANEL_PAD,
+                ..egui::Margin::ZERO
+            }))
+            .show(ctx, |ui| self.param_panel(ui))
+            .response
+            .rect;
+        edge(ctx, params.right() - 0.5, params);
+        let side_panel = egui::SidePanel::right("side")
             .resizable(true)
             .default_width(320.0)
             .width_range(280.0..=480.0)
-            .frame(side)
+            .frame(side.inner_margin(egui::Margin::ZERO))
             .show(ctx, |ui| {
-                let mut mode = self.mode;
-                let tabs = Mode::ALL.map(|m| (m, m.label(), m.key().map(|(_, at)| at)));
-                if ui::tabs(ui, &mut mode, &tabs) {
-                    self.set_mode(mode);
-                }
-                // The fixed card at the bottom first, so that the tab gets
+                const PAD: i8 = ui::PANEL_PAD;
+                // The tabs sit in a darker strip. The selected tab has the
+                // panel color, so it joins the panel below it.
+                egui::TopBottomPanel::top("side_tabs")
+                    .frame(
+                        egui::Frame::NONE
+                            .fill(ui::c().bg)
+                            .inner_margin(egui::Margin {
+                                left: 10,
+                                right: 10,
+                                top: 10,
+                                bottom: 0,
+                            }),
+                    )
+                    .show_separator_line(false)
+                    .show_inside(ui, |ui| {
+                        let mut mode = self.mode;
+                        let tabs = Mode::ALL.map(|m| (m, m.label(), m.key().map(|(_, at)| at)));
+                        if ui::tabs(ui, &mut mode, &tabs) {
+                            self.set_mode(mode);
+                        }
+                    });
+                // The bar at the bottom before the tab, so that the tab gets
                 // the height that is left above it: Export in the Optimize
-                // tab, Save in the Render tab. The Model tab has none.
-                let bottom = |id: &'static str| {
+                // tab, Render and Save in the Render tab. The Model tab has
+                // none. The bar goes to the edges of the panel.
+                let bar = |id: &'static str| {
                     egui::TopBottomPanel::bottom(id)
-                        .frame(egui::Frame::NONE.inner_margin(egui::Margin {
-                            top: 10,
-                            ..Default::default()
-                        }))
+                        .frame(
+                            egui::Frame::NONE
+                                .fill(ui::c().card)
+                                .inner_margin(egui::Margin::symmetric(PAD, 14)),
+                        )
                         .show_separator_line(false)
                 };
-                match self.mode {
-                    Mode::Model => {}
-                    Mode::Optimize => {
-                        bottom("export").show_inside(ui, |ui| self.export_card(ui));
-                    }
-                    Mode::Render => {
-                        bottom("render").show_inside(ui, |ui| self.render_card(ui));
-                    }
+                let shown = match self.mode {
+                    Mode::Model => None,
+                    Mode::Optimize => Some(
+                        bar("export")
+                            .show_inside(ui, |ui| self.export_bar(ui))
+                            .response,
+                    ),
+                    Mode::Render => Some(
+                        bar("render")
+                            .show_inside(ui, |ui| self.render_bar(ui))
+                            .response,
+                    ),
+                };
+                if let Some(r) = &shown {
+                    ui.painter().hline(r.rect.x_range(), r.rect.top(), line);
                 }
-                match self.mode {
-                    Mode::Model => self.model_panel(ui),
-                    Mode::Optimize => self.optimize_panel(ui),
-                    Mode::Render => self.render_panel(ui),
-                }
-            });
+                egui::CentralPanel::default()
+                    // No side margin: the tabs put it inside their scroll
+                    // area, so the scroll bar is at the edge of the panel.
+                    .frame(egui::Frame::NONE.inner_margin(egui::Margin {
+                        left: 0,
+                        right: 0,
+                        top: PAD,
+                        bottom: 0,
+                    }))
+                    .show_inside(ui, |ui| match self.mode {
+                        Mode::Model => self.model_panel(ui),
+                        Mode::Optimize => self.optimize_panel(ui),
+                        Mode::Render => self.render_panel(ui),
+                    });
+            })
+            .response
+            .rect;
+        edge(ctx, side_panel.left() + 0.5, side_panel);
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
             .show(ctx, |ui| self.viewport(ui));
@@ -3886,14 +4232,72 @@ impl eframe::App for App {
         if let Some(j) = &self.parts_job {
             j.cancel.store(true, Ordering::Relaxed);
         }
+        if let Some(gl) = gl {
+            self.queue_thumb();
+            self.draw_thumbs(gl);
+        }
         if let (Some(gl), Some(r)) = (gl, &self.renderer) {
             r.lock().unwrap().destroy(gl);
         }
     }
 }
 
+/// The color swatches and a color button. `current` has a ring. Returns
+/// the color that the user selected in this frame.
+fn swatch_row(ui: &mut egui::Ui, current: Option<[u8; 3]>) -> Option<[u8; 3]> {
+    let mut out = None;
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing = Vec2::new(8.0, 8.0);
+        for (name, c) in SWATCHES {
+            let (r, resp) = ui.allocate_exact_size(Vec2::splat(26.0), egui::Sense::click());
+            let col = Color32::from_rgb(c[0], c[1], c[2]);
+            ui.painter().circle_filled(r.center(), 12.0, col);
+            // Outline, so black and white swatches show on both themes.
+            ui.painter()
+                .circle_stroke(r.center(), 12.0, egui::Stroke::new(1.0_f32, ui::c().line));
+            if current == Some(c) {
+                ui.painter().circle_stroke(
+                    r.center(),
+                    12.5,
+                    egui::Stroke::new(2.0_f32, ui::c().text),
+                );
+            }
+            if resp.on_hover_text(name).clicked() {
+                out = Some(c);
+            }
+        }
+        let mut color = current.unwrap_or(SWATCHES[0].1);
+        if ui
+            .color_edit_button_srgb(&mut color)
+            .on_hover_text("Any color")
+            .changed()
+        {
+            out = Some(color);
+        }
+    });
+    out
+}
+
 /// Label and value on one row, full-width slider below. Returns true on change.
 fn setting<N: egui::emath::Numeric>(
+    ui: &mut egui::Ui,
+    label: &str,
+    v: &mut N,
+    range: std::ops::RangeInclusive<N>,
+    step: f64,
+    suffix: &str,
+) -> bool {
+    // The label row and the slider sit close together, as the parameters.
+    ui.scope(|ui| {
+        let sp = ui.spacing_mut();
+        sp.item_spacing.y = 2.0;
+        sp.interact_size.y = 20.0;
+        setting_lines(ui, label, v, range, step, suffix)
+    })
+    .inner
+}
+
+fn setting_lines<N: egui::emath::Numeric>(
     ui: &mut egui::Ui,
     label: &str,
     v: &mut N,
@@ -3922,34 +4326,7 @@ fn setting<N: egui::emath::Numeric>(
     changed |= ui
         .add(egui::Slider::new(v, range).step_by(step).show_value(false))
         .changed();
-    ui.add_space(4.0);
     changed
-}
-
-/// Title, description and other fields of a sets file or a set. An empty
-/// `meta` shows nothing. A web address shows as a link.
-fn meta_text(ui: &mut egui::Ui, meta: &presets::Meta) {
-    if meta.is_empty() {
-        return;
-    }
-    ui.spacing_mut().item_spacing.y = 3.0;
-    if let Some(t) = &meta.title {
-        ui.add(egui::Label::new(RichText::new(t).size(14.0).strong()).wrap());
-    }
-    if let Some(d) = &meta.description {
-        ui.add(egui::Label::new(RichText::new(d).size(12.5).color(ui::c().dim)).wrap());
-    }
-    for (k, v) in &meta.other {
-        ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing.x = 4.0;
-            ui.label(ui::dim(format!("{}:", humanize(k))));
-            if v.starts_with("https://") || v.starts_with("http://") {
-                ui.hyperlink_to(RichText::new(v).size(12.5), v);
-            } else {
-                ui.label(RichText::new(v).size(12.5));
-            }
-        });
-    }
 }
 
 /// Dim label on the left, value on the right.
@@ -3980,8 +4357,19 @@ fn stat(ui: &mut egui::Ui, value: &str, label: &str) {
     ui.label(ui::dim(label));
 }
 
-/// One parameter row. Returns true when the value changed.
+/// One parameter row. Returns true when the value changed. The label line
+/// and the control sit close together, so that more parameters fit.
 fn param_row(ui: &mut egui::Ui, p: &mut Param) -> bool {
+    ui.scope(|ui| {
+        let sp = ui.spacing_mut();
+        sp.item_spacing.y = 2.0;
+        sp.interact_size.y = 20.0;
+        param_lines(ui, p)
+    })
+    .inner
+}
+
+fn param_lines(ui: &mut egui::Ui, p: &mut Param) -> bool {
     let before = p.value.clone();
     // The description is the label when the file has one. Line 1 holds the
     // label and the inline value, line 2 the slider, list or text field.
@@ -3994,7 +4382,6 @@ fn param_row(ui: &mut egui::Ui, p: &mut Param) -> bool {
     let step = p.step();
     let decimals = decimals(step);
 
-    ui.add_space(2.0);
     ui.horizontal(|ui| {
         if changed {
             let (r, _) = ui.allocate_exact_size(Vec2::new(6.0, 6.0), egui::Sense::hover());
@@ -4114,7 +4501,6 @@ fn param_row(ui: &mut egui::Ui, p: &mut Param) -> bool {
         }
         _ => {}
     }
-    ui.add_space(4.0);
     match &mut p.value {
         Value::Num(n) => *n = params::clean(*n),
         Value::Vec(v) => v.iter_mut().for_each(|n| *n = params::clean(*n)),

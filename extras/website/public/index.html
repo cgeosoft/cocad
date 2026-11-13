@@ -219,9 +219,11 @@
               <tr><th>Plates</th><td>All parts or one part. Parts with the same shape are one row with a count. When the parts do not fit on one bed, CoCAD fills more plates.</td></tr>
               <tr><th>Orientation</th><td>Off by default. With custom orientation on, Auto puts a part on its best face, or you select the face for the bed.</td></tr>
               <tr><th>Teardrop holes</th><td>Round holes with a horizontal axis get a 45 degree point at the top.</td></tr>
+              <tr><th>Hole size</th><td>Round holes with a vertical axis get the diameter of the model, plus a set value.</td></tr>
               <tr><th>Bridges</th><td>Bridged ceilings start on straight edges. A hole above a bridge gets sacrificial layers or a stepped bridge.</td></tr>
               <tr><th>Bed chamfer</th><td>A 45 degree chamfer of the bed edges, in whole layers.</td></tr>
               <tr><th>Brim</th><td>A one-layer brim on small bed islands, with a gap to the rest of the part.</td></tr>
+              <tr><th>Mouse ears</th><td>A one-layer disk on each sharp bed corner of a large part.</td></tr>
               <tr><th>Check</th><td>Overhangs, long bridges, arcs in bridges, small islands and parts that are too large for the bed.</td></tr>
               <tr><th>Auto split</th><td>For a part that is too large for the bed, CoCAD proposes cuts with a flat, pins or dovetail joint. You accept the split.</td></tr>
               <tr><th>Layers</th><td>Walls, infill and skin of the plate, with a time, length and weight estimate.</td></tr>
@@ -232,7 +234,7 @@
       <ul class="guard-list reveal">
         <li><b>In the file.</b> The fixes change the mesh, so the exported STL or 3MF has them.</li>
         <li><b>Reference parts.</b> Parts with the <code class="inline">%</code> mark show in gray. They are not printed or exported.</li>
-        <li><b>Export card.</b> Export 3MF writes the print plate, with one object for each part. Its menu has STL, all plates and STEP of the model.</li>
+        <li><b>Export 3MF.</b> The button at the bottom of the tab writes the print plate, with one object for each part. Its menu has STL, all plates and STEP of the model.</li>
         <li><b>Printer presets.</b> File &gt; Settings &gt; Printer sets the default print area. Each model can have its own.</li>
       </ul>
     </section>
@@ -277,6 +279,7 @@
                 <tr><th class="mono">get_source</th><td>Source of the <code class="inline">.scad</code> file</td></tr>
                 <tr><th class="mono">view_model</th><td>Render an image and return it to the client</td></tr>
                 <tr><th class="mono">open_model</th><td>Open a file. Starts the app when it is not running</td></tr>
+                <tr><th class="mono">new_model</th><td>Write a new model and open it <span class="pill pill-accent" data-since="0.8.0">Next release</span></td></tr>
                 <tr><th class="mono">set_params<br>reset_params</th><td>Change or reset parameters, then build</td></tr>
                 <tr><th class="mono">build</th><td>Run OpenSCAD again. The old name <code class="inline">render</code> also works</td></tr>
                 <tr><th class="mono">get_optimize<br>set_optimize</th><td>Read or change the print preparation: print area, parts, copies, orientation, fixes and split <span class="pill pill-accent" data-since="0.7.0">Next release</span></td></tr>
@@ -312,9 +315,9 @@
         <button type="button" role="tab" class="tour-tab" data-shot="assets/img/screen-optimize.webp" data-text="Optimize tab. The print parts on the plate, with the count of same parts, the fit on the bed and a split for a part that is too large.">Optimize</button>
         <button type="button" role="tab" class="tour-tab" data-shot="assets/img/screen-layers.webp" data-text="Layers preview of the plate. Walls, infill and skin as round strands, with a layer slider and a time, length and weight estimate.">Layers</button>
         <button type="button" role="tab" class="tour-tab" data-shot="assets/img/screen-model.webp" data-text="Model tab. The Customizer panel reads the comments in your .scad file. Parts with the % mark show in gray and are not printed.">Model</button>
-        <button type="button" role="tab" class="tour-tab" data-shot="assets/img/screen-render.webp" data-text="Render tab. A path tracer renders the current camera in a plastic color and finish you choose, on all CPU cores.">Render</button>
+        <button type="button" role="tab" class="tour-tab" data-shot="assets/img/screen-render.webp" data-text="Render tab. Click Render, and a path tracer renders the current camera in a plastic color and finish you choose, on all CPU cores.">Render</button>
         <button type="button" role="tab" class="tour-tab" data-shot="assets/img/screen-sets.webp" data-text="Parameter sets. Named sets in a .json file that OpenSCAD reads too.">Sets</button>
-        <button type="button" role="tab" class="tour-tab" data-shot="assets/img/screen-export.webp" data-text="Export card of the Optimize tab. Export 3MF writes the plate, with one object for each part. The arrow opens the other exports: STL of the plate and STEP of the model. With two or more plates, also all plates, one file each.">Export</button>
+        <button type="button" role="tab" class="tour-tab" data-shot="assets/img/screen-export.webp" data-text="Export 3MF at the bottom of the Optimize tab writes the plate, with one object for each part. The arrow opens the other exports: STL of the plate and STEP of the model. With two or more plates, also all plates, one file each.">Export</button>
       </div>
       <div class="tour-frame reveal">
         <img data-tour-img src="assets/img/screen-optimize.webp" width="1600" height="1040" alt="CoCAD screenshot." loading="lazy" decoding="async">

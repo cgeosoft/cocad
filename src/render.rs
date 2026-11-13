@@ -241,8 +241,13 @@ in vec3 v_col;
 in vec3 v_pos;
 uniform vec3 u_eye;
 uniform float u_tint;
+uniform vec4 u_clip[3];
 out vec4 o_color;
 void main() {
+    // The toolpaths are on the bed, as the plate: the section cut applies.
+    for (int i = 0; i < 3; i++) {
+        if (dot(u_clip[i].xyz, v_pos) + u_clip[i].w < 0.0) discard;
+    }
     vec3 n = normalize(v_nrm);
     vec3 v = normalize(u_eye - v_pos);
     vec3 key = normalize(vec3(0.45, 0.3, 1.0));
@@ -777,6 +782,11 @@ impl Renderer {
                     view.eye.y,
                     view.eye.z,
                 );
+                let planes = &view.section.planes[..view.section.planes.len().min(MAX_PLANES)];
+                gl.uniform_4_f32_slice(
+                    u(self.path_prog, "u_clip").as_ref(),
+                    &clip_uniform(planes, None),
+                );
                 gl.uniform_1_f32(u(self.path_prog, "u_tint").as_ref(), 0.8);
                 self.paths.draw(gl, 0, start);
                 gl.uniform_1_f32(u(self.path_prog, "u_tint").as_ref(), 1.1);
@@ -798,6 +808,83 @@ impl Renderer {
 }
 
 impl Renderer {
+    /// Draws `view` with `assembly` into an offscreen square of `px` pixels
+    /// and returns the RGBA pixels, top row first. The background is
+    /// transparent. The GL state of the caller stays. The next `set_mesh`
+    /// uploads its mesh again.
+    pub fn snapshot(
+        &mut self,
+        gl: &glow::Context,
+        assembly: &Assembly,
+        view: &View,
+        px: i32,
+    ) -> Option<Vec<u8>> {
+        unsafe {
+            let prev_fb = gl.get_parameter_framebuffer(glow::FRAMEBUFFER_BINDING);
+            let mut vp = [0i32; 4];
+            gl.get_parameter_i32_slice(glow::VIEWPORT, &mut vp);
+            let scissor = gl.is_enabled(glow::SCISSOR_TEST);
+            let fb = gl.create_framebuffer().ok()?;
+            let rbs = [gl.create_renderbuffer(), gl.create_renderbuffer()];
+            let mut out = None;
+            if let [Ok(color), Ok(depth)] = rbs {
+                for (rb, format) in [(color, glow::RGBA8), (depth, glow::DEPTH24_STENCIL8)] {
+                    gl.bind_renderbuffer(glow::RENDERBUFFER, Some(rb));
+                    gl.renderbuffer_storage(glow::RENDERBUFFER, format, px, px);
+                }
+                gl.bind_renderbuffer(glow::RENDERBUFFER, None);
+                gl.bind_framebuffer(glow::FRAMEBUFFER, Some(fb));
+                gl.framebuffer_renderbuffer(
+                    glow::FRAMEBUFFER,
+                    glow::COLOR_ATTACHMENT0,
+                    glow::RENDERBUFFER,
+                    Some(color),
+                );
+                gl.framebuffer_renderbuffer(
+                    glow::FRAMEBUFFER,
+                    glow::DEPTH_STENCIL_ATTACHMENT,
+                    glow::RENDERBUFFER,
+                    Some(depth),
+                );
+                if gl.check_framebuffer_status(glow::FRAMEBUFFER) == glow::FRAMEBUFFER_COMPLETE {
+                    gl.disable(glow::SCISSOR_TEST);
+                    gl.viewport(0, 0, px, px);
+                    gl.clear_color(0.0, 0.0, 0.0, 0.0);
+                    gl.clear(glow::COLOR_BUFFER_BIT | glow::STENCIL_BUFFER_BIT);
+                    self.mesh_rev = u64::MAX;
+                    self.set_mesh(gl, Some(assembly), u64::MAX - 1);
+                    self.paint(gl, view);
+                    let mut buf = vec![0u8; (px * px * 4) as usize];
+                    gl.pixel_store_i32(glow::PACK_ALIGNMENT, 1);
+                    gl.read_pixels(
+                        0,
+                        0,
+                        px,
+                        px,
+                        glow::RGBA,
+                        glow::UNSIGNED_BYTE,
+                        glow::PixelPackData::Slice(Some(&mut buf)),
+                    );
+                    // GL rows go up from the bottom.
+                    let row = (px * 4) as usize;
+                    let flipped: Vec<u8> = buf.chunks_exact(row).rev().flatten().copied().collect();
+                    out = Some(flipped);
+                    self.mesh_rev = u64::MAX;
+                }
+            }
+            gl.bind_framebuffer(glow::FRAMEBUFFER, prev_fb);
+            gl.viewport(vp[0], vp[1], vp[2], vp[3]);
+            if scissor {
+                gl.enable(glow::SCISSOR_TEST);
+            }
+            gl.delete_framebuffer(fb);
+            for rb in rbs.into_iter().flatten() {
+                gl.delete_renderbuffer(rb);
+            }
+            out
+        }
+    }
+
     /// Draws the parts: first the opaque parts, their cut faces and their
     /// wireframe, then the transparent parts from back to front, without
     /// depth writes. Neighbour parts with the same style share one draw

@@ -21,9 +21,12 @@
 //!   files get the escapes. A string that holds such a quote, for example
 //!   `text("a\", b")`, is not read correctly.
 
+use crate::assembly::Kind;
 use crate::mesh::Mesh;
 use crate::openscad::{self, Config};
-use crate::parts::Part;
+use crate::params::Param;
+use crate::part_param;
+use crate::parts::{self, Part};
 use anyhow::{Context, Result, bail};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
@@ -683,7 +686,7 @@ fn export_csg(
 
 /// True for the errors of `openscad::render` that mean the piece has no
 /// 3D geometry, for example an empty or 2D piece.
-fn is_empty_error(e: &anyhow::Error) -> bool {
+pub(crate) fn is_empty_error(e: &anyhow::Error) -> bool {
     let first = e.to_string();
     let first = first.lines().next().unwrap_or("");
     [
@@ -705,6 +708,13 @@ pub struct Split {
     /// The `%` subtrees, each built on its own: "Reference 1",
     /// "Reference 2" and so on in tree order. They are not printed.
     pub references: Vec<Part>,
+    /// How `parts` become the parts of the assembly.
+    pub kind: Kind,
+    /// Exact builds that hold the same shapes as `parts`, for the test
+    /// that finds the "Other" parts. Empty: `parts` are exact.
+    pub cover: Vec<Part>,
+    /// Errors that did not stop the job, for the OpenSCAD output.
+    pub notes: Vec<String>,
 }
 
 impl Split {
@@ -829,7 +839,7 @@ pub fn render(
 }
 
 /// Builds the `%` subtrees of `file` as reference parts, for a model whose
-/// parts come from somewhere else (the `cocad_part` list). See `render`.
+/// parts come from somewhere else (a multicolor part list). See `render`.
 pub fn render_references(
     cfg: &Config,
     file: &Path,
@@ -851,6 +861,140 @@ pub fn render_references(
             })
         })
         .collect())
+}
+
+/// Finds the parts of a built model, as the app and the command line do.
+/// The methods, in this order:
+///
+/// 1. A multicolor part list with all parts shown: each part builds on its
+///    own (`parts::render`). With one part shown, the shells stay.
+/// 2. A part list with `all` shown: each value builds on its own
+///    (`part_param::render`). When a build fails, the module split finds
+///    the parts, and the error goes to `Split::notes`. With one value
+///    shown, the pieces of its module split (see `Kind::Shown`), named
+///    with its label.
+/// 3. The module split (`render`).
+///
+/// The `%` subtrees build as reference parts with all methods. `defines`
+/// are the values of the main build. `None` keeps the shells of the mesh.
+pub fn find_parts(
+    cfg: &Config,
+    file: &Path,
+    params: &[Param],
+    defines: &[String],
+    cancel: &Arc<AtomicBool>,
+) -> Result<Option<Split>> {
+    let only_references = |kind: Kind| -> Result<Option<Split>> {
+        let references = render_references(cfg, file, defines, cancel)?;
+        Ok((!references.is_empty()).then_some(Split {
+            references,
+            kind,
+            ..Split::default()
+        }))
+    };
+    if parts::needs_render(params) {
+        let parts = parts::render(cfg, file, params, cancel)?;
+        let references = render_references(cfg, file, defines, cancel)?;
+        return Ok(Some(Split {
+            parts,
+            references,
+            kind: Kind::Colors,
+            cover: Vec::new(),
+            notes: Vec::new(),
+        }));
+    }
+    if !parts::names(params).is_empty() {
+        // One part of the list is shown: its shells are the parts.
+        return only_references(Kind::Modules);
+    }
+    if part_param::needs_render(params) {
+        match part_param::render(cfg, file, params, cancel) {
+            Ok(built) => {
+                let references = render_references(cfg, file, defines, cancel)?;
+                return Ok(Some(Split {
+                    parts: built.parts,
+                    references,
+                    kind: Kind::Labeled,
+                    cover: built.cover,
+                    notes: Vec::new(),
+                }));
+            }
+            Err(_) if cancel.load(Ordering::Relaxed) => bail!("cancelled"),
+            Err(e) => {
+                let mut split = render(cfg, file, defines, cancel)?.unwrap_or_default();
+                let name = part_param::selector(params).map_or("part", |(p, _)| p.name.as_str());
+                split.notes.push(format!(
+                    "The builds of the {name} values failed. The module split finds the parts: {e:#}"
+                ));
+                return Ok(Some(split));
+            }
+        }
+    }
+    if let Some(label) = part_param::shown_label(params) {
+        // Parts of the value that touch are one solid of the build. The
+        // pieces of the module split can divide them: see `Kind::Shown`.
+        let mut notes = Vec::new();
+        let pieces = match split_texts(cfg, file, defines, cancel)
+            .and_then(|t| build_texts(cfg, &t.unwrap_or_default(), cancel))
+        {
+            Ok(meshes) => meshes.into_iter().flatten().collect(),
+            Err(_) if cancel.load(Ordering::Relaxed) => bail!("cancelled"),
+            Err(e) => {
+                notes.push(format!("The module split of the part failed: {e:#}"));
+                Vec::new()
+            }
+        };
+        let parts = (pieces.into_iter())
+            .map(|mesh| Part {
+                name: label.clone(),
+                color: [0xff; 3],
+                mesh,
+            })
+            .collect();
+        let references = render_references(cfg, file, defines, cancel)?;
+        return Ok(Some(Split {
+            parts,
+            references,
+            kind: Kind::Shown(label),
+            cover: Vec::new(),
+            notes,
+        }));
+    }
+    render(cfg, file, defines, cancel)
+}
+
+/// The .csg texts of the module split of `file`, one for each piece.
+/// `None` when the tree gives fewer than two pieces, or this parser cannot
+/// read it.
+pub(crate) fn split_texts(
+    cfg: &Config,
+    file: &Path,
+    defines: &[String],
+    cancel: &Arc<AtomicBool>,
+) -> Result<Option<Vec<String>>> {
+    let Some(e) = exported(cfg, file, defines, cancel)? else {
+        return Ok(None);
+    };
+    let pieces = split(&e.tree, MAX_PIECES, LEVELS).unwrap_or_default();
+    if pieces.len() < 2 {
+        return Ok(None);
+    }
+    Ok(Some(
+        (pieces.iter())
+            .map(|p| piece_text(&e.tree, p, &e.dir, &e.uses))
+            .collect(),
+    ))
+}
+
+/// Builds each .csg text on its own, in parallel. `None` for a text
+/// without 3D geometry. An error of one text fails the job.
+pub(crate) fn build_texts(
+    cfg: &Config,
+    texts: &[String],
+    cancel: &Arc<AtomicBool>,
+) -> Result<Vec<Option<Mesh>>> {
+    let mut temp = TempFiles(Vec::new());
+    build_all(cfg, texts, texts.len(), &mut temp, cancel)
 }
 
 /// Builds each .csg text on its own, in parallel. The result has one entry
@@ -1351,7 +1495,7 @@ group() {
                         let a = crate::assembly::Assembly::from_parts(
                             &m.mesh,
                             parts,
-                            true,
+                            &crate::assembly::Kind::Modules,
                             &split.references,
                         );
                         let other: Vec<String> = (a.parts.iter())

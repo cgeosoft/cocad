@@ -35,7 +35,7 @@ install -Dm644 packaging/$name.desktop "$root/usr/share/applications/$name.deskt
 install -Dm644 packaging/$name.svg "$root/usr/share/icons/hicolor/scalable/apps/$name.svg"
 install -Dm644 packaging/$name-mime.xml "$root/usr/share/mime/packages/$name.xml"
 install -Dm644 README.md "$root/usr/share/doc/$name/README.md"
-install -Dm644 examples/*.scad -t "$root/usr/share/doc/$name/examples/"
+install -Dm644 examples/*.scad examples/*.yml -t "$root/usr/share/doc/$name/examples/"
 
 size=$(du -sk "$root/usr" | cut -f1)
 mkdir -p "$root/DEBIAN"

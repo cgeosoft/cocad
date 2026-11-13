@@ -257,6 +257,24 @@ impl App {
                 self.note(format!("opened {}", self.stem()));
                 self.state_after(args, reply)
             }
+            "new_model" => {
+                let path = absolute(args)?;
+                if !has_ext(&path, "scad") {
+                    return Err("The path must end in .scad.".into());
+                }
+                if path.exists() {
+                    return Err(format!(
+                        "{} exists. Use open_model to open it.",
+                        path.display()
+                    ));
+                }
+                let source = args["source"].as_str();
+                let path = super::start::write_new(&path, source)
+                    .map_err(|e| format!("cannot write {}: {e}", path.display()))?;
+                self.open(path);
+                self.note(format!("new model {}", self.stem()));
+                self.state_after(args, reply)
+            }
             "set_params" => self.set_params(args, reply),
             "reset_params" => self.reset_params(args, reply),
             // "render" is the name before 0.7.
@@ -367,16 +385,19 @@ impl App {
             "parameter_count": self.params.len(),
             "changed_params": changed,
             "parameter_sets": {
-                "file": self.sets_file,
+                "file": self.def_file,
                 "names": self.sets,
                 "active": self.active_set,
                 "edited": self.set_edited,
-                "title": self.sets_info.file.title,
-                "description": self.sets_info.file.description,
-                "active_title": self.active_set.as_deref()
-                    .and_then(|n| self.sets_info.set(n)).and_then(|m| m.title.clone()),
                 "active_description": self.active_set.as_deref()
-                    .and_then(|n| self.sets_info.set(n)).and_then(|m| m.description.clone()),
+                    .and_then(|n| self.def.set(n)).and_then(|s| s.description.clone()),
+            },
+            "definition": {
+                "file": self.def_file,
+                "exists": self.def_file.exists(),
+                "title": self.def.meta.title,
+                "description": self.def.meta.description,
+                "problems": self.def_notes,
             },
             "mode": mode,
             "wireframe": self.wireframe,
@@ -385,9 +406,14 @@ impl App {
             "reference_parts": parts.iter().filter(|p| p.reference).count(),
             "part_colors": v.part_colors,
             "explode": explode,
-            "section": v.section.to_json(),
+            "section": v.section.to_json(self.section_space()),
             "plates": self.current_plates(),
             "plate": self.opt.state.plate + 1,
+            "render": {
+                "running": self.photo_on,
+                "samples": self.photo_samples(),
+                "of": self.photo.samples,
+            },
             "log": log,
         })
     }
@@ -477,7 +503,7 @@ impl App {
                 if !self.sets.contains(n) {
                     return Err(format!("No parameter set named {n}."));
                 }
-                skipped = presets::apply(&self.sets_file, n, &mut self.params)
+                skipped = presets::apply(&self.def_file, n, &mut self.params)
                     .map_err(|e| e.to_string())?;
             }
         }
@@ -499,11 +525,11 @@ impl App {
             return Err(format!("Set {name} exists. Set overwrite to replace it."));
         }
         self.flush_autosave();
-        presets::save(&self.sets_file, &name, &self.params).map_err(|e| e.to_string())?;
-        self.sets = presets::names(&self.sets_file);
+        presets::save(&self.def_file, &name, &self.params).map_err(|e| format!("{e:#}"))?;
+        self.load_def();
         self.set_active(Some(name.clone()));
         self.note(format!("saved set {name}"));
-        Ok(Some(json!({ "saved": name, "file": self.sets_file })))
+        Ok(Some(json!({ "saved": name, "file": self.def_file })))
     }
 
     /// `export_model`: STL and 3MF write the plate as the window does (the
@@ -820,10 +846,17 @@ impl App {
                     .ok_or_else(|| format!("Unknown explode_axis {name}. Use all, x, y or z."))?,
             ),
         };
-        // The section object replaces all cuts.
+        // The section object replaces all cuts. The positions are in the
+        // space of the tab: the bed in the Optimize tab, else the model.
         let mut section = self.view3d.section.clone();
         if !args["section"].is_null() {
-            section.set_json(&args["section"])?;
+            let space = super::section::Space::of(mode.unwrap_or(self.mode));
+            section.set_json(space, &args["section"])?;
+        }
+        // The Render tab starts no render by itself.
+        let render = args["render"].as_bool();
+        if render == Some(true) && mode.unwrap_or(self.mode) != Mode::Render {
+            return Err("render needs the Render tab. Give mode render too.".into());
         }
         if let Some(m) = mode {
             self.set_mode(m);
@@ -842,6 +875,12 @@ impl App {
         }
         if flag(args, "fit", false) {
             self.fit();
+        }
+        // After the view changes, so that the render is of the new view.
+        match render {
+            Some(true) => self.start_photo(),
+            Some(false) => self.stop_photo(),
+            None => {}
         }
         self.wireframe = flag(args, "wireframe", self.wireframe);
         self.grid = flag(args, "grid", self.grid);

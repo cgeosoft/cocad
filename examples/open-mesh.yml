@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=https://cocad.cgeosoft.com/schema/model-1.json
+cocad: 1
+title: Open mesh
+description: >-
+  A cube with one face missing. Use it to test the open-edge warning and the
+  STEP export of an open shell.
+author: cgeosoft
+license: MIT
+url: https://github.com/cgeosoft/cocad/blob/main/examples/open-mesh.scad
+
+sets:
+  Missing face:
+    description: The default. One face is missing, so the mesh is open.
+  Closed cube:
+    description: All faces are there, so the open-edge warning goes away.
+    values:
+      missing_face: false

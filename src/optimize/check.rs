@@ -7,6 +7,7 @@
 //!   limit. A flat region is a bridge. A bridge is a problem when it is
 //!   longer than the bridge limit or when its outline has arcs. A sloped
 //!   region is an overhang.
+//! - Walls that are thinner than the line width.
 //! - Small bed islands (see `brim.rs`).
 //! - The fit in the print area.
 //!
@@ -14,8 +15,9 @@
 //! `brim.rs` use.
 
 use super::{Area, Layers, Limits, brim, tri_area};
+use crate::assembly::ray_triangle;
 use crate::mesh::{Bounds, Mesh};
-use glam::Vec2;
+use glam::{Vec2, Vec3};
 use std::collections::{HashMap, HashSet};
 
 /// The kind of a problem.
@@ -25,6 +27,8 @@ pub enum Kind {
     Overhang,
     /// A bridge longer than the bridge limit.
     LongBridge,
+    /// A wall thinner than one printed line.
+    ThinWall,
     /// A bridge with a round outline (an arc in the air).
     Arc,
     /// A small bed island without a brim.
@@ -40,8 +44,9 @@ impl Kind {
             Kind::TooLarge => 0,
             Kind::LongBridge => 1,
             Kind::Overhang => 2,
-            Kind::Arc => 3,
-            Kind::SmallIsland => 4,
+            Kind::ThinWall => 3,
+            Kind::Arc => 4,
+            Kind::SmallIsland => 5,
         }
     }
 }
@@ -82,6 +87,18 @@ const WELD: f32 = 1e-3;
 /// `ARC_MIN` and less than `ARC_MAX` degrees there (`overhang.py`).
 const ARC_MIN: f32 = 0.5;
 const ARC_MAX: f32 = 40.0;
+/// A face with a normal z between `-WALL_NZ` and `WALL_NZ` is a wall face
+/// in the thin wall check: within 30 degrees of vertical.
+const WALL_NZ: f32 = 0.5;
+/// The two faces of a wall have opposite normals within about 25 degrees:
+/// the dot product of the normals is below this. The sharp edge of a
+/// chamfer or a wedge fails this test.
+const WALL_OPPOSITE: f32 = -0.906;
+/// A wall must be thinner than the line width by this (mm) to be thin, so
+/// that a wall of one line width is not a problem.
+const WALL_TOL: f32 = 0.01;
+/// The largest number of cells of the wall grid on x and on y.
+const WALL_GRID: usize = 128;
 
 /// The problems of `mesh` (print frame).
 pub fn run(mesh: &Mesh, layers: Layers, limits: &Limits, area: &Area) -> Vec<Issue> {
@@ -93,6 +110,7 @@ pub fn run(mesh: &Mesh, layers: Layers, limits: &Limits, area: &Area) -> Vec<Iss
         out.push(i);
     }
     small_islands(mesh, layers, &mut out);
+    thin_walls(mesh, layers, &mut out);
     down_regions(mesh, layers, limits, b.min.z, &mut out);
     out.sort_by(|a, b| {
         a.kind
@@ -159,6 +177,155 @@ fn small_islands(mesh: &Mesh, layers: Layers, out: &mut Vec<Issue>) {
             text: format!(
                 "Small bed island {:.1} mm², {:.1} mm wide, at x {:.1}, y {:.1}",
                 isl.area, isl.width, c.x, c.y
+            ),
+        });
+    }
+}
+
+/// A grid on x and y with the triangles of a mesh, for rays that go only a
+/// short distance.
+struct WallGrid {
+    min: Vec2,
+    cell: f32,
+    nx: usize,
+    ny: usize,
+    cells: Vec<Vec<u32>>,
+}
+
+impl WallGrid {
+    /// A grid with cells that are not smaller than `reach`.
+    fn new(mesh: &Mesh, b: &Bounds, reach: f32) -> WallGrid {
+        let size = b.size();
+        let cell = (size.x.max(size.y) / WALL_GRID as f32).max(reach).max(1e-3);
+        let nx = (size.x / cell) as usize + 1;
+        let ny = (size.y / cell) as usize + 1;
+        let mut g = WallGrid {
+            min: Vec2::new(b.min.x, b.min.y),
+            cell,
+            nx,
+            ny,
+            cells: vec![Vec::new(); nx * ny],
+        };
+        for t in 0..mesh.triangles.len() {
+            let [a, b, c] = mesh.tri(t);
+            let lo = a.min(b).min(c);
+            let hi = a.max(b).max(c);
+            let (x0, y0) = g.index(Vec2::new(lo.x, lo.y));
+            let (x1, y1) = g.index(Vec2::new(hi.x, hi.y));
+            for y in y0..=y1 {
+                for x in x0..=x1 {
+                    g.cells[y * nx + x].push(t as u32);
+                }
+            }
+        }
+        g
+    }
+
+    /// The cell of the point `p`. A point out of the grid gets the nearest
+    /// cell.
+    fn index(&self, p: Vec2) -> (usize, usize) {
+        let q = (p - self.min) / self.cell;
+        (
+            (q.x.max(0.0) as usize).min(self.nx - 1),
+            (q.y.max(0.0) as usize).min(self.ny - 1),
+        )
+    }
+
+    /// The triangles in the cells that the box from `a` to `b` touches. A
+    /// triangle can be in the list more than one time.
+    fn near(&self, a: Vec2, b: Vec2) -> impl Iterator<Item = u32> + '_ {
+        let (x0, y0) = self.index(a.min(b));
+        let (x1, y1) = self.index(a.max(b));
+        (y0..=y1)
+            .flat_map(move |y| (x0..=x1).map(move |x| y * self.nx + x))
+            .flat_map(|i| self.cells[i].iter().copied())
+    }
+}
+
+/// A `ThinWall` issue for each wall that is thinner than the line width
+/// (feature 12 of `docs/optimize-tab.md`).
+///
+/// A ray goes from the center of each wall face into the part. The wall is
+/// thin there when the ray comes out of the part before one line width, at
+/// a face that is almost parallel to the first face. A wall thinner than
+/// `SLIVER_MM` is a mesh sliver, for example the tip of a cusp that the bed
+/// chamfer keeps: it is not listed.
+fn thin_walls(mesh: &Mesh, layers: Layers, out: &mut Vec<Issue>) {
+    let Some(b) = mesh.bounds() else {
+        return;
+    };
+    let limit = layers.line_width - WALL_TOL;
+    if limit <= SLIVER_MM {
+        return;
+    }
+    let grid = WallGrid::new(mesh, &b, layers.line_width);
+    // The thin faces, with the thickness and the face on the other side.
+    let mut thin: Vec<(u32, f32, u32)> = Vec::new();
+    for t in 0..mesh.triangles.len() {
+        let n = mesh.normal(t);
+        if n.z.abs() > WALL_NZ || n.length_squared() < 0.5 {
+            continue;
+        }
+        let [p, q, r] = mesh.tri(t);
+        let origin = (p + q + r) / 3.0;
+        let end = origin - n * layers.line_width;
+        let hit = grid
+            .near(Vec2::new(origin.x, origin.y), Vec2::new(end.x, end.y))
+            .filter(|&o| o as usize != t)
+            .filter_map(|o| ray_triangle(origin, -n, mesh.tri(o as usize)).map(|d| (d, o)))
+            .filter(|(d, _)| *d > 1e-4)
+            .min_by(|a, b| a.0.total_cmp(&b.0));
+        if let Some((d, o)) = hit
+            && d >= SLIVER_MM
+            && d < limit
+            && mesh.normal(o as usize).dot(n) < WALL_OPPOSITE
+        {
+            thin.push((t as u32, d, o));
+        }
+    }
+    if thin.is_empty() {
+        return;
+    }
+    // One place: thin faces that share a vertex, and the two sides of a
+    // wall.
+    let tris: Vec<u32> = thin.iter().map(|x| x.0).collect();
+    let weld = Weld::new(mesh, &tris);
+    let mut sets = Sets::new(tris.len());
+    let mut first: HashMap<u32, usize> = HashMap::new();
+    let at: HashMap<u32, usize> = tris.iter().enumerate().map(|(i, &t)| (t, i)).collect();
+    for (i, &(t, _, o)) in thin.iter().enumerate() {
+        for v in weld.tri(mesh, t) {
+            match first.get(&v) {
+                Some(&j) => sets.join(j, i),
+                None => {
+                    first.insert(v, i);
+                }
+            }
+        }
+        if let Some(&j) = at.get(&o) {
+            sets.join(j, i);
+        }
+    }
+    let thickness: HashMap<u32, f32> = thin.iter().map(|x| (x.0, x.1)).collect();
+    for g in sets.groups(&tris) {
+        let area: f32 = g.iter().map(|&t| tri_area(mesh, t as usize)).sum();
+        if area < SLIVER_MM2 {
+            continue;
+        }
+        let d = g.iter().map(|t| thickness[t]).fold(f32::MAX, f32::min);
+        let pts = g.iter().flat_map(|&t| mesh.tri(t as usize));
+        let (lo, hi) = pts.fold((Vec3::MAX, Vec3::MIN), |(lo, hi), p| (lo.min(p), hi.max(p)));
+        let s = hi - lo;
+        out.push(Issue {
+            kind: Kind::ThinWall,
+            tris: g,
+            area,
+            text: format!(
+                "Thin wall {d:.2} mm, {:.1} x {:.1} mm, at z {:.2} to {:.2}",
+                s.x.max(s.y),
+                s.z,
+                lo.z,
+                hi.z
             ),
         });
     }
@@ -899,6 +1066,72 @@ mod tests {
     }
 
     #[test]
+    fn a_fin_thinner_than_the_line_is_a_thin_wall() {
+        // A base with a fin 0.3 mm thick and a fin 0.45 mm thick.
+        let m = mesh(&[
+            block(Vec3::new(0.0, 0.0, 0.0), Vec3::new(30.0, 20.0, 2.0)),
+            block(Vec3::new(5.0, 2.0, 2.0), Vec3::new(5.3, 18.0, 10.0)),
+            block(Vec3::new(15.0, 2.0, 2.0), Vec3::new(15.45, 18.0, 10.0)),
+        ]);
+        let i = run(&m, Layers::default(), &Limits::default(), &Area::default());
+        assert_eq!(kinds(&i), vec![Kind::ThinWall], "{i:?}");
+        // The two sides of the fin are one place.
+        assert_eq!(i[0].tris.len(), 4);
+        assert!((i[0].area - 2.0 * 16.0 * 8.0).abs() < 0.1);
+        assert!(
+            i[0].text.contains("0.30 mm, 16.0 x 8.0 mm"),
+            "{}",
+            i[0].text
+        );
+    }
+
+    #[test]
+    fn the_line_width_is_the_thin_wall_limit() {
+        let m = mesh(&[block(Vec3::ZERO, Vec3::new(0.3, 20.0, 10.0))]);
+        let run_with = |line_width| {
+            let l = Layers {
+                line_width,
+                ..Layers::default()
+            };
+            run(&m, l, &Limits::default(), &Area::default())
+        };
+        assert!(run_with(0.45).iter().any(|i| i.kind == Kind::ThinWall));
+        assert!(run_with(0.25).iter().all(|i| i.kind != Kind::ThinWall));
+    }
+
+    #[test]
+    fn a_sliver_is_not_a_thin_wall() {
+        let m = mesh(&[block(Vec3::ZERO, Vec3::new(0.05, 20.0, 10.0))]);
+        let i = run(&m, Layers::default(), &Limits::default(), &Area::default());
+        assert!(i.iter().all(|i| i.kind != Kind::ThinWall), "{i:?}");
+    }
+
+    #[test]
+    fn a_sharp_edge_is_not_a_thin_wall() {
+        // A wedge of 45 degrees on a vertical edge: thin at the edge, but
+        // the faces are not parallel.
+        let wedge = [
+            Vec2::new(0.0, 0.0),
+            Vec2::new(10.0, 0.0),
+            Vec2::new(10.0, 10.0),
+        ];
+        let m = mesh(&[prism(&wedge, 0.0, 10.0)]);
+        let i = run(&m, Layers::default(), &Limits::default(), &Area::default());
+        assert!(i.is_empty(), "{i:?}");
+    }
+
+    #[test]
+    #[ignore = "needs openscad-nightly"]
+    fn a_thin_tube_is_a_thin_wall() {
+        let m = render(
+            "$fn = 48; difference() { cylinder(d = 20, h = 10); translate([0, 0, -1]) cylinder(d = 19.4, h = 12); }",
+        );
+        let i = run(&m, Layers::default(), &Limits::default(), &Area::default());
+        let walls: Vec<_> = i.iter().filter(|i| i.kind == Kind::ThinWall).collect();
+        assert_eq!(walls.len(), 1, "{i:?}");
+    }
+
+    #[test]
     fn a_cube_has_no_problems() {
         let m = crate::mesh::cube(10.0);
         let i = run(&m, Layers::default(), &Limits::default(), &Area::default());
@@ -1002,7 +1235,9 @@ mod tests {
             block(Vec3::new(10.0, 10.0, 8.0), Vec3::new(10.5, 10.6, 9.0)),
         ]);
         let i = run(&m, Layers::default(), &Limits::default(), &Area::default());
-        assert!(i.is_empty(), "{i:?}");
+        // The step is thinner than the line width. It is a thin wall, but
+        // no bridge and no overhang.
+        assert_eq!(kinds(&i), vec![Kind::ThinWall], "{i:?}");
     }
 
     #[test]

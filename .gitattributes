@@ -13,3 +13,7 @@ extras/website/images/** -filter -diff -merge -text
 extras/website/public/**/*.png -filter -diff -merge -text
 # Guide pictures: plain git, so the wiki shows them
 assets/guide/** -filter -diff -merge -text
+# Window icon: plain git, so the build needs no LFS
+/assets/icon.png -filter -diff -merge -text
+# Built-in example thumbnails: plain git, so the build needs no LFS
+assets/examples/** -filter -diff -merge -text

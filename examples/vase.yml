@@ -1,0 +1,36 @@
+# yaml-language-server: $schema=https://cocad.cgeosoft.com/schema/model-1.json
+cocad: 1
+title: Vase
+description: >-
+  A twisted vase made with linear_extrude, twist and scale. Use it to test
+  many sloped faces.
+author: cgeosoft
+license: MIT
+url: https://github.com/cgeosoft/cocad/blob/main/examples/vase.scad
+
+sets:
+  Twisted vase:
+    description: The default vase with 7 sides and a twist of 120 degrees.
+  Straight hexagon:
+    description: Six sides, no twist and no taper.
+    values:
+      sides: 6
+      twist: 0
+      taper: 1
+  Spiral tower:
+    description: A tall vase with a full turn and a narrow top.
+    values:
+      sides: 5
+      radius: 25
+      height: 180
+      twist: 360
+      taper: 0.8
+  Bowl:
+    description: A wide, low bowl with 12 sides.
+    values:
+      sides: 12
+      radius: 60
+      height: 50
+      twist: 45
+      taper: 1.5
+      floor_thickness: 3

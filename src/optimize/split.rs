@@ -148,7 +148,7 @@ impl Default for JointValues {
 
 impl JointValues {
     /// Diameter of a pin hole.
-    fn hole_d(&self) -> f32 {
+    pub fn hole_d(&self) -> f32 {
         self.pin_d + self.clearance
     }
 

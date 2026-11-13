@@ -64,7 +64,10 @@ pub fn run(
 
 /// The OpenSCAD statement that imports the STL file at `path`.
 pub fn import(path: &Path) -> String {
-    format!("import({}, convexity = 10);", quote(&path.to_string_lossy().replace('\\', "/")))
+    format!(
+        "import({}, convexity = 10);",
+        quote(&path.to_string_lossy().replace('\\', "/"))
+    )
 }
 
 /// An OpenSCAD string literal for `value`.

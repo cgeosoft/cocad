@@ -4,6 +4,8 @@ A parameter is a value of the model that you can change, for example a width, a 
 
 The **Parameters** panel on the left shows all parameters of the open model.
 
+The card at the top of the panel shows the name and the description of the model. Click the **i** button in the card to see all information about the model: for example the author, the license, the model file and the number of parameters and sets.
+
 ![The Parameters panel](https://raw.githubusercontent.com/cgeosoft/cocad/main/assets/tour/2-customizer.jpg)
 
 ## The controls
@@ -16,7 +18,7 @@ The **Parameters** panel on the left shows all parameters of the open model.
 | Text box | A text, for example a label on the part |
 | Number boxes in a row | A value with more than one number, for example a position with X and Y |
 
-The parameters are in groups. Click the header of a group to close or open it. **Collapse** at the top closes all groups. **Expand** opens them again. CoCAD remembers the closed groups for each model.
+The parameters are in groups. Click the header of a group to close or open it. The button with two chevrons at the right of the set list closes all groups. When all groups are closed, the same button opens them again. CoCAD remembers the closed groups for each model.
 
 If the author wrote a description for a parameter, the panel shows the description as the label.
 
@@ -38,7 +40,7 @@ While **Auto build** is off, the status bar shows "Parameters changed. Press F5.
 - An orange dot marks a value that you changed.
 - The arrow next to the value sets this one value back.
 - The header of a group shows how many values you changed in it, for example "2 edited".
-- **Reset all** at the top sets all values back.
+- **Reset all** sets all values back. It is the button with the round arrow at the right of the set list.
 
 ## Keep your values
 

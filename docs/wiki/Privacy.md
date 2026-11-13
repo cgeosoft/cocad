@@ -52,6 +52,6 @@ The full legal text is the [Privacy Notice](https://cocad.cgeosoft.com/privacy/)
 **For technical readers.**
 
 - Only the app window sends data. The `params`, `export`, `slice` and `photo` commands and the `cocad mcp` process send nothing.
-- With the MCP tools: `open_model` sends the app start and model open events, and `set_view` sends a view change when it changes the `mode`. The other tools send no event.
+- With the MCP tools: `open_model` and `new_model` send the app start and model open events, and `set_view` sends a view change when it changes the `mode`. The other tools send no event.
 - A build reads the PostHog project key from `POSTHOG_API_KEY` at compile time. A debug build or a build with no key sends nothing and does not ask. See [Build from source](Build-from-source#analytics-key).
 - The design of this code is in [`docs/telemetry-consent.md`](https://github.com/cgeosoft/cocad/blob/main/docs/telemetry-consent.md).
