@@ -30,12 +30,14 @@ The **Plate** card shows three print parts:
 | Print part | What it is | Status |
 |---|---|---|
 | **Base plate** | The base plate | Too large |
-| **Stand** | The stand | 7 problems |
-| **Cable clip 1 ×3** | The clips. CoCAD found three parts with the same shape. | 5 problems |
+| **Stand** | The stand. CoCAD lays it on its side. | 4 problems |
+| **Cable clip 1 ×3** | The clips. CoCAD found three parts with the same shape, and puts them on their flat face. | Fits |
 
 The print area is 220 × 220 × 250 mm, the default. The base plate is 260 mm long, so it is too large. It stays on the plate, but your printer cannot print it. Below its row, a **Split** section shows a proposal. You split the plate in [step 6](#6-split-the-base-plate).
 
-The **Check** card lists the problems. Click a problem to see its faces in purple in the 3D view. The stand has overhangs at the cable arch and the cable hole, bridges with a round outline at the pilot holes, and a small bed island at its front foot.
+CoCAD puts each part on its best face. This is **Auto** orientation, the default. See [step 5](#5-check-the-orientation).
+
+The **Check** card lists the problems. Click a problem to see its faces in purple in the 3D view. On its side, the stand has round horizontal holes: the cable hole, and the two pilot holes for the screws. The top of each hole is an overhang. The base plate has bridges with a round outline at its counterbores and magnet pockets.
 
 ## 3. Set your printer
 
@@ -49,7 +51,7 @@ Open the **Print fixes** card and turn on all four fixes.
 
 ![All print fixes on](https://raw.githubusercontent.com/cgeosoft/cocad/main/assets/guide/app-3-fixes.jpg)
 
-Each fix shows the number of places that it changed. The stand now has the status **Fits**: the fixes removed all its problems. The line of the **Export** card names the fixes: "Bed chamfer, 4 teardrops, 2 bridge fixes, 2 brims".
+Each fix shows the number of places that it changed. The stand now has the status **Fits**: the fixes removed all its problems. The line of the **Export** card names the fixes: "Bed chamfer, 4 teardrops, 6 bridge fixes".
 
 The sections below show each fix on a part of the desk dock. The parts are in print position. In the section pictures, the bed is at the bottom.
 
@@ -57,7 +59,7 @@ The sections below show each fix on a part of the desk dock. The parts are in pr
 
 A printer cannot put plastic on air. Over an empty space, it pulls a strand from one edge to the opposite edge. This is a **bridge**. A bridge prints well from a straight edge. From a round edge, the strands start in the air and sag.
 
-**What the fix does.** On the desk dock, **Bridges** changes three kinds of places.
+**What the fix does.** On the desk dock, **Bridges** changes the base plate at two kinds of places.
 
 The counterbores of the screw heads open to the bed. Above each counterbore, the screw hole goes on through the plate.
 
@@ -70,9 +72,7 @@ The last layer under each round ceiling gets a square outline that holds the cir
 
 ![The layer under the counterbore ceiling](https://raw.githubusercontent.com/cgeosoft/cocad/main/assets/guide/2-plate-last-layer.png)
 
-The pilot holes of the stand are blind holes that go up. Their flat round end is a small bridge. The fix makes a 45 degree cone at the end. A slope of 45 degrees prints without support.
-
-![The blind pilot hole before and after the fix](https://raw.githubusercontent.com/cgeosoft/cocad/main/assets/guide/4-stand-pilot-holes.png)
+The fix also changes blind holes that go up, for example a screw hole from below in a part that stands upright. The flat round end of such a hole is a small bridge. The fix makes a 45 degree cone at the end. A slope of 45 degrees prints without support. On the desk dock, the stand lies on its side, so its blind holes are horizontal and get a teardrop.
 
 **When to use it.** Use it for holes and pockets on the bed side, for counterbores of screw heads and nuts, and for blind holes that go up. Select **Sacrificial** for a strong, closed bridge when you can drill the hole. Select **Stepped** when you do not want to drill. A bridge that is longer than the bridge limit (12 mm by default) does not change. The **Check** card lists it.
 
@@ -80,9 +80,9 @@ The pilot holes of the stand are blind holes that go up. Their flat round end is
 
 The top of a round hole with a horizontal axis is a ceiling in the air. It sags, or it needs support.
 
-**What the fix does.** The top of the hole gets a 45 degree point, as a teardrop. The bottom and the sides of the hole stay round. On the stand, the cable arch and the cable hole get the point.
+**What the fix does.** The top of the hole gets a 45 degree point, as a teardrop. The bottom and the sides of the hole stay round. On the stand, the cable hole and the two pilot holes get the point. The fix shows "4 holes".
 
-![The cable arch and the cable hole before and after the fix](https://raw.githubusercontent.com/cgeosoft/cocad/main/assets/guide/3-stand-teardrops.png)
+![The cable hole and a pilot hole before and after the fix](https://raw.githubusercontent.com/cgeosoft/cocad/main/assets/guide/3-stand-teardrops.png)
 
 **When to use it.** Use it for horizontal holes for cables, screws and pins, from 1 to 40 mm in diameter. The point makes the hole higher at the top. A shaft in the hole then touches only the bottom and the sides of the hole. When the wall above a hole is too thin for the point, CoCAD does not change the hole. The card then shows "1 place skipped" with the reason "wall above too thin".
 
@@ -92,9 +92,9 @@ A thin line of the first layer has little contact with the bed. It can come loos
 
 **What the fix does.** CoCAD finds the small areas of the first layer: areas that are thinner than 3 mm or smaller than 25 mm². Each small area gets a brim of one layer around it, 5 mm wide by default. The brim keeps a gap of 1 mm from the rest of the part. The brim stays inside the print area.
 
-The front foot of the stand is 2.4 mm thin. It gets a brim.
+On the desk dock with Auto orientation, no part has a small island: the fix shows "0 brims". When you turn off **Custom orientation** for the stand, the stand stands as on the desk, on its front foot. The foot is 2.4 mm thin. It then gets a brim.
 
-![The first layer of the stand before and after the fix](https://raw.githubusercontent.com/cgeosoft/cocad/main/assets/guide/5-stand-brim.png)
+![The first layer of the upright stand before and after the fix](https://raw.githubusercontent.com/cgeosoft/cocad/main/assets/guide/5-stand-brim.png)
 
 **When to use it.** Use it for thin feet, thin walls on the bed and small pins that stand on the bed. After the print, cut the brim off the part. The brim is only one layer thick.
 
@@ -141,20 +141,22 @@ Other properties of the bed chamfer:
 
 The fixes work together. CoCAD applies them in this order: the hole size, the cuts and the additions of the teardrops and the bridges, then the bed chamfer, then the brim and the mouse ears.
 
-## 5. Turn the clips
+## 5. Check the orientation
 
-In the model, the clips sit tilted on the back of the stand. In this rotation, a clip stands on an edge on the bed. The **Check** card lists 5 problems for it.
+The model shows the dock as it stands on the desk. That is not always a good position for the print. By default, **Custom orientation** is on with **Auto**: CoCAD puts each part on its best face. It prefers less overhang, more area on the bed and a lower part.
 
-1. Click **Cable clip 1 ×3** in the **Plate** card.
-2. In the **Orientation** card, turn on **Custom orientation**. **Auto** is the first choice.
-
-CoCAD puts the clip on its best face. The cable hole now goes up, so it needs no teardrop, and the clip has no problems.
+- **The clips** sit tilted on the back of the stand. In this rotation, a clip stands on an edge on the bed, and the **Check** card lists 5 problems for it. Auto puts the clip on its flat face. The cable hole then goes up, so it needs no teardrop, and the clip has no problems.
+- **The stand** lies on its side. Its outline is on the bed, so the back support needs no support material.
 
 ![A clip in the rotation of the model and with Auto](https://raw.githubusercontent.com/cgeosoft/cocad/main/assets/guide/7-clip-orientation.png)
 
-![The clips on their flat face](https://raw.githubusercontent.com/cgeosoft/cocad/main/assets/guide/app-4-auto.jpg)
+To change the orientation of a part:
 
-The orientation applies to all copies of the part. To put a different face on the bed, click **Select face**, then click that face of the part in the 3D view. **Turn 90°** turns the part on the bed.
+1. Click the part in the **Plate** card, or in the 3D view.
+2. In the **Orientation** card, click **Select face**, then click a face of the part in the 3D view. That face goes on the bed. **Turn 90°** turns the part on the bed.
+3. To keep the rotation of the model, turn off **Custom orientation**.
+
+The orientation applies to all copies of the part. Only you know which face must look good, and in which direction the part must be strong.
 
 ## 6. Split the base plate
 
@@ -180,7 +182,7 @@ Click **Top** at the bottom of the 3D view to see the plate from above:
 
 ![The plate from above](https://raw.githubusercontent.com/cgeosoft/cocad/main/assets/guide/app-6-top.jpg)
 
-The print fixes also apply to the pieces. The **Bridges** fix now also changes the counterbores and the magnet pockets of the plate: "8 bridge fixes".
+The pieces lie as the whole base plate, so both pieces have the same face on the bed. The print fixes also apply to the pieces.
 
 To change the split, select a piece. **Remove split** makes the plate whole again.
 
@@ -211,11 +213,10 @@ At the bottom of the tab, click **Export 3MF**. For an STL file, click the arrow
 
 In your slicer, set the elephant foot compensation to 0, because the bed chamfer is on.
 
-CoCAD stores all values of this guide with the model: the print area, the fixes, the orientation of the clips and the split. When you open the model again, they are the same. The [command line](Command-line) uses them too.
+CoCAD stores all values of this guide with the model: the print area, the fixes, the orientation of each part and the split. When you open the model again, they are the same. The [command line](Command-line) uses them too.
 
 ## 10. After the print
 
-- Cut the brim off the front foot of the stand.
 - Drill the screw holes of the plate open through the sacrificial layers. With **Stepped**, you do not have to do this.
 - Glue the two pieces of the base plate together at the dovetail.
 - Put the magnets in their pockets, and attach the stand with the screws.

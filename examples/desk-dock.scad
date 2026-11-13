@@ -5,12 +5,15 @@
 // - The base plate is 260 mm long, so it does not fit most beds. The
 //   Optimize tab proposes a split with a dovetail joint.
 // - Two screws from below hold the stand. Under the plate: round head
-//   counterbores with the screw holes above them, and magnet pockets. In
-//   the stand: blind pilot holes that go up. Turn on Bridges.
-// - The stand stands on a cable arch and has a cable hole across it. Turn
-//   on Teardrop holes. Its front foot is 2.4 mm thin: turn on the Brim.
+//   counterbores with the screw holes above them, and magnet pockets.
+//   Turn on Bridges.
+// - The stand has a cable arch, a cable hole and two blind pilot holes.
+//   Auto orientation puts it on its side: the cable hole and the pilot
+//   holes are then horizontal. Turn on Teardrop holes.
+// - With Custom orientation off, the stand stands on its front foot, which
+//   is 2.4 mm thin: turn on the Brim.
 // - The three clips are the same part (x3). They sit tilted on the stand.
-//   Turn on Custom orientation and use Auto to put them flat on the bed.
+//   Auto puts them flat on the bed.
 // - The phone, the magnets and the screws have the % mark: they show in
 //   gray and are not printed.
 // - Turn on the Bed chamfer for all parts.

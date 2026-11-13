@@ -85,33 +85,30 @@ montage("2-plate-last-layer", [
     ("Bridges: square last layer", render("q-s", s2("plate-bridges-sacrificial"), cam2, ortho=True)),
 ], "Plate: layer under the counterbore ceiling")
 
-# 3. Stand teardrops: a slice at x -30 (arch) and the front face (cable hole).
+# 3. Stand teardrops. Auto lays the stand on its side: the cable hole goes
+#    along y at x 39, z 35, and the pilot holes go along x from the end at
+#    x 50, at y 15. Sections across y at 0 and across x at 48.
 lo, hi = bounds("stand-before")
-s3 = lambda n: slab(n, 0, -30, (lo[1] - 1, -1), (hi[1] + 1, 30))
-cam_end = [-30, lo[1] + 16, 12, 90, 0, 90, 48]
-cam_front = [0, lo[1], 11, 90, 0, 0, 40]
+s3h = lambda n: slab(n, 1, 0, (29, 25), (49, 45))
+cam_h = [39, 0, 35, 90, 0, 0, 30]
+s3p = lambda n: slab(n, 0, 48, (5, 5), (25, 25))
+cam_p = [48, 15, 15.5, 90, 0, 90, 22]
 montage("3-stand-teardrops", [
-    ("Before: round arch", render("s-be", s3("stand-before"), cam_end, ortho=True)),
-    ("Teardrop holes", render("s-te", s3("stand-teardrops"), cam_end, ortho=True)),
-    ("Before: round cable hole", render("s-bf", imp("stand-before"), cam_front, ortho=True)),
-    ("Teardrop holes", render("s-tf", imp("stand-teardrops"), cam_front, ortho=True)),
-], "Stand: cable arch (section) and cable hole (front)")
+    ("Before: round cable hole", render("s-bh", s3h("stand-before"), cam_h, ortho=True)),
+    ("Teardrop holes", render("s-th", s3h("stand-teardrops"), cam_h, ortho=True)),
+    ("Before: round pilot hole", render("s-bp", s3p("stand-before"), cam_p, ortho=True)),
+    ("Teardrop holes", render("s-tp", s3p("stand-teardrops"), cam_p, ortho=True)),
+], "Stand on its side: cable hole and pilot hole (sections)")
 
-# 4. Stand pilot holes: a slice through the pilot hole at x -21.
-s4 = lambda n: slab(n, 0, -21, (5, -1), (25, 16))
-cam_p = [-21, 15, 7, 90, 0, 90, 26]
-montage("4-stand-pilot-holes", [
-    ("Before: flat round ceiling", render("c-b", s4("stand-before"), cam_p, ortho=True)),
-    ("Bridges: 45 degree cone", render("c-a", s4("stand-bridges-sacrificial"), cam_p, ortho=True)),
-], "Stand: blind pilot hole (section)")
-
-# 5. Stand brim: the first layer, from above.
-fl = (lo[0] - 8, lo[1] - 8, -1, hi[0] + 8, hi[1] + 8, 0.3)
-cam_f = [0, (lo[1] + hi[1]) / 2 - 6, 0, 0, 0, 0, 175]
+# 5. Brim: the stand upright (custom orientation off), first layer, from
+#    above.
+ulo, uhi = bounds("stand-upright-before")
+fl = (ulo[0] - 8, ulo[1] - 8, -1, uhi[0] + 8, uhi[1] + 8, 0.3)
+cam_f = [0, (ulo[1] + uhi[1]) / 2 - 6, 0, 0, 0, 0, 175]
 montage("5-stand-brim", [
-    ("Before: thin front foot", render("b-b", cut("stand-before", fl), cam_f, ortho=True)),
-    ("Brim on the small island", render("b-a", cut("stand-brim", fl), cam_f, ortho=True)),
-], "Stand: first layer, front foot below")
+    ("Before: thin front foot", render("b-b", cut("stand-upright-before", fl), cam_f, ortho=True)),
+    ("Brim on the small island", render("b-a", cut("stand-upright-brim", fl), cam_f, ortho=True)),
+], "Stand upright: first layer, front foot below")
 
 # 6. Bed chamfer: a slice through the plate edge, very close.
 plo, phi = bounds("plate-before")
@@ -150,9 +147,9 @@ montage("8-plate-split", [
 ], "Plate split at x 130: flat and dovetail")
 
 # 9. Combination: all fixes on the stand and the plate.
-cam_s = [0, -5, 48, 72, 0, 320, 380]
+cam_s = [10, 0, 28, 60, 0, 50, 370]
 cam_pl = [0, 0, 0, 145, 0, 20, 360]
 montage("9-all-fixes", [
     ("Stand before", render("a-sb", imp("stand-before"), cam_s)),
     ("Stand, all fixes", render("a-sa", imp("stand-all-sacrificial"), cam_s)),
-], "Stand: all fixes together")
+], "Stand on its side: all fixes together")
