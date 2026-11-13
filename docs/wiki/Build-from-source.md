@@ -110,6 +110,7 @@ Models with `// expect: error` on the first line must fail.
 | `scripts/` | Build and packaging scripts |
 | `packaging/` | Desktop entry, icon, MIME type for the `.deb` |
 | `assets/tour/` | Tour screenshots, embedded in the binary |
+| `assets/guide/` | Screenshots (`scripts/guide-shots.sh`) and before and after pictures of the guide [Prepare a model for printing](Prepare-a-model-for-printing) |
 | `docs/wiki/` | The source of these wiki pages. `scripts/publish-wiki.sh` copies them to the GitHub wiki. |
 
 Stack: Rust 2024, `eframe`/`egui` 0.31 with the `glow` (OpenGL 3.3) backend and an own renderer in an egui paint callback. `glam` for math, `zip` for 3MF, `rfd` for file dialogs.
