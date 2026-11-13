@@ -80,6 +80,7 @@ For all other models, or when the module split finds no parts, CoCAD uses the so
 ## Colors
 
 - A part of a multicolor list keeps its color.
+- A part of a part list with a `color` in the definition has that color. All solids of the value get it.
 - The other parts get colors from a palette of 12 colors when **Part colors** is on.
 
 ## Selection and focus

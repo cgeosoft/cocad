@@ -167,10 +167,22 @@ pub fn shown_label(params: &[Param]) -> Option<String> {
     Some(c.label)
 }
 
+/// The color from the definition of the one value that the model shows.
+/// `None` when it shows all parts, has no selector, or the value has no
+/// color.
+pub fn shown_color(params: &[Param]) -> Option<[u8; 3]> {
+    let value = selected(params).filter(|s| s != ALL)?;
+    choices(params).into_iter().find(|c| c.value == value)?.color
+}
+
 /// The parts of all values.
 pub struct Built {
-    /// The parts, each one with the label of its value as its name.
+    /// The parts, each one with the label of its value as its name, and
+    /// the color of its value, else white.
     pub parts: Vec<Part>,
+    /// The color of each part in `parts` from the definition. `None`: the
+    /// value has no color.
+    pub colors: Vec<Option<[u8; 3]>>,
     /// The exact build of each value, for the "Other" test. A part that
     /// comes from the module split of a value builds from the CSG tree,
     /// which has rounded numbers.
@@ -192,7 +204,8 @@ struct Run {
 /// So CoCAD also applies the module split to the CSG tree of each value.
 /// When the pieces give more solids than the build of the value, the
 /// pieces are the parts, else the build is. Each part has the label as its
-/// name. A value without 3D geometry gives no part. An error of one value
+/// name and the color of its value. A value without 3D geometry gives no
+/// part. An error of one value
 /// fails the job, and so does a list where no value gives geometry.
 pub fn render(
     cfg: &Config,
@@ -252,16 +265,17 @@ pub fn render(
     let mut meshes = crate::csg_split::build_texts(cfg, &texts, cancel)?.into_iter();
     let mut out = Built {
         parts: Vec::new(),
+        colors: Vec::new(),
         cover: Vec::new(),
     };
-    for r in runs {
+    for (r, c) in runs.into_iter().zip(choices) {
         let pieces: Vec<_> = meshes.by_ref().take(r.pieces.len()).flatten().collect();
         let Some(mesh) = r.mesh else {
             continue;
         };
         let part = |mesh| Part {
             name: r.label.clone(),
-            color: [0xff; 3],
+            color: c.color.unwrap_or([0xff; 3]),
             mesh,
         };
         let solids: usize = pieces
@@ -275,6 +289,7 @@ pub fn render(
             out.cover.push(part(mesh.clone()));
             out.parts.push(part(mesh));
         }
+        out.colors.resize(out.parts.len(), c.color);
     }
     if out.parts.is_empty() {
         bail!("no value of the {name} list gives 3D geometry");

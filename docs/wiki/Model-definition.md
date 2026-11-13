@@ -24,10 +24,13 @@ url: https://example.com/part-selector
 parts:
   - id: box
     name: Box
+    color: "#4e8fd6"
   - id: lid
     name: Lid
+    color: "#59a14f"
   - id: feet
     name: Foot
+    color: "#e15759"
 
 sets:
   Small box:
@@ -74,13 +77,14 @@ The `parts` list of the definition gives each other value a name:
 parts:
   - id: box        # the value of the part parameter
     name: Box      # the name that CoCAD shows
+    color: "#4e8fd6"  # quotes: without them, # starts a comment
   - id: lid
     name: Lid
   - feet           # only the id: the name is "feet"
 ```
 
 - The order of the list is the order in the dropdown list of the parameter. For a multicolor model, it also sets the filament number.
-- `color` sets the color of a part in a multicolor model: `#RRGGBB` or a color name (white, black, red, green, blue, yellow, orange, purple, pink, brown, cyan, magenta, gold, silver, gray).
+- `color` sets the color of a part: `#RRGGBB` or a color name (white, black, red, green, blue, yellow, orange, purple, pink, brown, cyan, magenta, gold, silver, gray). The 3D view, the thumbnail and the photo with **Part colors** on show the part in this color. **Colors…** in the **Parts** card can change it. In a multicolor model, it is also the color of the filament.
 - The parameter must be a string parameter in the `.scad` file, not in the `Hidden` group. A dropdown list in the `.scad` file is optional. With the list, the part selection also works in the OpenSCAD Customizer. The names of the definition replace the labels of the list.
 - For the rules of the parts, see [Write models for CoCAD](Write-models-for-CoCAD#names-for-the-parts).
 

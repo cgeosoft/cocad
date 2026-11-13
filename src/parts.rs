@@ -69,11 +69,16 @@ pub fn needs_render(params: &[Param]) -> bool {
     selected(params).is_some_and(|s| s == part_param::ALL)
 }
 
-/// The color of the one part that the model shows, from the log of the
-/// main render. `None` when the model shows all parts or has no parts.
+/// The color of the one part that the model shows. For a multicolor part,
+/// it can come from the log of the main render (see `color`). For a part of
+/// a part list, it is the color of the definition. `None` when the model
+/// shows all parts, has no parts, or shows a part of a part list without a
+/// color.
 pub fn shown_color(params: &[Param], log: &str) -> Option<[u8; 3]> {
+    let Some((_, l)) = list(params) else {
+        return part_param::shown_color(params);
+    };
     let value = selected(params).filter(|s| s != part_param::ALL)?;
-    let (_, l) = list(params)?;
     let i = l.choices.iter().position(|c| c.value == value)?;
     Some(color(l.choices[i].color, log, i))
 }
@@ -272,5 +277,27 @@ mod tests {
         let all = params::parse("cocad_part = \"all\"; // [all, plate, star]\n");
         assert_eq!(shown_color(&all, ""), None);
         assert!(needs_render(&all));
+    }
+
+    #[test]
+    fn one_selected_part_of_a_part_list_takes_its_defined_color() {
+        let def = crate::definition::parse(
+            "cocad: 1\nparts:\n  - {id: box, color: red}\n  - lid\n",
+            false,
+        )
+        .unwrap();
+        let with = |value: &str| {
+            let mut p = params::parse(&format!("part = \"{value}\"; // [all, box, lid]\n"));
+            assert!(def.apply_parts(&mut p).is_empty());
+            p
+        };
+        // The log has no effect on a part list.
+        assert_eq!(
+            shown_color(&with("box"), "ECHO: cocad_color = \"blue\""),
+            Some([0xff, 0, 0])
+        );
+        assert_eq!(shown_color(&with("lid"), ""), None);
+        assert_eq!(shown_color(&with("all"), ""), None);
+        assert!(!needs_render(&with("all")));
     }
 }

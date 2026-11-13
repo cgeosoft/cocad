@@ -89,7 +89,8 @@ pub struct PartDef {
     pub id: String,
     /// The name that CoCAD shows. `None`: the id.
     pub name: Option<String>,
-    /// A `#RRGGBB` value or a color name, for a multicolor print.
+    /// A `#RRGGBB` value or a color name: the color of the part in the 3D
+    /// view, and the filament color of a multicolor print.
     pub color: Option<String>,
 }
 

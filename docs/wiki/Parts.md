@@ -15,6 +15,7 @@ While CoCAD looks for the parts, the card shows "Finding the parts…" or "Build
 ## Part colors
 
 - Turn on **Part colors** to show each part in a different color.
+- A model can give its parts their colors in its [model definition](Model-definition#parts). The 3D view shows these parts in their colors, also with **Part colors** off. The other parts are orange. With **Part colors** on, they each get a different color.
 - Click **Colors…** to see the list of all parts with their volumes. Click a color to change it. **Reset** gives the part its default color again.
 - A color change turns on **Part colors**.
 - The colors stay when the model builds again. When you open a different model, CoCAD clears them.

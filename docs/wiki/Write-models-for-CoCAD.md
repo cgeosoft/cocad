@@ -126,6 +126,7 @@ Rules:
 - Each other value shows only that part, in its place of use. Do not turn the part to a print position. The [Optimize](Optimize) tab does that.
 - Do not show the `%` parts for the other values.
 - The `name` in the definition is the name of the part. Without `parts` in the definition, CoCAD uses the labels of the dropdown list (`// [all:All, box:Box]`), else the values.
+- `color` in the definition gives the part a color in the 3D view, for example `color: "#4e8fd6"`. See [Model definition](Model-definition#parts).
 - `part_parameter` in the definition sets another name for the parameter.
 - One value can give more than one solid, for example four feet. The parts then have the names "Foot 1", "Foot 2" and so on.
 - Parts of one value that touch, for example the segments of a board, stay separate when each one is a module call. A `for` loop of module calls also works:

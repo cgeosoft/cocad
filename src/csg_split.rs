@@ -710,6 +710,9 @@ pub struct Split {
     pub references: Vec<Part>,
     /// How `parts` become the parts of the assembly.
     pub kind: Kind,
+    /// The color of each part of `parts` from the model definition, for a
+    /// part list (`Kind::Labeled`). Empty, or `None` for a part: no color.
+    pub colors: Vec<Option<[u8; 3]>>,
     /// Exact builds that hold the same shapes as `parts`, for the test
     /// that finds the "Other" parts. Empty: `parts` are exact.
     pub cover: Vec<Part>,
@@ -899,8 +902,7 @@ pub fn find_parts(
             parts,
             references,
             kind: Kind::Colors,
-            cover: Vec::new(),
-            notes: Vec::new(),
+            ..Split::default()
         }));
     }
     if !parts::names(params).is_empty() {
@@ -915,6 +917,7 @@ pub fn find_parts(
                     parts: built.parts,
                     references,
                     kind: Kind::Labeled,
+                    colors: built.colors,
                     cover: built.cover,
                     notes: Vec::new(),
                 }));
@@ -956,8 +959,8 @@ pub fn find_parts(
             parts,
             references,
             kind: Kind::Shown(label),
-            cover: Vec::new(),
             notes,
+            ..Split::default()
         }));
     }
     render(cfg, file, defines, cancel)

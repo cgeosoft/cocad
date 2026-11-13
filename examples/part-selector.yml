@@ -4,7 +4,7 @@ title: Part selector
 description: >-
   A box with a lid and four feet. The part parameter selects one part, also in
   plain OpenSCAD. CoCAD builds each part on its own and takes the part names
-  from part-selector.yml.
+  and colors from part-selector.yml.
 author: cgeosoft
 license: MIT
 url: https://github.com/cgeosoft/cocad/blob/main/examples/part-selector.scad
@@ -12,10 +12,13 @@ url: https://github.com/cgeosoft/cocad/blob/main/examples/part-selector.scad
 parts:
   - id: box
     name: Box
+    color: "#4e8fd6"
   - id: lid
     name: Lid
+    color: "#59a14f"
   - id: feet
     name: Foot
+    color: "#e15759"
 
 sets:
   Small box:

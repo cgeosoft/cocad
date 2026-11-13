@@ -234,7 +234,8 @@ impl Assembly {
     /// - `Kind::Colors` (a multicolor part list): each part is one part with
     ///   its name and color.
     /// - `Kind::Labeled` (the `part` selector): each shell of each part is
-    ///   one part without a color, named after its part.
+    ///   one part, named after its part. It has the color of its part from
+    ///   the definition (`Split::colors`), else no color.
     /// - `Kind::Modules` (the module split, `csg_split.rs`): each shell of
     ///   each part is one part "Part N" without a color. With no parts (no
     ///   module split), the shells of `main` are the parts.
@@ -253,7 +254,7 @@ impl Assembly {
     /// its name.
     #[cfg(test)]
     pub fn from_parts(main: &Mesh, parts: &[Part], kind: &Kind, references: &[Part]) -> Assembly {
-        Assembly::assemble(main, parts, parts, kind, references)
+        Assembly::assemble(main, parts, parts, &[], kind, references)
     }
 
     /// The parts of a `csg_split::Split`, as `from_parts`. For the "Other"
@@ -264,14 +265,23 @@ impl Assembly {
         } else {
             &split.cover
         };
-        Assembly::assemble(main, &split.parts, cover, &split.kind, &split.references)
+        Assembly::assemble(
+            main,
+            &split.parts,
+            cover,
+            &split.colors,
+            &split.kind,
+            &split.references,
+        )
     }
 
-    /// `from_parts` with `cover`: the parts that the "Other" test uses.
+    /// `from_parts` with `cover`, the parts that the "Other" test uses, and
+    /// `colors`, the colors of the `Labeled` parts.
     fn assemble(
         main: &Mesh,
         parts: &[Part],
         cover: &[Part],
+        colors: &[Option<[u8; 3]>],
         kind: &Kind,
         references: &[Part],
     ) -> Assembly {
@@ -303,10 +313,14 @@ impl Assembly {
                 shells: Shells::Numbered,
                 reference: false,
             }],
-            _ => (parts.iter())
-                .map(|p| Source {
+            _ => (parts.iter().enumerate())
+                .map(|(k, p)| Source {
                     name: p.name.clone(),
-                    color: (*kind == Kind::Colors).then_some(p.color),
+                    color: match kind {
+                        Kind::Colors => Some(p.color),
+                        Kind::Labeled => colors.get(k).copied().flatten(),
+                        _ => None,
+                    },
                     mesh: &p.mesh,
                     shells: match kind {
                         Kind::Colors => Shells::Whole,
@@ -933,6 +947,21 @@ mod tests {
         assert_eq!(names, ["Spine", "Pin 1", "Pin 2", "Other"]);
         assert!((a.parts[1].volume - 64.0).abs() < 1e-3);
         assert!(a.parts.iter().all(|p| p.color.is_none()));
+
+        // With colors from the definition: each solid takes the color of its
+        // part. A part without a color and the "Other" part get none.
+        let split = crate::csg_split::Split {
+            parts: vec![
+                part("Spine", [0xff; 3], &spine),
+                part("Pin", [0xff; 3], &pins),
+            ],
+            kind: Kind::Labeled,
+            colors: vec![None, Some([1, 2, 3])],
+            ..Default::default()
+        };
+        let a = Assembly::from_split(&Mesh::from_soup(&main), &split);
+        let colors: Vec<_> = a.parts.iter().map(|p| p.color).collect();
+        assert_eq!(colors, [None, Some([1, 2, 3]), Some([1, 2, 3]), None]);
     }
 
     #[test]

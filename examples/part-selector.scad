@@ -1,10 +1,10 @@
 // A box with a lid and four feet, with a part parameter.
 // The part parameter works in plain OpenSCAD too: pick one part to see or
 // export only that part. CoCAD builds each value on its own. The part names
-// are in part-selector.yml. The lid sits on the box, so in the "all" build
-// they touch, but they stay separate parts. The four feet are one value:
-// CoCAD names them "Foot 1" to "Foot 4". The coin has the % mark: it shows
-// only with "all", and it is not printed.
+// and colors are in part-selector.yml. The lid sits on the box, so in the
+// "all" build they touch, but they stay separate parts. The four feet are one
+// value: CoCAD names them "Foot 1" to "Foot 4". The coin has the % mark: it
+// shows only with "all", and it is not printed.
 
 /* [Parts] */
 part = "all"; // [all, box, lid, feet]
