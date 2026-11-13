@@ -17,9 +17,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install build and test packages
+        # CoCAD needs an OpenSCAD build with the Manifold backend. Ubuntu has
+        # only 2021.01, so the tests use openscad-nightly from the OpenSCAD
+        # repository on download.opensuse.org.
         run: |
+          repo=https://download.opensuse.org/repositories/home:/t-paul/xUbuntu_24.04
+          curl -fsSL "$repo/Release.key" | gpg --dearmor | sudo tee /usr/share/keyrings/openscad-nightly.gpg > /dev/null
+          echo "deb [signed-by=/usr/share/keyrings/openscad-nightly.gpg] $repo/ ./" | sudo tee /etc/apt/sources.list.d/openscad-nightly.list
           sudo apt-get update
-          sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libgl-dev fakeroot openscad
+          sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libgl-dev fakeroot openscad-nightly
+          openscad-nightly --version
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
