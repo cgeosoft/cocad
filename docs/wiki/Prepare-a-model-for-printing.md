@@ -182,7 +182,7 @@ Click **Split**. The plate becomes two print parts:
 - **Base plate 1/2**, 134.9 × 80.0 × 6.0 mm, with the tabs.
 - **Base plate 2/2**, 129.9 × 80.0 × 6.0 mm, with the sockets.
 
-All parts now fit on the bed.
+Each part now fits the print area. The mouse ears make the parts a little larger on the bed. All parts together then need a little more room than 220 × 220 mm, so the label at the top left of the 3D view shows "Larger than the bed. The slicer arranges the parts." Without the mouse ears, all parts fit on the bed. See [step 7](#7-a-smaller-printer).
 
 ![The split plate](https://raw.githubusercontent.com/cgeosoft/cocad/main/assets/guide/app-5-split.jpg)
 
