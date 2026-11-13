@@ -129,16 +129,19 @@ fn too_large(mesh: &Mesh, b: &Bounds, area: &Area) -> Option<Issue> {
     })
 }
 
-/// A `SmallIsland` issue for each small bed island.
+/// A `SmallIsland` issue for each small bed island. An island smaller
+/// than `SLIVER_MM2` is a mesh sliver, for example the tip of a cusp that
+/// the bed chamfer keeps: it is not listed.
 fn small_islands(mesh: &Mesh, layers: Layers, out: &mut Vec<Issue>) {
     let islands = brim::islands(mesh, layers);
-    if !islands.iter().any(brim::Island::small) {
+    let listed = |i: &brim::Island| i.small() && i.area >= SLIVER_MM2;
+    if !islands.iter().any(listed) {
         return;
     }
     let z = brim::island_z(mesh, layers);
     let owner = island_triangles(mesh, &islands, z);
     for (k, isl) in islands.iter().enumerate() {
-        if !isl.small() {
+        if !listed(isl) {
             continue;
         }
         let c = isl.center();
@@ -1041,6 +1044,17 @@ mod tests {
         assert!((i[0].area - 16.0).abs() < 0.15, "{}", i[0].area);
         // The four walls and the bottom of the thin wall.
         assert_eq!(i[0].tris.len(), 10, "{:?}", i[0].tris);
+    }
+
+    #[test]
+    fn a_sliver_on_the_bed_is_no_small_island() {
+        // A block, and a spike of 0.2 x 0.2 mm (0.04 mm²) on the bed.
+        let m = mesh(&[
+            block(Vec3::ZERO, Vec3::new(30.0, 30.0, 2.0)),
+            block(Vec3::new(35.0, 0.0, 0.0), Vec3::new(35.2, 0.2, 1.0)),
+        ]);
+        let i = run(&m, Layers::default(), &Limits::default(), &Area::default());
+        assert!(i.iter().all(|i| i.kind != Kind::SmallIsland), "{i:?}");
     }
 
     #[test]
