@@ -19,11 +19,15 @@
 /* [Plate] */
 // Length of the base plate
 plate_l = 260; // [180:5:320]
+// Width of the base plate
 plate_w = 80; // [60:1:120]
+// Thickness of the base plate
 plate_t = 6; // [4:0.2:10]
+// Corner radius of the base plate
 corner_r = 6; // [1:0.5:15]
 
 /* [Stand] */
+// Width of the stand
 stand_w = 70; // [50:1:100]
 // Lean of the back support from the vertical, in degrees
 lean = 18; // [5:1:30]
@@ -31,22 +35,31 @@ lean = 18; // [5:1:30]
 cable_d = 8; // [5:0.5:12]
 
 /* [Clips] */
+// Diameter of the cable hole in the clips
 clip_hole = 7; // [4:0.5:10]
 
 /* [Logo] */
 // Engrave the CGEO/FAB wordmark on the plate
 logo = true;
+// Height of the letters
 logo_size = 10; // [5:0.5:16]
+// Depth of the engraving
 logo_depth = 0.6; // [0.2:0.2:1.2]
 
 /* [Hardware] */
+// Diameter of the magnets
 magnet_d = 10; // [6:0.5:15]
+// Height of the magnets
 magnet_h = 3; // [1:0.5:4]
+// Diameter of the screws
 screw_d = 4; // [3:0.5:6]
 // Pilot hole in the stand for the screw
 pilot_d = 3.4; // [2:0.1:5]
+// Depth of the pilot hole
 pilot_h = 10; // [5:0.5:15]
+// Diameter of the screw heads
 head_d = 8.6; // [6:0.2:12]
+// Height of the screw heads
 head_h = 2.6; // [1:0.2:4]
 // Gap around the magnets and the screws
 fit = 0.2; // [0:0.05:0.5]
