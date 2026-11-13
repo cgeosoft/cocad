@@ -1,9 +1,9 @@
 /**
  * Small WebGL2 model viewer. No library.
  * Reads the meshes that scripts/website-assets.py writes and draws them in
- * three modes: solid (smooth shaded, with sharp edges kept), wire and slice (layer
- * bands in the shader, and the outline of the current layer, cut from the
- * mesh in this browser).
+ * three modes: solid (smooth shaded, with sharp edges kept), wire and slice
+ * (the Layers button of the page: layer bands in the shader, and the outline
+ * of the current layer, cut from the mesh in this browser).
  */
 (function () {
   "use strict";

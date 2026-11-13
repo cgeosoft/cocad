@@ -189,7 +189,7 @@
       host.append(box);
     });
     const total = Object.keys(models[state.slug].variants).length;
-    host.append(el("p", "param-note mono", `This page holds ${total} prebuilt meshes of ${models[state.slug].file}. The app renders any value.`));
+    host.append(el("p", "param-note mono", `This page holds ${total} prebuilt meshes of ${models[state.slug].file}. The app builds the model for any value.`));
     syncControls();
   }
 
@@ -279,7 +279,7 @@
 
   // The texts of one turn. The animated run and a stage click both use them.
   const paramsArgs = (t) => JSON.stringify({ values: t.prompt.set });
-  const renderText = (d) => `rendered in ${d.seconds.toFixed(2)} s, ${fmt(d.triangles)} triangles`;
+  const buildText = (d) => `built in ${d.seconds.toFixed(2)} s, ${fmt(d.triangles)} triangles`;
   const sliceText = (d) => `${fmt(d.layers)} layers, ${d.filament_m} m, ${d.grams} g, ${d.print_time}`;
 
   function agentLine(d) {
@@ -343,7 +343,7 @@
     await applyMesh(true);
     if (!alive()) return;
     const d = current();
-    finish(params, renderText(d));
+    finish(params, buildText(d));
     await sleep(900);
     if (!alive()) return;
 
@@ -385,7 +385,7 @@
         Object.assign(state.values[state.slug], t.prompt.set);
         const d = current();
         const params = toolRow("set_params", paramsArgs(t));
-        finish(params, renderText(d));
+        finish(params, buildText(d));
         addLine(log, params);
         if (n > 1) {
           const slice = toolRow("slice", null);

@@ -4,13 +4,13 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>CoCAD - From prompt to print-ready model</title>
-  <meta name="description" content="A free desktop app for OpenSCAD. An AI agent changes the model over MCP, you check the slice in seconds, then render or export. The fast way to make models for 3D printing.">
+  <meta name="description" content="A free desktop app for OpenSCAD. An AI agent changes the model over MCP. CoCAD puts the parts on the print plate, fixes them for the printer and shows the layers in seconds. Then export STL, 3MF or STEP.">
   <link rel="canonical" href="https://cocad.cgeosoft.com/">
   <link rel="icon" type="image/svg+xml" href="assets/app-icon.svg">
   <link rel="apple-touch-icon" href="assets/icon-512.png">
   <meta name="theme-color" content="#0f1114">
   <meta property="og:title" content="CoCAD - Ask for the change. Check the slice. Print.">
-  <meta property="og:description" content="An AI agent changes the OpenSCAD model over MCP. You see the render and the slice in seconds. Free, MIT, for Linux, Windows and macOS.">
+  <meta property="og:description" content="An AI agent changes the OpenSCAD model over MCP. CoCAD prepares the print plate, and you see the layers in seconds. Free, MIT, for Linux, Windows and macOS.">
   <link rel="alternate" type="text/plain" href="/llms.txt" title="llms.txt">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://cocad.cgeosoft.com/">
@@ -42,6 +42,7 @@
       </a>
       <nav class="main-nav" aria-label="Primary">
         <a href="#loop">The loop</a>
+        <a href="#optimize">Optimize</a>
         <a href="#mcp">MCP</a>
         <a href="#tour">Tour</a>
         <a href="#features">Features</a>
@@ -56,14 +57,14 @@
 
   <main>
     <section class="hero" data-hero>
-      <canvas class="hero-canvas" role="img" aria-label="A twisted vase turns slowly. An agent changes its parameters, the model renders again, and its print layers build up from the bottom."></canvas>
+      <canvas class="hero-canvas" role="img" aria-label="A twisted vase turns slowly. An agent changes its parameters, the model builds again, and its print layers build up from the bottom."></canvas>
       <img class="hero-fallback" src="assets/img/render-vase.webp" alt="Path traced render of the twisted vase example." width="1000" height="750">
       <div class="hero-scrim" aria-hidden="true"></div>
       <div class="container hero-inner">
         <div class="hero-copy">
-          <a class="hero-new" href="#mcp"><span class="pill pill-accent">MCP server</span>Your agent drives the window</a>
+          <a class="hero-new" href="#optimize"><span class="pill pill-accent">Optimize tab</span>Print preparation in the app</a>
           <h1 class="hero-headline">Ask for the change.<br><em>Check the slice.</em><br>Print.</h1>
-          <p class="hero-lede">CoCAD is the fast way to make models for 3D printing. An AI agent changes the OpenSCAD model over MCP. You see the new render and its print layers in seconds, and you catch errors before the printer does.</p>
+          <p class="hero-lede">CoCAD is the fast way to make models for 3D printing. An AI agent changes the OpenSCAD model over MCP. CoCAD builds it, puts the parts on the print plate and shows the layers in seconds, so you catch errors before the printer does.</p>
           <div class="hero-cta">
             <div class="hero-buttons">
               <a href="#downloads" class="btn btn-big" id="primary-download-btn">
@@ -86,8 +87,8 @@
       <div class="hero-trace" aria-hidden="true">
         <ol class="hero-stages mono">
           <li data-hero-stage>Agent</li>
-          <li data-hero-stage>Render</li>
-          <li data-hero-stage>Slice</li>
+          <li data-hero-stage>Build</li>
+          <li data-hero-stage>Layers</li>
         </ol>
         <code class="hero-call" data-hero-call>set_params</code>
         <span class="hero-result mono" data-hero-result></span>
@@ -98,13 +99,13 @@
       <div class="container loop-container">
         <div class="loop-head reveal">
           <p class="label"><span class="dot"></span>The loop</p>
-          <h2 class="big-title">One prompt.<br>Render, slice, <em>next prompt.</em></h2>
+          <h2 class="big-title">One prompt.<br>Build, check, <em>next prompt.</em></h2>
           <p class="lede">Most of the time on a printable model goes to small changes and checks. CoCAD keeps that loop short. Pick a prompt and watch one turn.</p>
         </div>
         <ol class="loop-stages mono reveal" aria-label="Stages of one turn">
           <li><button type="button" class="stage" data-loop-stage><span class="stage-num">1</span><span class="stage-name">Ask</span><span class="stage-meta">The agent edits the model</span><i class="stage-fill"></i></button></li>
-          <li><button type="button" class="stage" data-loop-stage><span class="stage-num">2</span><span class="stage-name">Render</span><span class="stage-meta">OpenSCAD runs in the background</span><i class="stage-fill"></i></button></li>
-          <li><button type="button" class="stage" data-loop-stage><span class="stage-num">3</span><span class="stage-name">Slice</span><span class="stage-meta">Check the layers for errors</span><i class="stage-fill"></i></button></li>
+          <li><button type="button" class="stage" data-loop-stage><span class="stage-num">2</span><span class="stage-name">Build</span><span class="stage-meta">OpenSCAD runs in the background</span><i class="stage-fill"></i></button></li>
+          <li><button type="button" class="stage" data-loop-stage><span class="stage-num">3</span><span class="stage-name">Layers</span><span class="stage-meta">Check the layers for errors</span><i class="stage-fill"></i></button></li>
           <li><button type="button" class="stage" data-loop-stage><span class="stage-num">4</span><span class="stage-name">Finish</span><span class="stage-meta">Export or render a photo</span><i class="stage-fill"></i></button></li>
         </ol>
         <div class="loop-grid reveal">
@@ -114,12 +115,12 @@
               <div class="view-group" role="group" aria-label="View mode">
                 <button type="button" class="view-btn" data-mode="solid" aria-pressed="true">Model</button>
                 <button type="button" class="view-btn" data-mode="wire" aria-pressed="false">Wire</button>
-                <button type="button" class="view-btn" data-mode="slice" aria-pressed="false">Slice</button>
+                <button type="button" class="view-btn" data-mode="slice" aria-pressed="false">Layers</button>
               </div>
             </div>
             <div class="view-stage">
               <canvas role="img" aria-label="Live 3D view of the example model. Drag to orbit. Click, then use the wheel to zoom."></canvas>
-              <img class="view-fallback" src="assets/img/screen-slice.webp" alt="CoCAD with the slice preview of the honeycomb tray example." loading="lazy">
+              <img class="view-fallback" src="assets/img/screen-layers.webp" alt="CoCAD with the layers preview of the desk dock example on the print plate." loading="lazy">
               <div class="view-presets" role="group" aria-label="Camera">
                 <button type="button" class="view-btn" data-view="iso">Iso</button>
                 <button type="button" class="view-btn" data-view="top">Top</button>
@@ -164,30 +165,76 @@
       </div>
       <div class="rule-grid">
         <article class="card rule reveal">
-          <p class="rule-tag mono">Render</p>
-          <p class="rule-value mono">0.24&ndash;0.41 s</p>
+          <p class="rule-tag mono">Build</p>
+          <p class="rule-value mono">0.09&ndash;0.16 s</p>
           <h3>Each change, in view</h3>
           <p>OpenSCAD runs with the Manifold backend. This is the range for the 72 meshes on this page.</p>
         </article>
         <article class="card rule reveal">
-          <p class="rule-tag mono">Slice</p>
-          <p class="rule-value mono">&lt; 50 ms</p>
+          <p class="rule-tag mono">Layers</p>
+          <p class="rule-value mono">4&ndash;65 ms</p>
           <h3>Layers, not a slicer session</h3>
-          <p>See walls, infill and skin at real line width. You do not export or open a slicer for a first check.</p>
+          <p>See walls, infill and skin at real line width, with no slicer. This is the range for the same 72 meshes.</p>
         </article>
         <article class="card rule reveal">
           <p class="rule-tag mono">Agent</p>
-          <p class="rule-value mono">16 tools</p>
+          <p class="rule-value mono">18 tools</p>
           <h3>It sees what you see</h3>
-          <p>The agent reads the render state, the OpenSCAD log, open edges and slice data. Then it fixes what it finds.</p>
+          <p>The agent reads the build state, the OpenSCAD log, open edges, the plates and the layers. Then it fixes what it finds.</p>
         </article>
         <article class="card rule reveal">
           <p class="rule-tag mono">Finish</p>
           <p class="rule-value mono">STL 3MF STEP</p>
           <h3>Done means a file</h3>
-          <p>Export from the window or through the agent. Render a studio photo of the part if you want one.</p>
+          <p>STL and 3MF get the print plate. STEP gets the model. Export from the window or through the agent.</p>
         </article>
       </div>
+    </section>
+
+    <section class="section container" id="optimize">
+      <div class="reveal">
+        <p class="label"><span class="dot"></span>Optimize tab <span class="pill pill-accent" data-since="0.7.0">Next release</span></p>
+        <h2 class="big-title">The file holds the model.<br><em>CoCAD prepares the print.</em></h2>
+        <p class="lede">Model the parts in their place in use, with no print code in the file. The Optimize tab puts them on the print plate, changes them for the printer and lists the problems that stay. All print fixes are off until you turn them on.</p>
+      </div>
+      <div class="mcp-grid">
+        <div class="mcp-setup reveal">
+          <figure class="shot">
+            <button type="button" class="zoom" data-zoom="assets/img/screen-optimize.webp" aria-label="Enlarge screenshot">
+              <img src="assets/img/screen-optimize.webp" width="1600" height="1040" alt="The Optimize tab with the desk dock example. The base plate is split in two pieces with a dovetail joint. The stand and three clips are on the same plate." loading="lazy" decoding="async">
+            </button>
+            <figcaption class="mono">The desk dock example: the base plate in two pieces, the print fixes on.</figcaption>
+          </figure>
+          <figure class="shot">
+            <button type="button" class="zoom" data-zoom="assets/img/screen-fixes.webp" aria-label="Enlarge screenshot">
+              <img src="assets/img/screen-fixes.webp" width="1600" height="1040" alt="The Print fixes card: teardrop holes, bridges, bed chamfer and brim, each with a switch and the number of places. The Check card says that it found no problems." loading="lazy" decoding="async">
+            </button>
+            <figcaption class="mono">Each fix shows the number of places or parts that it changed.</figcaption>
+          </figure>
+        </div>
+        <div class="card tools reveal">
+          <table>
+            <caption class="sr-only">What the Optimize tab does</caption>
+            <tbody>
+              <tr><th>Plates</th><td>All parts or one part. Parts with the same shape are one row with a count. When the parts do not fit on one bed, CoCAD fills more plates.</td></tr>
+              <tr><th>Orientation</th><td>Off by default. With custom orientation on, Auto puts a part on its best face, or you select the face for the bed.</td></tr>
+              <tr><th>Teardrop holes</th><td>Round holes with a horizontal axis get a 45 degree point at the top.</td></tr>
+              <tr><th>Bridges</th><td>Bridged ceilings start on straight edges. A hole above a bridge gets sacrificial layers or a stepped bridge.</td></tr>
+              <tr><th>Bed chamfer</th><td>A 45 degree chamfer of the bed edges, in whole layers.</td></tr>
+              <tr><th>Brim</th><td>A one-layer brim on small bed islands, with a gap to the rest of the part.</td></tr>
+              <tr><th>Check</th><td>Overhangs, long bridges, arcs in bridges, small islands and parts that are too large for the bed.</td></tr>
+              <tr><th>Auto split</th><td>For a part that is too large for the bed, CoCAD proposes cuts with a flat, pins or dovetail joint. You accept the split.</td></tr>
+              <tr><th>Layers</th><td>Walls, infill and skin of the plate, with a time, length and weight estimate.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <ul class="guard-list reveal">
+        <li><b>In the file.</b> The fixes change the mesh, so the exported STL or 3MF has them.</li>
+        <li><b>Reference parts.</b> Parts with the <code class="inline">%</code> mark show in gray. They are not printed or exported.</li>
+        <li><b>Export card.</b> STL and 3MF write the print plate. A 3MF has one object for each part. STEP writes the model.</li>
+        <li><b>Printer presets.</b> File &gt; Settings &gt; Printer sets the default print area. Each model can have its own.</li>
+      </ul>
     </section>
 
     <section class="section mcp" id="mcp">
@@ -216,7 +263,7 @@
             </div>
             <figure class="shot">
               <button type="button" class="zoom" data-zoom="assets/img/screen-agent.webp" aria-label="Enlarge screenshot">
-                <img src="assets/img/screen-agent.webp" width="1120" height="700" alt="CoCAD with the vase example. A message in the view says that MCP changed sides, twist and taper." loading="lazy" decoding="async">
+                <img src="assets/img/screen-agent.webp" width="1600" height="1040" alt="CoCAD with the vase example. A message in the view says that MCP changed sides, twist and taper." loading="lazy" decoding="async">
               </button>
               <figcaption class="mono">The window names each change from the agent.</figcaption>
             </figure>
@@ -225,17 +272,18 @@
             <table>
               <caption class="sr-only">MCP tools</caption>
               <tbody>
-                <tr><th class="mono">get_state</th><td>File, render status, last error, mesh data, OpenSCAD log</td></tr>
+                <tr><th class="mono">get_state</th><td>File, build status, last error, mesh data, plates, OpenSCAD log</td></tr>
                 <tr><th class="mono">get_params</th><td>All Customizer parameters with limits and options</td></tr>
                 <tr><th class="mono">get_source</th><td>Source of the <code class="inline">.scad</code> file</td></tr>
                 <tr><th class="mono">view_model</th><td>Render an image and return it to the client</td></tr>
                 <tr><th class="mono">open_model</th><td>Open a file. Starts the app when it is not running</td></tr>
-                <tr><th class="mono">set_params<br>reset_params</th><td>Change or reset parameters, then render</td></tr>
-                <tr><th class="mono">render</th><td>Run OpenSCAD again</td></tr>
-                <tr><th class="mono">slice</th><td>Layers, filament, weight and a rough print time</td></tr>
-                <tr><th class="mono">export_model</th><td>Write STL, 3MF or STEP</td></tr>
+                <tr><th class="mono">set_params<br>reset_params</th><td>Change or reset parameters, then build</td></tr>
+                <tr><th class="mono">build</th><td>Run OpenSCAD again. The old name <code class="inline">render</code> also works</td></tr>
+                <tr><th class="mono">get_optimize<br>set_optimize</th><td>Read or change the print preparation: print area, parts, copies, orientation, fixes and split <span class="pill pill-accent" data-since="0.7.0">Next release</span></td></tr>
+                <tr><th class="mono">slice</th><td>Layers, filament, weight and a rough print time of the current plate</td></tr>
+                <tr><th class="mono">export_model</th><td>Write the print plate as STL or 3MF, or the model as STEP</td></tr>
                 <tr><th class="mono">save_photo</th><td>Write a path traced PNG</td></tr>
-                <tr><th class="mono">set_view</th><td>Tab, camera, wireframe, grid and slice layer</td></tr>
+                <tr><th class="mono">set_view</th><td>Tab (Model, Optimize, Render), camera, wireframe, grid and layer</td></tr>
                 <tr><th class="mono">load_parameter_set<br>save_parameter_set</th><td>Load or save a named set</td></tr>
                 <tr><th class="mono">list_windows<br>select_window</th><td>Choose a window when more than one is open</td></tr>
               </tbody>
@@ -244,7 +292,7 @@
         </div>
         <ul class="guard-list reveal">
           <li><b>Limits apply.</b> One bad value rejects the whole call.</li>
-          <li><b>No stale output.</b> Export and photo fail when the last render failed.</li>
+          <li><b>No stale output.</b> Export and photo fail when the last build failed.</li>
           <li><b>No overwrite.</b> Files stay unless the call sets <code class="inline">overwrite</code>.</li>
           <li><b>Local only.</b> Each window listens on 127.0.0.1 and needs a random token.</li>
         </ul>
@@ -261,23 +309,24 @@
       </div>
       <div class="tour-tabs reveal" role="tablist" aria-label="Screens">
         <i class="tour-ink" aria-hidden="true"></i>
-        <button type="button" role="tab" class="tour-tab" data-shot="assets/img/screen-slice.webp" data-text="Slice preview. Walls, infill and skin as round strands, with a layer slider and a time, length and weight estimate.">Slice</button>
-        <button type="button" role="tab" class="tour-tab" data-shot="assets/img/screen-model.webp" data-text="Customizer panel. Sliders, dropdowns, switches, text and vectors, read from the comments in your .scad file.">Customizer</button>
-        <button type="button" role="tab" class="tour-tab" data-shot="assets/img/screen-photo.webp" data-text="Photo view. A path tracer renders the current camera in a plastic color and finish you choose, on all CPU cores.">Photo</button>
+        <button type="button" role="tab" class="tour-tab" data-shot="assets/img/screen-optimize.webp" data-text="Optimize tab. The print parts on the plate, with the count of same parts, the fit on the bed and a split for a part that is too large.">Optimize</button>
+        <button type="button" role="tab" class="tour-tab" data-shot="assets/img/screen-layers.webp" data-text="Layers preview of the plate. Walls, infill and skin as round strands, with a layer slider and a time, length and weight estimate.">Layers</button>
+        <button type="button" role="tab" class="tour-tab" data-shot="assets/img/screen-model.webp" data-text="Model tab. The Customizer panel reads the comments in your .scad file. Parts with the % mark show in gray and are not printed.">Model</button>
+        <button type="button" role="tab" class="tour-tab" data-shot="assets/img/screen-render.webp" data-text="Render tab. A path tracer renders the current camera in a plastic color and finish you choose, on all CPU cores.">Render</button>
         <button type="button" role="tab" class="tour-tab" data-shot="assets/img/screen-sets.webp" data-text="Parameter sets. Named sets in a .json file that OpenSCAD reads too.">Sets</button>
-        <button type="button" role="tab" class="tour-tab" data-shot="assets/img/screen-export.webp" data-text="Mesh check and export. Size, volume, triangles and open edges, then STL, 3MF or STEP.">Export</button>
+        <button type="button" role="tab" class="tour-tab" data-shot="assets/img/screen-export.webp" data-text="Mesh check and export. Size, volume, triangles and open edges. The Export card stays at the bottom of each tab.">Export</button>
       </div>
       <div class="tour-frame reveal">
-        <img data-tour-img src="assets/img/screen-slice.webp" width="1600" height="1040" alt="CoCAD screenshot." loading="lazy" decoding="async">
+        <img data-tour-img src="assets/img/screen-optimize.webp" width="1600" height="1040" alt="CoCAD screenshot." loading="lazy" decoding="async">
       </div>
-      <p class="tour-text mono" data-tour-text aria-live="polite">Slice preview. Walls, infill and skin as round strands, with a layer slider and a time, length and weight estimate.</p>
+      <p class="tour-text mono" data-tour-text aria-live="polite">Optimize tab. The print parts on the plate, with the count of same parts, the fit on the bed and a split for a part that is too large.</p>
     </section>
 
     <section class="section container photo" id="photo">
       <div class="reveal">
-        <p class="label">Photo render</p>
-        <h2 class="big-title">Happy with the slice?<br><em>See the part.</em></h2>
-        <p class="lede">The path tracer makes a studio photo of the current view. The agent can run it too, or you can use the CLI.</p>
+        <p class="label">Render tab</p>
+        <h2 class="big-title">Happy with the plate?<br><em>See the part.</em></h2>
+        <p class="lede">The Render tab makes a path traced studio photo of the current view. The agent can run it too, or you can use the CLI.</p>
       </div>
       <div class="gallery">
         <button type="button" class="zoom reveal" data-zoom="assets/img/render-gear.webp" aria-label="Enlarge gear render"><img src="assets/img/render-gear.webp" width="1000" height="750" alt="Path traced render of the gear example." loading="lazy" decoding="async"></button>
@@ -297,14 +346,17 @@
         <h2 class="big-title">Also without an agent</h2>
       </div>
       <ol class="ledger-list">
-        <li class="card reveal"><h3>Customizer panel</h3><p>It reads the same comments as OpenSCAD. The model renders again when you change a value.</p></li>
+        <li class="card reveal"><h3>Customizer panel</h3><p>It reads the same comments as OpenSCAD. The model builds again when you change a value.</p></li>
         <li class="card reveal"><h3>Live reload</h3><p>Keep your editor open. When the file changes on disk, the model reloads and your values stay.</p></li>
         <li class="card reveal"><h3>Parameter sets</h3><p>Save named sets in the OpenSCAD <code class="inline">.json</code> format.</p></li>
-        <li class="card reveal"><h3>Slice preview</h3><p>Walls, infill and skin, with a time, length and weight estimate. It writes no G-code.</p></li>
+        <li class="card reveal"><h3>Layers preview</h3><p>Walls, infill and skin of the print plate, with a time, length and weight estimate. It writes no G-code.</p></li>
         <li class="card reveal"><h3>Mesh check</h3><p>Size, volume, triangles and open edges. Back faces show in purple.</p></li>
+        <li class="card reveal"><h3>Reference parts <span class="pill pill-accent" data-since="0.7.0">Next release</span></h3><p>Parts with the <code class="inline">%</code> mark show in gray, as in OpenSCAD. They are not printed or exported.</p></li>
+        <li class="card reveal"><h3>Printer presets <span class="pill pill-accent" data-since="0.7.0">Next release</span></h3><p>Five printer presets and a default print area in the settings. Each model can have its own area.</p></li>
         <li class="card reveal"><h3>Real STEP export</h3><p>AP214 with planar faces. A closed mesh becomes one solid that CAD tools can edit.</p></li>
-        <li class="card reveal"><h3>3MF with parameters</h3><p>The parameter values go in the metadata of the file.</p></li>
-        <li class="card reveal"><h3>Batch CLI</h3><p>Run <code class="inline">export</code>, <code class="inline">slice</code> and <code class="inline">photo</code> without the window.</p></li>
+        <li class="card reveal"><h3>3MF with parameters</h3><p>The parameter values go in the metadata of the file. Each print part is a separate object.</p></li>
+        <li class="card reveal"><h3>Batch CLI</h3><p>Run <code class="inline">export</code>, <code class="inline">slice</code> and <code class="inline">photo</code> without the window. Export and slice take the print options: plate, part, print area, orientation and fixes.</p></li>
+        <li class="card reveal"><h3>Desk dock example <span class="pill pill-accent" data-since="0.7.0">Next release</span></h3><p>File &gt; Examples &gt; Desk dock shows each feature of the Optimize tab.</p></li>
         <li class="card reveal"><h3>Three systems</h3><p>Linux, Windows and macOS, with dark and light themes.</p></li>
       </ol>
     </section>
@@ -333,8 +385,8 @@
         </div>
       </div>
       <div class="card gate reveal">
-        <p class="label"><span class="dot"></span>You also need OpenSCAD</p>
-        <p class="gate-text">Install a <a href="https://openscad.org/downloads.html#snapshots" target="_blank" rel="noopener noreferrer">development snapshot</a>. It has the Manifold backend. The 2021 release also works, but a model that takes 13 s with CGAL can take 0.3 s with Manifold.</p>
+        <p class="label"><span class="dot"></span>You also need OpenSCAD <span class="pill pill-accent" data-since="0.7.0">Next release</span></p>
+        <p class="gate-text">CoCAD needs an OpenSCAD <a href="https://openscad.org/downloads.html#snapshots" target="_blank" rel="noopener noreferrer">development snapshot</a> (nightly) with the Manifold backend. The 2021.01 release does not have Manifold. On Debian and Ubuntu, add the OpenSCAD repository and install <code class="inline">openscad-nightly</code>. On Windows and macOS, install a snapshot from the download page. When CoCAD finds no snapshot, the window shows these steps.</p>
       </div>
       <p class="caption mono">Older versions and release notes are on <a href="https://github.com/cgeosoft/cocad/releases" target="_blank" rel="noopener noreferrer">GitHub releases</a>.</p>
     </section>
@@ -355,11 +407,15 @@
         </details>
         <details>
           <summary>Does it replace my slicer?</summary>
-          <p>No. The slice is for preview only. It has no travel moves, supports or bridges, and it does not write G-code. Export a 3MF or STL for your slicer.</p>
+          <p>No. CoCAD prepares the parts and shows a layers preview, but it does not write G-code. The preview has no travel moves and no supports. Export the plate as 3MF or STL for your slicer.</p>
         </details>
         <details>
           <summary>What errors does the check show?</summary>
-          <p>The mesh check shows open edges and back faces. The slice view shows each layer, so you can see gaps, thin walls and details that vanish. The OpenSCAD console shows script errors. The agent reads the same log and data.</p>
+          <p>The mesh check shows open edges and back faces. The Check card of the Optimize tab lists overhangs, long bridges, arcs in bridges, small bed islands and parts that are too large for the bed. The layers preview shows each layer, so you can see gaps, thin walls and details that vanish. The OpenSCAD console shows script errors. The agent reads the same log and data.</p>
+        </details>
+        <details>
+          <summary>Why does CoCAD need an OpenSCAD snapshot?</summary>
+          <p>CoCAD builds the models with the Manifold backend of OpenSCAD. The print fixes and the split run OpenSCAD again for each changed part, so a slow backend makes the Optimize tab slow. The 2021.01 release has only the CGAL backend.</p>
         </details>
         <details>
           <summary>Does my model leave my computer?</summary>

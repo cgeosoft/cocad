@@ -1,20 +1,29 @@
 # CoCAD
 
-> CoCAD is a free, MIT licensed desktop app for OpenSCAD models on Linux, Windows and macOS. An AI agent changes the model over MCP, the window renders it again, and the user checks a slice preview for errors before printing. It exports STL, 3MF and STEP, and it makes path traced photo renders.
+> CoCAD is a free, MIT licensed desktop app for OpenSCAD models on Linux, Windows and macOS. An AI agent changes the model over MCP, and the window builds it again. The Optimize tab prepares the parts for the printer and shows a layers preview. The app exports STL, 3MF and STEP, and the Render tab makes path traced photos.
 
-OpenSCAD does the geometry through its CLI, so the user must install OpenSCAD too. A development snapshot with the Manifold backend is much faster than the 2021 release. The slice view is for preview only: it has no travel moves, supports or bridges, and it writes no G-code. Usage analytics and error reports are optional, and each stays off until the user accepts it.
+OpenSCAD does the geometry through its CLI, so the user must install OpenSCAD too. CoCAD needs an OpenSCAD development snapshot (nightly) with the Manifold backend. The 2021.01 release does not have Manifold. Get a snapshot at https://openscad.org/downloads.html#snapshots. When CoCAD finds no snapshot, the window shows the install steps.
+
+The right panel has three tabs: Model (build, parts, explode, section cut, mesh check), Optimize (print preparation and the layers preview) and Render (path traced photo). The Export card at the bottom of each tab writes the print plate as STL or 3MF, or the model as STEP. A 3MF of a plate has one object for each print part.
+
+The Optimize tab puts the print parts on one or more plates and counts parts with the same shape. Custom orientation is off by default: Auto puts a part on its best face, or the user selects the face. The print fixes are teardrop holes, bridges, bed chamfer and a brim on small bed islands. All fixes are off until the user turns them on, and they change the exported mesh. The Check card lists overhangs, long bridges, arcs in bridges, small islands and parts that are too large for the bed. For a part that is too large, CoCAD proposes a split with a flat, pins or dovetail joint. Parts with the OpenSCAD `%` mark are reference parts: they show in gray and are not printed or exported. File > Settings > Printer has presets and the default print area.
+
+The layers preview is not a slicer: it has no travel moves or supports, and it writes no G-code. Usage analytics and error reports are optional, and each stays off until the user accepts it.
 
 ## Docs
 
-- [Website](https://cocad.cgeosoft.com/): Overview, the agent loop, MCP setup and downloads
-- [README](https://raw.githubusercontent.com/cgeosoft/cocad/main/README.md): Install, usage, MCP tools, parameter sets, CLI, Customizer syntax and build steps
+- [Website](https://cocad.cgeosoft.com/): Overview, the agent loop, the Optimize tab, MCP setup and downloads
+- [README](https://raw.githubusercontent.com/cgeosoft/cocad/main/README.md): Short overview with links to the wiki
+- [Wiki](https://github.com/cgeosoft/cocad/wiki): Install, first steps, each feature, the CLI and the build steps
+- [Optimize tab](https://github.com/cgeosoft/cocad/wiki/Optimize): Plates, orientation, print fixes, the check, the split and the layers preview
 - [Releases](https://github.com/cgeosoft/cocad/releases): Downloads and release notes
 
 ## MCP
 
-- [MCP server](https://github.com/cgeosoft/cocad#mcp-server): Client setup, the tool list, behavior and security
+- [AI assistant](https://github.com/cgeosoft/cocad/wiki/AI-assistant): Client setup
+- [MCP reference](https://github.com/cgeosoft/cocad/wiki/MCP-reference): Setup, the tool list and the behavior
 
-The client runs `cocad mcp` as a stdio server. Tools: `get_state`, `get_params`, `get_source`, `view_model`, `open_model`, `set_params`, `reset_params`, `render`, `slice`, `export_model`, `save_photo`, `set_view`, `load_parameter_set`, `save_parameter_set`, `list_windows`, `select_window`.
+The client runs `cocad mcp` as a stdio server. Tools: `get_state`, `get_params`, `get_source`, `view_model`, `open_model`, `set_params`, `reset_params`, `build` (the old name `render` also works), `get_optimize`, `set_optimize`, `slice`, `export_model`, `save_photo`, `set_view`, `load_parameter_set`, `save_parameter_set`, `list_windows`, `select_window`.
 
 ## Optional
 
