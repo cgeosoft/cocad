@@ -182,7 +182,7 @@ fn path_len(p: &Path) -> f32 {
 
 /// Cuts the triangles at height `z` and joins the segments into closed loops.
 /// Outer loops run counter-clockwise, holes clockwise.
-fn cut(mesh: &Mesh, tris: &[u32], z: f32) -> Vec<Vec<Vec2>> {
+pub(crate) fn cut(mesh: &Mesh, tris: &[u32], z: f32) -> Vec<Vec<Vec2>> {
     type Edge = (u32, u32);
     let point = |e: Edge| -> Vec2 {
         // Same edge -> same float result, whatever triangle asks.
@@ -257,7 +257,7 @@ fn cut(mesh: &Mesh, tris: &[u32], z: f32) -> Vec<Vec<Vec2>> {
 
 /// Removes points closer than `tol` to the previous kept point, and
 /// points on a straight line.
-fn simplify(pts: Vec<Vec2>, tol: f32) -> Vec<Vec2> {
+pub(crate) fn simplify(pts: Vec<Vec2>, tol: f32) -> Vec<Vec2> {
     let mut out: Vec<Vec2> = Vec::with_capacity(pts.len());
     for p in pts {
         if out.last().is_none_or(|q: &Vec2| q.distance(p) > tol) {
@@ -281,14 +281,14 @@ fn simplify(pts: Vec<Vec2>, tol: f32) -> Vec<Vec2> {
         .collect()
 }
 
-fn area(p: &[Vec2]) -> f32 {
+pub(crate) fn area(p: &[Vec2]) -> f32 {
     let n = p.len();
     (0..n).map(|i| p[i].perp_dot(p[(i + 1) % n])).sum::<f32>() * 0.5
 }
 
 /// Moves a loop `d` to its left (into the material). Returns None when the
 /// loop disappears or flips.
-fn offset(p: &[Vec2], d: f32) -> Option<Vec<Vec2>> {
+pub(crate) fn offset(p: &[Vec2], d: f32) -> Option<Vec<Vec2>> {
     let n = p.len();
     let left = |a: Vec2, b: Vec2| (b - a).normalize_or_zero().perp();
     let out: Vec<Vec2> = (0..n)

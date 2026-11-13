@@ -11,6 +11,7 @@ mod mcp;
 mod mesh;
 mod net;
 mod openscad;
+mod optimize;
 mod params;
 mod parts;
 mod pathtrace;
