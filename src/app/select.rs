@@ -164,9 +164,9 @@ impl App {
         let (origin, dir) = self.cam.ray(aspect, ndc);
         let styles = self.part_styles();
         let offsets: Vec<Vec3> = styles.iter().map(|s| s.offset).collect();
-        let ghost: Vec<bool> = styles.iter().map(|s| s.alpha < 1.0).collect();
+        let alpha: Vec<f32> = styles.iter().map(|s| s.alpha).collect();
         let planes = self.view3d.clip_planes();
-        a.pick(origin, dir, &offsets, &planes, &ghost)
+        a.pick(origin, dir, &offsets, &planes, &alpha)
             .map(|(i, _)| i)
     }
 
@@ -354,6 +354,7 @@ impl App {
                             act = Some(Act::Focus(i));
                         }
                         if part.is_some()
+                            && !p.reference
                             && ui::menu_item(ui, "Change color…", "", true, false).clicked()
                         {
                             act = Some(Act::Color(p.name.clone()));
@@ -470,6 +471,7 @@ mod tests {
             },
             center: Vec3::splat(0.5),
             volume: 1.0,
+            reference: false,
         }
     }
 

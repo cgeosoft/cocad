@@ -41,7 +41,8 @@ pub struct PartStyle {
     pub color: [f32; 3],
     /// Movement of the part, in mm.
     pub offset: Vec3,
-    /// 1 is opaque. Transparent parts draw after the opaque parts.
+    /// 1 is opaque. Transparent parts draw after the opaque parts. 0 hides
+    /// the part.
     pub alpha: f32,
     /// Brighter, with an accent rim.
     pub highlight: bool,
@@ -815,7 +816,9 @@ impl Renderer {
                 // In a cut, the inside of a part shows in a dark part color,
                 // not as open geometry. With cut faces, it has the color of
                 // the cut face: the edge pixels of the cut face then agree.
-                let back = if planes.is_empty() {
+                // Through a transparent part, the inside shows in a dark
+                // part color too, for example a reference part.
+                let back = if planes.is_empty() && s.alpha >= 1.0 {
                     PURPLE
                 } else if caps && s.alpha >= 1.0 {
                     s.color.map(|c| c * CAP_SHADE)
@@ -904,7 +907,7 @@ impl Renderer {
             }
 
             let mut clear: Vec<(f32, usize)> = (0..self.parts.len())
-                .filter(|&i| style(i).alpha < 1.0)
+                .filter(|&i| style(i).alpha > 0.0 && style(i).alpha < 1.0)
                 .map(|i| {
                     let at = self.parts[i].center + style(i).offset;
                     (at.distance_squared(view.eye), i)

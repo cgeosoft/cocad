@@ -812,24 +812,40 @@ impl App {
 
     /// Finds the parts of the new mesh in the background. The parts then
     /// replace the shells of the mesh. With all parts of a multicolor model
-    /// shown, each part of the `cocad_part` list renders. A model without
+    /// shown, each part of the `cocad_part` list builds. A model without
     /// that list divides at its module instances (see `csg_split.rs`). A
-    /// model that shows one part of its list keeps the shells.
+    /// model that shows one part of its list keeps the shells, in the color
+    /// of that part. In all three cases, the `%` subtrees of the model
+    /// build as reference parts. Call it after `self.log` has the log of
+    /// the build.
     fn color_parts(&mut self, params: Vec<Param>) {
         self.cancel_parts();
         let Some(file) = self.file.clone() else {
             return;
         };
         let cfg = self.cfg.clone();
+        // The same values as the main build.
+        let defines = params::defines(&params);
         if crate::parts::needs_render(&params) {
-            self.start_parts_job(false, "Building the named parts…", move |cancel| {
-                crate::parts::render(&cfg, &file, &params, cancel).map(Some)
+            self.start_parts_job(false, None, "Building the named parts…", move |cancel| {
+                let parts = crate::parts::render(&cfg, &file, &params, cancel)?;
+                let references =
+                    crate::csg_split::render_references(&cfg, &file, &defines, cancel)?;
+                Ok(Some(crate::csg_split::Split { parts, references }))
             });
         } else if crate::parts::names(&params).is_empty() {
-            // The same values as the main render.
-            let defines = params::defines(&params);
-            self.start_parts_job(true, "Finding the parts…", move |cancel| {
+            self.start_parts_job(true, None, "Finding the parts…", move |cancel| {
                 crate::csg_split::render(&cfg, &file, &defines, cancel)
+            });
+        } else {
+            let paint = crate::parts::shown_color(&params, &self.log);
+            self.start_parts_job(true, paint, "Finding the parts…", move |cancel| {
+                let references =
+                    crate::csg_split::render_references(&cfg, &file, &defines, cancel)?;
+                Ok((!references.is_empty()).then(|| crate::csg_split::Split {
+                    parts: Vec::new(),
+                    references,
+                }))
             });
         }
     }
@@ -838,13 +854,14 @@ impl App {
     /// one by one. When it is done, its parts replace the shells of the mesh
     /// in the 3D view (see `Assembly::from_parts`). With `split_shells`, each
     /// shell of a part is one part. When `render` gives `None`, the shells
-    /// stay. A new render or file cancels the job. The Parts card shows
-    /// `note` while the job runs.
+    /// stay. `paint` gives all printed parts one color. A new build or file
+    /// cancels the job. The Parts card shows `note` while the job runs.
     fn start_parts_job(
         &mut self,
         split_shells: bool,
+        paint: Option<[u8; 3]>,
         note: &'static str,
-        render: impl FnOnce(&Arc<AtomicBool>) -> anyhow::Result<Option<Vec<crate::parts::Part>>>
+        render: impl FnOnce(&Arc<AtomicBool>) -> anyhow::Result<Option<crate::csg_split::Split>>
         + Send
         + 'static,
     ) {
@@ -857,7 +874,16 @@ impl App {
         let c = cancel.clone();
         std::thread::spawn(move || {
             let r = render(&c)
-                .map(|parts| parts.map(|p| Assembly::from_parts(&mesh, &p, split_shells)))
+                .map(|found| {
+                    found.map(|s| {
+                        let mut a =
+                            Assembly::from_parts(&mesh, &s.parts, split_shells, &s.references);
+                        if let Some(color) = paint {
+                            a.paint_all(color);
+                        }
+                        a
+                    })
+                })
                 .map_err(|e| format!("{e:#}"));
             let _ = tx.send(r);
         });
@@ -897,8 +923,8 @@ impl App {
                     self.mesh = Some(out.mesh);
                     self.mesh_rev += 1;
                     self.set_assembly(Some(out.assembly));
-                    self.color_parts(params);
                     self.log = out.log;
+                    self.color_parts(params);
                     self.last_time = Some(out.elapsed);
                     self.error = None;
                     if self.fit_pending {
