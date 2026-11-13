@@ -102,10 +102,12 @@ mcp set_view '{"part_colors":true,"explode":24,"explode_axis":"z","section":{"y"
 shot 5-parts 3
 quit
 
-# Slice preview.
-start --optimize "$models/honeycomb-tray.scad"
-mcp set_view '{"view":"iso","fit":true,"layer":60}'
-shot 6-slice 2
+# Optimize tab: the desk dock on the plate, with the print fixes on, the
+# clips flat on the bed (Auto) and the base plate split in two pieces.
+start --optimize "$models/desk-dock.scad"
+mcp set_optimize '{"fixes":{"chamfer":true,"teardrops":true,"bridges":true,"brim":true},"parts":{"Part 3":{"orient":"auto"},"Part 1":{"split":{"joint":"dovetail","cuts":[[0,130]],"clearance":0.2}}}}'
+mcp set_view '{"view":"iso","fit":true}'
+shot 6-slice 3
 
 # Photo render.
 quit
@@ -119,10 +121,10 @@ mcp set_params '{"values":{"sides":5,"twist":240,"taper":0.8}}'
 mcp set_view '{"view":"iso","fit":true}'
 shot 8-agent
 
-# Settings on the MCP server page.
+# Settings on the MCP server page (the fifth page in the list).
 xdotool key ctrl+comma
 sleep 1
-xdotool mousemove 320 289 click 1
+xdotool mousemove 320 326 click 1
 shot 9-connect
 xdotool key Escape
 sleep 0.5

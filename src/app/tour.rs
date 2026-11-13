@@ -66,11 +66,11 @@ const STEPS: [Step; 10] = [
     },
     Step {
         title: "Check and export",
-        intro: "The Model tab shows the mesh data and the export buttons.",
+        intro: "The status bar and the Mesh card of the Model tab show the mesh data. The Export card is at the bottom of each tab.",
         points: &[
             "Check the size, volume, triangles and open edges.",
             "Back faces show in purple. Press W for the wireframe.",
-            "Export binary STL, 3MF with the parameters, or STEP AP214.",
+            "STL and 3MF write the print plate of the Optimize tab. STEP writes the model as built.",
             "A model with a cocad_part list shows each part in its color and exports a multicolor 3MF.",
         ],
         image: shot!("4-export"),
@@ -90,7 +90,7 @@ const STEPS: [Step; 10] = [
         title: "Optimize for the printer",
         intro: "The Optimize tab puts the parts on the bed of your printer. Press O to open it.",
         points: &[
-            "Same parts show as one row with a count. Parts that do not fit go to more plates.",
+            "Same parts show as one row with a count. When the parts do not fit on one plate, CoCAD fills more plates.",
             "Custom orientation puts a part on its best face, or on a face that you click.",
             "Turn on print fixes: teardrop holes, bridges, bed chamfer and brims.",
             "Split a part that is too large. The Check card lists the problems.",
@@ -99,7 +99,7 @@ const STEPS: [Step; 10] = [
         image: shot!("6-slice"),
     },
     Step {
-        title: "Photo render",
+        title: "Render a photo",
         intro: "The Render tab path-traces the current view on all CPU cores. Press R to open it.",
         points: &[
             "The image gets cleaner with each sample.",
@@ -130,8 +130,8 @@ const STEPS: [Step; 10] = [
         title: "Settings and shortcuts",
         intro: "You are ready to start.",
         points: &[
-            "File > Settings sets the theme, auto save of sets, the OpenSCAD binary and your \
-             privacy choices.",
+            "File > Settings sets the theme, auto save of sets, the OpenSCAD binary, the default \
+             print area and your privacy choices.",
             "CoCAD needs an OpenSCAD development snapshot with the Manifold backend.",
             "Help > About and shortcuts lists all keys.",
             "The CLI exports, slices and makes photos without the window. Run cocad --help.",
