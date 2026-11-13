@@ -155,6 +155,15 @@ struct PhotoKey {
     samples: u32,
 }
 
+/// The GPU path tracer of the photo renders.
+enum Gpu {
+    /// Not made yet: the first photo makes it.
+    Untried,
+    Ready(pathtrace::gpu::Tracer),
+    /// The context cannot run it, or it failed. Photos render on the CPU.
+    Off,
+}
+
 /// Pages of the Settings window.
 #[derive(Clone, Copy, PartialEq)]
 enum SettingsPage {
@@ -379,6 +388,9 @@ pub struct App {
     /// backend. The window then shows a notice and CoCAD does not build.
     no_manifold: Option<(String, openscad::Probe)>,
     renderer: Option<Arc<Mutex<Renderer>>>,
+    /// The OpenGL context, for the GPU path tracer.
+    gl: Option<Arc<eframe::glow::Context>>,
+    gpu: Gpu,
     toast: Option<(String, Instant)>,
     /// A running export: the written files, or the error.
     export_rx: Option<Receiver<Result<Exported, String>>>,
@@ -553,6 +565,8 @@ impl App {
             settings_page: SettingsPage::Appearance,
             no_manifold: None,
             renderer,
+            gl: cc.gl.clone(),
+            gpu: Gpu::Untried,
             toast: None,
             export_rx: None,
             opt: optimize_tab::Opt::new(cfg_bed, &cfg_preset),
@@ -2677,8 +2691,13 @@ impl App {
                 }
                 Mode::Render => {
                     sep(ui);
+                    let on = match self.photo_job.as_ref().map(|j| j.backend()) {
+                        Some(pathtrace::Backend::Gpu) => "  ·  GPU",
+                        Some(pathtrace::Backend::Cpu) => "  ·  CPU",
+                        None => "",
+                    };
                     ui.label(small(format!(
-                        "Render {} / {}",
+                        "Render {} / {}{on}",
                         self.photo_samples(),
                         self.photo.samples
                     )));
@@ -2722,6 +2741,58 @@ impl App {
         }
     }
 
+    /// The queue of the GPU path tracer. The first call makes the tracer.
+    /// `None` when the GPU cannot render: photos then render on the CPU.
+    fn gpu_queue(&mut self) -> Option<pathtrace::gpu::Queue> {
+        if matches!(self.gpu, Gpu::Untried) {
+            self.gpu = match self.gl.as_deref().map(pathtrace::gpu::Tracer::new) {
+                Some(Ok(t)) => Gpu::Ready(t),
+                Some(Err(e)) => {
+                    eprintln!("gpu render: off, {e}");
+                    Gpu::Off
+                }
+                None => Gpu::Off,
+            };
+        }
+        match &self.gpu {
+            Gpu::Ready(t) => Some(t.queue()),
+            _ => None,
+        }
+    }
+
+    /// Starts a photo render, on the GPU when it can.
+    pub(super) fn photo_job(
+        &mut self,
+        model: pathtrace::Model,
+        cam: pathtrace::Camera,
+        look: pathtrace::Look,
+        size: (usize, usize),
+        samples: u32,
+    ) -> pathtrace::Job {
+        let queue = self.gpu_queue();
+        pathtrace::Job::start_with(queue.as_ref(), model, cam, look, size.0, size.1, samples)
+    }
+
+    /// Renders the GPU photo jobs for one frame.
+    fn step_gpu(&mut self, ctx: &egui::Context) {
+        let (Gpu::Ready(t), Some(gl)) = (&mut self.gpu, &self.gl) else {
+            return;
+        };
+        match t.step(gl) {
+            Ok(busy) => {
+                if busy {
+                    ctx.request_repaint();
+                }
+            }
+            Err(e) => {
+                eprintln!("gpu render: off, {e}");
+                t.shutdown(gl);
+                self.gpu = Gpu::Off;
+                ctx.request_repaint();
+            }
+        }
+    }
+
     /// Runs the photo render for the current view and draws it over the viewport.
     fn photo_view(&mut self, ui: &mut egui::Ui, rect: egui::Rect) {
         if self.mesh.is_none() {
@@ -2758,14 +2829,8 @@ impl App {
                     if at.elapsed() > Duration::from_millis(250)
                         && let Some(model) = self.photo_model()
                     {
-                        self.photo_job = Some(pathtrace::Job::start(
-                            model,
-                            key.cam,
-                            key.look,
-                            size.0,
-                            size.1,
-                            key.samples,
-                        ));
+                        self.photo_job =
+                            Some(self.photo_job(model, key.cam, key.look, size, key.samples));
                         self.photo_key = Some(key);
                         self.photo_tex = None;
                         self.photo_started = Instant::now();
@@ -4221,6 +4286,8 @@ impl eframe::App for App {
             .show(ctx, |ui| self.viewport(ui));
         self.menu_popup(ctx);
         self.update_notice(ctx);
+        // Last, so that the jobs of this frame start now.
+        self.step_gpu(ctx);
     }
 
     fn on_exit(&mut self, gl: Option<&eframe::glow::Context>) {
@@ -4238,6 +4305,9 @@ impl eframe::App for App {
         }
         if let (Some(gl), Some(r)) = (gl, &self.renderer) {
             r.lock().unwrap().destroy(gl);
+        }
+        if let (Some(gl), Gpu::Ready(t)) = (gl, &mut self.gpu) {
+            t.shutdown(gl);
         }
     }
 }

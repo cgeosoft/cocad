@@ -645,7 +645,7 @@ impl App {
 
     /// Starts a photo job that frames the whole model.
     fn photo_job_for(
-        &self,
+        &mut self,
         model: pathtrace::Model,
         view: Option<(f32, f32)>,
         size: (usize, usize),
@@ -654,7 +654,8 @@ impl App {
         let (yaw, pitch) = view.unwrap_or((self.cam.yaw, self.cam.pitch));
         let aspect = size.0 as f32 / size.1 as f32;
         let cam = pathtrace::fit_camera(&model.mesh, yaw, pitch, aspect);
-        pathtrace::Job::start(model, cam, self.photo_look(), size.0, size.1, samples)
+        let look = self.photo_look();
+        self.photo_job(model, cam, look, size, samples)
     }
 
     fn view_image(&mut self, args: &Json, reply: &Reply) -> Outcome {

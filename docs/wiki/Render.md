@@ -55,4 +55,4 @@ The photo shows the model, not the print plate of the [Optimize](Optimize) tab.
 
 ---
 
-**For technical readers.** The render is a path tracer that uses all CPU cores. One sample is one pass over all pixels of the image. `cocad photo` makes a photo in a terminal. See [Command line](Command-line).
+**For technical readers.** The render is a path tracer. It runs on the GPU when the graphics driver has OpenGL 3.3 and is not a software renderer. If not, it uses all CPU cores. The status bar shows `GPU` or `CPU` after the sample count. If the GPU stops during a render, the render continues on the CPU. To select one, set the environment variable `COCAD_RENDER` to `gpu` or `cpu` before you start CoCAD. One sample is one pass over all pixels of the image. `cocad photo` makes a photo in a terminal. It always uses the CPU. See [Command line](Command-line).

@@ -532,7 +532,8 @@ enum GridKey {
     Bed(u32, u32, bool),
 }
 
-unsafe fn program(
+/// Compiles and links a program. `version` is the `#version` line.
+pub(crate) unsafe fn program(
     gl: &glow::Context,
     version: &str,
     vs: &str,

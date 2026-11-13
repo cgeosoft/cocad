@@ -101,7 +101,7 @@ const STEPS: [Step; 10] = [
     },
     Step {
         title: "Render a photo",
-        intro: "The Render tab path-traces the current view on all CPU cores. Press R to open it.",
+        intro: "The Render tab path-traces the current view on the GPU, or on all CPU cores. Press R to open it.",
         points: &[
             "Click Render at the bottom. The image gets cleaner with each sample.",
             "Material sets one color for the model or a color for each part, and the finish.",

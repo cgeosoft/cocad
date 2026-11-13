@@ -22,7 +22,7 @@ The names before 0.7, `--slice` and `--photo`, also work.
 | `cocad sets FILE.scad` | List the [parameter sets](Parameter-sets) of `FILE.yml`. With `--json`, write them in the format of the OpenSCAD Customizer, for `openscad -p`. |
 | `cocad export FILE.scad -o OUT` | Build and write `OUT`. The extension sets the format: `.stl`, `.3mf` or `.step`. STL and 3MF get the print plate, STEP gets the model as built. |
 | `cocad slice FILE.scad` | Slice the plates and show the estimates |
-| `cocad photo FILE.scad -o OUT.png` | Make a path traced photo from the iso view |
+| `cocad photo FILE.scad -o OUT.png` | Make a path traced photo from the iso view. It uses all CPU cores, not the GPU. |
 | `cocad mcp` | Serve MCP on stdin and stdout. See [MCP reference](MCP-reference). |
 | `cocad --help` | Show the usage text |
 | `cocad --version` | Show the version |

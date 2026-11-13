@@ -4,7 +4,9 @@
 use crate::mesh::Mesh;
 use glam::{Vec3, Vec4};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
+
+pub mod gpu;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Studio {
@@ -168,6 +170,7 @@ impl Clip {
 /// What the path tracer renders: a mesh and, if set, the colors of its
 /// triangles and a section cut. Without a paint, the model has the color of
 /// the `Look`.
+#[derive(Clone)]
 pub struct Model {
     pub mesh: Arc<Mesh>,
     pub paint: Option<Arc<Paint>>,
@@ -184,14 +187,37 @@ impl From<Arc<Mesh>> for Model {
     }
 }
 
+/// Where a render runs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Backend {
+    Cpu,
+    Gpu,
+}
+
 pub struct Job {
     pub frame: Arc<Mutex<Frame>>,
     cancel: Arc<AtomicBool>,
+    /// The GPU state of the job. `None` for a CPU job.
+    gpu: Option<Arc<gpu::Shared>>,
 }
 
 impl Job {
     /// Starts rendering on all cores until `max_samples` per pixel.
     pub fn start(
+        model: impl Into<Model>,
+        cam: Camera,
+        look: Look,
+        width: usize,
+        height: usize,
+        max_samples: u32,
+    ) -> Job {
+        Job::start_with(None, model, cam, look, width, height, max_samples)
+    }
+
+    /// Starts rendering on the GPU of `queue`, or on all cores without a
+    /// queue. A GPU job goes on with the CPU when the GPU stops.
+    pub fn start_with(
+        queue: Option<&gpu::Queue>,
         model: impl Into<Model>,
         cam: Camera,
         look: Look,
@@ -205,39 +231,88 @@ impl Job {
             ..Default::default()
         }));
         let cancel = Arc::new(AtomicBool::new(false));
-        let (f, c) = (frame.clone(), cancel.clone());
         let model = model.into();
+        if let Some(q) = queue {
+            let shared = gpu::submit(
+                q,
+                gpu::Shared::new(
+                    model,
+                    cam,
+                    look,
+                    (width, height),
+                    max_samples,
+                    frame.clone(),
+                    cancel.clone(),
+                ),
+            );
+            return Job {
+                frame,
+                cancel,
+                gpu: Some(shared),
+            };
+        }
+        let (f, c) = (frame.clone(), cancel.clone());
         std::thread::spawn(move || {
-            let mut scene = Scene::cached(&model.mesh, look);
-            scene.paint = model.paint;
-            scene.clip = model.clip.filter(|c| !c.planes.is_empty());
-            let mut accum = vec![Vec3::ZERO; width * height];
-            for pass in 0..max_samples {
-                if c.load(Ordering::Relaxed) {
-                    return;
-                }
-                scene.pass(&cam, width, height, pass, &mut accum, &c);
-                if c.load(Ordering::Relaxed) {
-                    return;
-                }
-                let rgba = tonemap(&accum, pass + 1, look.exposure);
-                let mut fr = f.lock().unwrap();
-                fr.rgba = rgba;
-                fr.samples = pass + 1;
-            }
+            run_cpu(&model, cam, look, (width, height), max_samples, &f, &c);
         });
-        Job { frame, cancel }
+        Job {
+            frame,
+            cancel,
+            gpu: None,
+        }
     }
 
     /// Stops the render. The frame keeps the samples that are done.
     pub fn stop(&self) {
         self.cancel.store(true, Ordering::Relaxed);
     }
+
+    /// Where the job renders now.
+    pub fn backend(&self) -> Backend {
+        match &self.gpu {
+            Some(s) if s.on_gpu() => Backend::Gpu,
+            _ => Backend::Cpu,
+        }
+    }
 }
 
 impl Drop for Job {
     fn drop(&mut self) {
         self.cancel.store(true, Ordering::Relaxed);
+    }
+}
+
+/// Renders on all cores until `max_samples` per pixel or `cancel`. A frame
+/// that has samples already (from the GPU, before a fallback) keeps them
+/// until the CPU has more.
+fn run_cpu(
+    model: &Model,
+    cam: Camera,
+    look: Look,
+    (width, height): (usize, usize),
+    max_samples: u32,
+    frame: &Mutex<Frame>,
+    cancel: &AtomicBool,
+) {
+    let mut scene = Scene::cached(&model.mesh, look);
+    scene.paint = model.paint.clone();
+    scene.clip = model.clip.clone().filter(|c| !c.planes.is_empty());
+    let mut accum = vec![Vec3::ZERO; width * height];
+    for pass in 0..max_samples {
+        if cancel.load(Ordering::Relaxed) {
+            return;
+        }
+        scene.pass(&cam, width, height, pass, &mut accum, cancel);
+        if cancel.load(Ordering::Relaxed) {
+            return;
+        }
+        if pass < frame.lock().unwrap().samples {
+            continue;
+        }
+        let rgba = tonemap(&accum, pass + 1, look.exposure);
+        let mut fr = frame.lock().unwrap();
+        fr.rgba = rgba;
+        fr.samples = pass + 1;
     }
 }
 
@@ -339,6 +414,8 @@ struct Geometry {
     floor: f32,
     center: Vec3,
     radius: f32,
+    /// The texture data of the GPU tracer, made on first use.
+    packed: OnceLock<gpu::Packed>,
 }
 
 struct Scene {
@@ -353,6 +430,33 @@ struct Scene {
 }
 
 const EPS: f32 = 1e-4;
+
+/// The colors of a studio. The CPU and the GPU tracer use the same values.
+struct StudioColors {
+    /// Environment at the horizon and at the zenith.
+    horizon: Vec3,
+    zenith: Vec3,
+    /// Strength of the soft box overhead.
+    top: f32,
+    floor: Vec3,
+}
+
+fn studio(s: Studio) -> StudioColors {
+    match s {
+        Studio::Dark => StudioColors {
+            horizon: Vec3::splat(0.012),
+            zenith: Vec3::new(0.03, 0.032, 0.038),
+            top: 0.35,
+            floor: Vec3::splat(0.05),
+        },
+        Studio::Light => StudioColors {
+            horizon: Vec3::splat(0.75),
+            zenith: Vec3::new(0.95, 0.96, 0.98),
+            top: 0.6,
+            floor: Vec3::splat(0.7),
+        },
+    }
+}
 
 impl std::ops::Deref for Scene {
     type Target = Geometry;
@@ -449,6 +553,7 @@ impl Geometry {
             floor: b.min.z - 1e-3,
             center: b.center(),
             radius: (b.size().length() * 0.5).max(1.0),
+            packed: OnceLock::new(),
         }
     }
 }
@@ -485,12 +590,9 @@ impl Scene {
     /// Environment radiance. `key` adds the key light when the ray sees it.
     fn env(&self, d: Vec3, key: bool) -> Vec3 {
         let up = d.z.max(0.0);
-        let (horizon, zenith, top) = match self.look.studio {
-            Studio::Dark => (Vec3::splat(0.012), Vec3::new(0.03, 0.032, 0.038), 0.35),
-            Studio::Light => (Vec3::splat(0.75), Vec3::new(0.95, 0.96, 0.98), 0.6),
-        };
+        let s = studio(self.look.studio);
         // Sky gradient plus a large soft box overhead.
-        let mut c = horizon.lerp(zenith, up.sqrt()) + Vec3::splat(top * up.powi(6));
+        let mut c = s.horizon.lerp(s.zenith, up.sqrt()) + Vec3::splat(s.top * up.powi(6));
         if key && d.dot(self.key_dir) > self.key_cos {
             c += Vec3::splat(self.key_radiance);
         }
@@ -498,10 +600,7 @@ impl Scene {
     }
 
     fn floor_albedo(&self) -> Vec3 {
-        match self.look.studio {
-            Studio::Dark => Vec3::splat(0.05),
-            Studio::Light => Vec3::splat(0.7),
-        }
+        studio(self.look.studio).floor
     }
 
     /// Nearest model hit: (t, triangle, u, v). With a section cut, the hits
@@ -1150,6 +1249,27 @@ mod tests {
         let (tc, n) = s.cap(o, d, t, i).unwrap();
         assert!((tc - 15.0).abs() < 1e-3);
         assert_eq!(n, Vec3::Z);
+    }
+
+    #[test]
+    fn studio_colors_keep_their_values() {
+        let m = cube(10.0);
+        let look = |studio| Look {
+            color: Vec3::ONE,
+            roughness: 0.5,
+            layer_lines: 0.0,
+            studio,
+            exposure: 1.0,
+        };
+        let close = |a: Vec3, b: Vec3| assert!((a - b).length() < 1e-6, "{a} != {b}");
+        let dark = Scene::new(&m, look(Studio::Dark));
+        close(dark.env(Vec3::Z, false), Vec3::new(0.38, 0.382, 0.388));
+        close(dark.env(Vec3::X, false), Vec3::splat(0.012));
+        close(dark.floor_albedo(), Vec3::splat(0.05));
+        let light = Scene::new(&m, look(Studio::Light));
+        close(light.env(Vec3::Z, false), Vec3::new(1.55, 1.56, 1.58));
+        close(light.env(Vec3::X, false), Vec3::splat(0.75));
+        close(light.floor_albedo(), Vec3::splat(0.7));
     }
 
     #[test]
