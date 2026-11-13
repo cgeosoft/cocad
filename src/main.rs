@@ -39,11 +39,14 @@ Usage:
   cocad mcp                              Serve MCP on stdin and stdout, for Claude Desktop and
                                                other MCP clients. Controls the open window.
   cocad params FILE.scad                 List the Customizer parameters
-  cocad export FILE.scad -o OUT [-P SET] [-D name=value]... [--for prusa|orca]
+  cocad export FILE.scad -o OUT [-P SET] [-D name=value]... [PRINT OPTIONS] [--for prusa|orca]
                                                Build and write OUT (.stl, .3mf or .step).
+                                               STL and 3MF get the print plate, STEP gets
+                                               the model as built.
                                                --for writes a multicolor 3MF for that slicer.
-  cocad slice FILE.scad [-P SET] [-D name=value]... [--layer-height MM] [--infill PCT] [--walls N]
-                                               Slice and print estimates
+  cocad slice FILE.scad [-P SET] [-D name=value]... [PRINT OPTIONS]
+                    [--layer-height MM] [--first-layer MM] [--infill PCT] [--walls N]
+                                               Slice the plates and print estimates
   cocad photo FILE.scad -o OUT.png [-P SET] [-D name=value]... [--size WxH] [--samples N]
                     [--color RRGGBB] [--finish matte|satin|gloss] [--studio dark|light] [--layer-lines]
                                                Photo render (path traced) from the iso view
@@ -51,6 +54,22 @@ Usage:
 Parameter sets:
   -P SET      Apply a saved parameter set before the -D values
   -p FILE     Read sets from FILE (default: the file chosen in the app, else FILE.json)
+
+Print options (export and slice):
+  CoCAD starts from the Optimize values that the app stored for the model, else
+  from the defaults (all parts, model rotation, all fixes off). The options change them.
+  --plate N|all        The plate to export or slice (default: export plate 1, slice
+                       all plates). all: export one file per plate, OUT-plateN.ext
+  --part NAME|all      Only this print part, or all print parts
+  --bed WxDxH          Print area in mm (default: the stored value, else Settings > Printer)
+  --orient model|auto  Orientation of all parts: the model rotation, or the best face
+  --chamfer[=MM]       Bed chamfer (0.4 mm by default; 0 turns it off)
+  --teardrops          Teardrop holes
+  --bridges[=sacrificial|stepped]
+                       Bridge fixes, with the fix for a hole above a bridge
+  --brim               Brim on small bed islands
+  --no-fixes           All stored fixes off. The fix options above still turn a fix on.
+  --as-built           The model as built, without the print preparation (as before 0.7)
 
 Environment:
   OPENSCAD       OpenSCAD binary (overrides the saved setting; default: openscad)
@@ -79,13 +98,14 @@ fn main() -> Result<()> {
             println!("cocad {}", env!("CARGO_PKG_VERSION"));
             Ok(())
         }
-        Some(cmd @ ("mcp" | "params" | "export" | "slice" | "photo")) => {
+        // `params` does not run OpenSCAD, so it needs no check.
+        Some("params") => cmd_params(&args[1..]),
+        Some(cmd @ ("mcp" | "export" | "slice" | "photo")) => {
             // These stop when OpenSCAD has no Manifold. The window shows a
             // notice instead.
             openscad::check(&openscad::Config::load())?;
             match cmd {
                 "mcp" => mcp::run(),
-                "params" => cmd_params(&args[1..]),
                 "export" => cmd_export(&args[1..]),
                 "slice" => cmd_slice(&args[1..]),
                 _ => cmd_photo(&args[1..]),
@@ -164,6 +184,8 @@ struct Batch {
     params: Vec<params::Param>,
     settings: slicer::Settings,
     target: Option<export::Slicer>,
+    /// The print options of export and slice.
+    print: optimize::headless::Options,
 }
 
 fn parse_batch(args: &[String]) -> Result<Batch> {
@@ -175,6 +197,7 @@ fn parse_batch(args: &[String]) -> Result<Batch> {
     let mut settings = slicer::Settings::default();
     let mut photo = PhotoArgs::default();
     let mut target = None;
+    let mut print = optimize::headless::Options::default();
     let mut it = args.iter();
     while let Some(a) = it.next() {
         let mut val = |name: &str| {
@@ -182,6 +205,9 @@ fn parse_batch(args: &[String]) -> Result<Batch> {
                 .cloned()
                 .with_context(|| format!("{name} needs a value"))
         };
+        if print.parse_flag(a, || val(a))? {
+            continue;
+        }
         match a.as_str() {
             "-o" => out = Some(PathBuf::from(val("-o")?)),
             "-D" => defs.push(val("-D")?),
@@ -235,6 +261,7 @@ fn parse_batch(args: &[String]) -> Result<Batch> {
         params,
         settings,
         target,
+        print,
     })
 }
 
@@ -246,17 +273,73 @@ fn build(b: &Batch) -> Result<mesh::Mesh> {
         &params::defines(&b.params),
         &cancel,
     )?;
-    let bb = out.mesh.bounds().unwrap();
-    let s = bb.size();
+    built_line(&out.mesh, out.elapsed);
+    Ok(out.mesh)
+}
+
+/// The first line on stderr after the build. `scripts/test-models.sh`
+/// reads the triangle count from it.
+fn built_line(mesh: &mesh::Mesh, elapsed: std::time::Duration) {
+    let s = optimize::bounds_or_zero(mesh).size();
     eprintln!(
         "built {} triangles, {:.2} x {:.2} x {:.2} mm in {:.2} s",
-        out.mesh.triangles.len(),
+        mesh.triangles.len(),
         s.x,
         s.y,
         s.z,
-        out.elapsed.as_secs_f32()
+        elapsed.as_secs_f32()
     );
-    Ok(out.mesh)
+}
+
+/// Builds the model and finds its printable parts (see
+/// `optimize::headless::inputs`).
+fn build_parts(b: &Batch) -> Result<optimize::headless::Built> {
+    let cancel = Arc::new(AtomicBool::new(false));
+    let built = optimize::headless::inputs(&openscad::Config::load(), &b.file, &b.params, &cancel)?;
+    built_line(&built.mesh, built.elapsed);
+    Ok(built)
+}
+
+/// Builds the model, runs the print preparation with the print options and
+/// prints the report on stderr.
+fn prepare(b: &Batch) -> Result<(optimize::headless::Built, optimize::headless::Prepared)> {
+    let built = build_parts(b)?;
+    let cancel = Arc::new(AtomicBool::new(false));
+    let layers = optimize::Layers {
+        first: b.settings.first_layer,
+        height: b.settings.layer_height,
+    };
+    let p = optimize::headless::optimize(
+        &openscad::Config::load(),
+        &b.file,
+        &built,
+        &b.print,
+        layers,
+        &cancel,
+    )?;
+    eprint!("{}", optimize::headless::report(&built, &p));
+    Ok((built, p))
+}
+
+/// The plates to write or slice: `--plate`, else `default`. Fails when
+/// the parts are on no plate, or the plate does not exist.
+fn plates(b: &Batch, o: &optimize::pipeline::Outcome, all_by_default: bool) -> Result<Vec<usize>> {
+    use optimize::headless::Plates;
+    if o.plates == 0 {
+        bail!("Nothing to print: no print part is on a plate. See the report above.");
+    }
+    Ok(match b.print.plate {
+        Some(Plates::One(n)) if n >= o.plates => bail!(
+            "--plate {}: the parts are on {} plate{}",
+            n + 1,
+            o.plates,
+            if o.plates == 1 { "" } else { "s" }
+        ),
+        Some(Plates::One(n)) => vec![n],
+        Some(Plates::All) => (0..o.plates).collect(),
+        None if all_by_default => (0..o.plates).collect(),
+        None => vec![0],
+    })
 }
 
 fn cmd_params(args: &[String]) -> Result<()> {
@@ -297,7 +380,7 @@ fn cmd_params(args: &[String]) -> Result<()> {
 fn cmd_export(args: &[String]) -> Result<()> {
     let b = parse_batch(args)?;
     let out = b.out.clone().context("missing -o OUT")?;
-    export::Format::from_path(&out).context("OUT must end in .stl, .3mf or .step")?;
+    let fmt = export::Format::from_path(&out).context("OUT must end in .stl, .3mf or .step")?;
     let title = b
         .file
         .file_stem()
@@ -312,7 +395,13 @@ fn cmd_export(args: &[String]) -> Result<()> {
             .map(|p| (p.name.clone(), p.value.to_scad()))
             .collect(),
     };
+    let opts = &b.print;
     if let Some(target) = b.target {
+        if opts.changes_print() || opts.part.is_some() || opts.as_built {
+            eprintln!(
+                "warning: --for writes all parts of the model as built. The print options do nothing."
+            );
+        }
         let cancel = Arc::new(AtomicBool::new(false));
         let parts = parts::render(&openscad::Config::load(), &b.file, &b.params, &cancel)?;
         export::write_parts(&out, &parts, &meta, target)?;
@@ -324,23 +413,129 @@ fn cmd_export(args: &[String]) -> Result<()> {
                 p.mesh.triangles.len()
             );
         }
-    } else {
-        export::write(&out, &build(&b)?, &meta)?;
+        eprintln!("wrote {}", out.display());
+        return Ok(());
     }
-    eprintln!("wrote {}", out.display());
+    if fmt == export::Format::Step || opts.as_built {
+        // The model as built, or one part of it in its model position.
+        if opts.changes_print() {
+            let why = if opts.as_built {
+                "--as-built writes the model as built"
+            } else {
+                "STEP gets the model as built"
+            };
+            eprintln!("warning: {why}. The print options do nothing.");
+        }
+        let mesh = match opts.only() {
+            None => build(&b)?,
+            Some(name) => model_part(&b, name)?,
+        };
+        export::write(&out, &mesh, &meta)?;
+        eprintln!("wrote {}", out.display());
+        return Ok(());
+    }
+    let (_, p) = prepare(&b)?;
+    let o = &p.outcome;
+    let list = plates(&b, o, false)?;
+    let all = opts.plate == Some(optimize::headless::Plates::All);
+    for &plate in &list {
+        let path = if all {
+            let name = out.file_name().unwrap_or_default().to_string_lossy();
+            out.with_file_name(export::plate_name(&name, plate))
+        } else {
+            out.clone()
+        };
+        match fmt {
+            export::Format::ThreeMf => {
+                let bytes = optimize::headless::plate_3mf(o, plate, &meta)?;
+                std::fs::write(&path, bytes)
+                    .with_context(|| format!("cannot write {}", path.display()))?;
+            }
+            _ => export::write(&path, &o.plate_mesh(plate), &meta)?,
+        }
+        eprintln!(
+            "wrote {} (plate {} of {})",
+            path.display(),
+            plate + 1,
+            o.plates
+        );
+    }
+    if o.plates > 1 && !all && opts.plate.is_none() {
+        eprintln!(
+            "note: the parts are on {} plates. Use --plate N or --plate all for the others.",
+            o.plates
+        );
+    }
     Ok(())
+}
+
+/// The part `name` of the model, in its model position. For STEP and
+/// `--as-built` with `--part`.
+fn model_part(b: &Batch, name: &str) -> Result<mesh::Mesh> {
+    let built = build_parts(b)?;
+    if let Some(p) = built.parts.iter().find(|p| p.name == name) {
+        return Ok(p.mesh.as_ref().clone());
+    }
+    let names: Vec<&str> = built.parts.iter().map(|p| p.name.as_str()).collect();
+    bail!(
+        "The model has no part with the name '{name}'.\nThe parts: {}",
+        names.join(", ")
+    )
+}
+
+/// Prints the slice estimate: the layers, the path, the filament and the
+/// print time.
+fn print_stats(st: &slicer::Stats, plates: usize) {
+    let all = if plates > 1 {
+        format!("  (all {plates} plates)")
+    } else {
+        String::new()
+    };
+    println!("layers      {}{all}", st.layers);
+    println!("path        {:.1} m", st.path_mm / 1000.0);
+    println!("filament    {:.2} m, {:.1} g", st.filament_m, st.grams);
+    println!("print time  {:.0} min (rough)", st.seconds / 60.0);
 }
 
 fn cmd_slice(args: &[String]) -> Result<()> {
     let b = parse_batch(args)?;
-    let mesh = build(&b)?;
+    if b.print.as_built {
+        if b.print.changes_print() || b.print.part.is_some() {
+            eprintln!(
+                "warning: --as-built slices the model as built. The print options do nothing."
+            );
+        }
+        let mesh = build(&b)?;
+        let t = std::time::Instant::now();
+        let r = slicer::slice(&mesh, &b.settings);
+        print_stats(&r.stats, 1);
+        println!("sliced in   {} ms", t.elapsed().as_millis());
+        return Ok(());
+    }
+    let (_, p) = prepare(&b)?;
+    let o = &p.outcome;
+    let list = plates(&b, o, true)?;
     let t = std::time::Instant::now();
-    let r = slicer::slice(&mesh, &b.settings);
-    let st = &r.stats;
-    println!("layers      {}", st.layers);
-    println!("path        {:.1} m", st.path_mm / 1000.0);
-    println!("filament    {:.2} m, {:.1} g", st.filament_m, st.grams);
-    println!("print time  {:.0} min (rough)", st.seconds / 60.0);
+    let mut total = slicer::Stats::default();
+    for &plate in &list {
+        let st = slicer::slice(&o.plate_mesh(plate), &b.settings).stats;
+        if list.len() > 1 {
+            println!(
+                "{:<12}{} layers, {:.2} m, {:.1} g, {:.0} min",
+                format!("plate {}", plate + 1),
+                st.layers,
+                st.filament_m,
+                st.grams,
+                st.seconds / 60.0
+            );
+        }
+        total.layers += st.layers;
+        total.path_mm += st.path_mm;
+        total.filament_m += st.filament_m;
+        total.grams += st.grams;
+        total.seconds += st.seconds;
+    }
+    print_stats(&total, list.len());
     println!("sliced in   {} ms", t.elapsed().as_millis());
     Ok(())
 }
