@@ -668,3 +668,289 @@ mod tests {
         assert!((o.parts[0].mesh.volume() - 1500.0).abs() < 1.0);
     }
 }
+
+// ------------------------------------------------------------------ storage
+//
+// The Optimize values of a model go to `models.json` (see `app/state.rs`)
+// under the key "optimize":
+//
+// { "area": [250, 220, 270], "gap": 10, "only": "Part 2", "plate": 0,
+//   "fixes": { "teardrops": true, "bridges": false, "hole_above": "stepped",
+//              "sacrificial_layers": 2, "chamfer": true, "chamfer_mm": 0.4,
+//              "brim": false, "brim_w": 5, "brim_gap": 1 },
+//   "parts": { "Part 1": { "include": true, "copies": 2,
+//                          "orient": "face", "down": [0, 1, 0], "turns": 1,
+//                          "split": { "joint": "dovetail", "cuts": [[0, 150]],
+//                                     "clearance": 0.2, ... } } } }
+
+use serde_json::{Map, Value as Json, json};
+
+fn f32_of(v: Option<&Json>) -> Option<f32> {
+    v.and_then(Json::as_f64).map(|x| x as f32)
+}
+
+fn vec3_of(v: Option<&Json>) -> Option<Vec3> {
+    let a = v?.as_array()?;
+    if a.len() != 3 {
+        return None;
+    }
+    Some(Vec3::new(
+        f32_of(a.first())?,
+        f32_of(a.get(1))?,
+        f32_of(a.get(2))?,
+    ))
+}
+
+fn fixes_json(f: &fixes::Settings) -> Json {
+    json!({
+        "teardrops": f.teardrops,
+        "bridges": f.bridges,
+        "hole_above": f.hole_above.name(),
+        "sacrificial_layers": f.sacrificial_layers,
+        "chamfer": f.chamfer,
+        "chamfer_mm": f.chamfer_mm,
+        "brim": f.brim,
+        "brim_w": f.brim_w,
+        "brim_gap": f.brim_gap,
+    })
+}
+
+fn fixes_of(v: &Json) -> fixes::Settings {
+    let mut f = fixes::Settings::default();
+    let b = |k: &str, d: bool| v.get(k).and_then(Json::as_bool).unwrap_or(d);
+    f.teardrops = b("teardrops", f.teardrops);
+    f.bridges = b("bridges", f.bridges);
+    f.chamfer = b("chamfer", f.chamfer);
+    f.brim = b("brim", f.brim);
+    if let Some(h) = v
+        .get("hole_above")
+        .and_then(Json::as_str)
+        .and_then(fixes::HoleAbove::from_name)
+    {
+        f.hole_above = h;
+    }
+    if let Some(n) = v.get("sacrificial_layers").and_then(Json::as_u64) {
+        f.sacrificial_layers = (n as u32).clamp(1, 10);
+    }
+    let clamp = |k: &str, d: f32, lo: f32, hi: f32| {
+        f32_of(v.get(k)).filter(|x| x.is_finite()).map_or(d, |x| x.clamp(lo, hi))
+    };
+    f.chamfer_mm = clamp("chamfer_mm", f.chamfer_mm, 0.0, 2.0);
+    f.brim_w = clamp("brim_w", f.brim_w, 0.0, 20.0);
+    f.brim_gap = clamp("brim_gap", f.brim_gap, 0.2, 5.0);
+    f
+}
+
+fn split_json(s: &split::Split) -> Json {
+    let v = &s.values;
+    json!({
+        "joint": s.joint.name(),
+        "cuts": s.cuts.iter().map(|c| json!([c.axis, c.at])).collect::<Vec<_>>(),
+        "clearance": v.clearance,
+        "pin_d": v.pin_d,
+        "pin_depth": v.pin_depth,
+        "tab_root": v.tab_root,
+        "tab_tip": v.tab_tip,
+        "tab_depth": v.tab_depth,
+        "tab_pitch": v.tab_pitch,
+    })
+}
+
+fn split_of(v: &Json) -> Option<split::Split> {
+    let joint = split::Joint::from_name(v.get("joint")?.as_str()?)?;
+    let mut cuts = Vec::new();
+    for c in v.get("cuts")?.as_array()? {
+        let a = c.as_array()?;
+        let axis = a.first()?.as_u64()? as usize;
+        let at = f32_of(a.get(1))?;
+        if axis > 2 || !at.is_finite() {
+            return None;
+        }
+        cuts.push(split::Cut { axis, at });
+    }
+    if cuts.is_empty() {
+        return None;
+    }
+    let mut values = split::JointValues::default();
+    let set = |k: &str, x: &mut f32, lo: f32, hi: f32| {
+        if let Some(n) = f32_of(v.get(k)).filter(|n| n.is_finite()) {
+            *x = n.clamp(lo, hi);
+        }
+    };
+    set("clearance", &mut values.clearance, 0.0, 2.0);
+    set("pin_d", &mut values.pin_d, 1.0, 30.0);
+    set("pin_depth", &mut values.pin_depth, 1.0, 50.0);
+    set("tab_root", &mut values.tab_root, 1.0, 100.0);
+    set("tab_tip", &mut values.tab_tip, 1.0, 100.0);
+    set("tab_depth", &mut values.tab_depth, 1.0, 50.0);
+    set("tab_pitch", &mut values.tab_pitch, 5.0, 500.0);
+    Some(split::Split {
+        cuts,
+        joint,
+        values,
+    })
+}
+
+impl PartState {
+    pub fn to_json(&self) -> Json {
+        let mut m = Map::new();
+        m.insert("include".into(), json!(self.include));
+        if let Some(c) = self.copies {
+            m.insert("copies".into(), json!(c));
+        }
+        let o = &self.orientation;
+        match o.choice {
+            orient::Choice::Model => {}
+            orient::Choice::Auto => {
+                m.insert("orient".into(), json!("auto"));
+            }
+            orient::Choice::Face(d) => {
+                m.insert("orient".into(), json!("face"));
+                m.insert("down".into(), json!([d.x, d.y, d.z]));
+            }
+        }
+        if !o.quarter_turns.is_multiple_of(4) {
+            m.insert("turns".into(), json!(o.quarter_turns % 4));
+        }
+        if let Some(s) = &self.split {
+            m.insert("split".into(), split_json(s));
+        }
+        Json::Object(m)
+    }
+
+    pub fn from_json(v: &Json) -> PartState {
+        let mut p = PartState::default();
+        if let Some(b) = v.get("include").and_then(Json::as_bool) {
+            p.include = b;
+        }
+        p.copies = v
+            .get("copies")
+            .and_then(Json::as_u64)
+            .map(|c| c.min(999) as u32);
+        p.orientation.choice = match v.get("orient").and_then(Json::as_str) {
+            Some("auto") => orient::Choice::Auto,
+            Some("face") => match vec3_of(v.get("down")) {
+                Some(d) if d.length() > 0.5 => orient::Choice::Face(d.normalize()),
+                _ => orient::Choice::Model,
+            },
+            _ => orient::Choice::Model,
+        };
+        p.orientation.quarter_turns = v.get("turns").and_then(Json::as_u64).unwrap_or(0) as u8 % 4;
+        p.split = v.get("split").and_then(split_of);
+        p
+    }
+}
+
+impl State {
+    pub fn to_json(&self) -> Json {
+        let mut m = Map::new();
+        m.insert(
+            "area".into(),
+            json!([self.area.w, self.area.d, self.area.h]),
+        );
+        m.insert("gap".into(), json!(self.gap));
+        if let Some(o) = &self.only {
+            m.insert("only".into(), json!(o));
+        }
+        m.insert("plate".into(), json!(self.plate));
+        m.insert("fixes".into(), fixes_json(&self.fixes));
+        let parts: Map<String, Json> = self
+            .parts
+            .iter()
+            .filter(|(_, p)| **p != PartState::default())
+            .map(|(k, p)| (k.clone(), p.to_json()))
+            .collect();
+        if !parts.is_empty() {
+            m.insert("parts".into(), Json::Object(parts));
+        }
+        Json::Object(m)
+    }
+
+    /// The stored state, or a new state with `area` for values that are
+    /// missing.
+    pub fn from_json(v: &Json, area: Area) -> State {
+        let mut s = State::new(area);
+        if let Some(a) = v.get("area").and_then(Json::as_array)
+            && let [w, d, h] = a.as_slice()
+            && let (Some(w), Some(d), Some(h)) = (f32_of(Some(w)), f32_of(Some(d)), f32_of(Some(h)))
+            && w > 0.0
+            && d > 0.0
+            && h > 0.0
+        {
+            s.area = Area { w, d, h };
+        }
+        if let Some(g) = f32_of(v.get("gap")).filter(|g| g.is_finite()) {
+            s.gap = g.clamp(0.0, 100.0);
+        }
+        s.only = v.get("only").and_then(Json::as_str).map(str::to_string);
+        s.plate = v.get("plate").and_then(Json::as_u64).unwrap_or(0) as usize;
+        if let Some(f) = v.get("fixes") {
+            s.fixes = fixes_of(f);
+        }
+        if let Some(parts) = v.get("parts").and_then(Json::as_object) {
+            for (k, p) in parts {
+                s.parts.insert(k.clone(), PartState::from_json(p));
+            }
+        }
+        s
+    }
+}
+
+#[cfg(test)]
+mod storage_tests {
+    use super::*;
+
+    #[test]
+    fn state_goes_to_json_and_back() {
+        let mut s = State::new(Area {
+            w: 250.0,
+            d: 220.0,
+            h: 270.0,
+        });
+        s.fixes.chamfer = true;
+        s.fixes.hole_above = fixes::HoleAbove::Stepped;
+        s.only = Some("Part 2".into());
+        s.plate = 1;
+        s.parts.insert(
+            "Part 1".into(),
+            PartState {
+                include: false,
+                copies: Some(3),
+                orientation: orient::Orientation {
+                    choice: orient::Choice::Face(Vec3::Y),
+                    quarter_turns: 1,
+                },
+                split: Some(split::Split {
+                    cuts: vec![split::Cut { axis: 0, at: 150.0 }],
+                    joint: split::Joint::Dovetail,
+                    values: split::JointValues::default(),
+                }),
+            },
+        );
+        s.parts.insert(
+            "Part 2".into(),
+            PartState {
+                orientation: orient::Orientation {
+                    choice: orient::Choice::Auto,
+                    quarter_turns: 0,
+                },
+                ..PartState::default()
+            },
+        );
+        let back = State::from_json(&s.to_json(), Area::default());
+        assert_eq!(back, s);
+    }
+
+    #[test]
+    fn missing_values_take_the_defaults() {
+        let a = Area {
+            w: 180.0,
+            d: 180.0,
+            h: 180.0,
+        };
+        let s = State::from_json(&json!({ "fixes": { "brim": true }, "area": [0, 1, 2] }), a);
+        assert_eq!(s.area, a);
+        assert!(s.fixes.brim && !s.fixes.chamfer);
+        assert!((s.fixes.brim_w - 5.0).abs() < 1e-6);
+    }
+}

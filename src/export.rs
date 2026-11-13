@@ -209,6 +209,68 @@ pub fn threemf_bytes(mesh: &Mesh, meta: &Meta) -> Result<Vec<u8>> {
     ])
 }
 
+/// A 3MF file with one object for each mesh in `objects` (name, mesh) and
+/// one build item for each entry of `items` (object index, matrix). The
+/// slicer then shows each copy as a separate object at its place.
+// The Optimize tab uses it in the next step.
+#[allow(dead_code)]
+pub fn plate_3mf_bytes(
+    objects: &[(String, &Mesh)],
+    items: &[(usize, glam::Mat4)],
+    meta: &Meta,
+) -> Result<Vec<u8>> {
+    if items.is_empty() {
+        bail!("nothing to export");
+    }
+    let mut model = model_head(meta, "", "");
+    model.push_str(" <resources>\n");
+    for (i, (name, mesh)) in objects.iter().enumerate() {
+        let _ = writeln!(
+            model,
+            "  <object id=\"{}\" name=\"{}\" type=\"model\">\n   <mesh>\n    <vertices>",
+            i + 1,
+            xml_escape(name)
+        );
+        mesh_rows(&mut model, mesh, true, 0);
+        model.push_str("    </vertices>\n    <triangles>\n");
+        mesh_rows(&mut model, mesh, false, 0);
+        model.push_str("    </triangles>\n   </mesh>\n  </object>\n");
+    }
+    model.push_str(" </resources>\n <build>\n");
+    for (obj, m) in items {
+        // 3MF: x' = m00 x + m10 y + m20 z + m30, so the columns of the
+        // glam matrix are the rows of the 3MF matrix.
+        let c = [m.x_axis, m.y_axis, m.z_axis, m.w_axis];
+        let t: Vec<String> = c
+            .iter()
+            .flat_map(|v| [v.x, v.y, v.z])
+            .map(|x| x.to_string())
+            .collect();
+        let _ = writeln!(
+            model,
+            "  <item objectid=\"{}\" transform=\"{}\"/>",
+            obj + 1,
+            t.join(" ")
+        );
+    }
+    model.push_str(" </build>\n</model>\n");
+    package(&[
+        ("[Content_Types].xml", CONTENT_TYPES.as_bytes()),
+        ("_rels/.rels", RELS.as_bytes()),
+        ("3D/3dmodel.model", model.as_bytes()),
+    ])
+}
+
+/// `name` with `-plate<n>` before the extension, for plate `plate` (0 is
+/// plate 1).
+#[allow(dead_code)]
+pub fn plate_name(name: &str, plate: usize) -> String {
+    match name.rsplit_once('.') {
+        Some((stem, ext)) => format!("{stem}-plate{}.{ext}", plate + 1),
+        None => format!("{name}-plate{}", plate + 1),
+    }
+}
+
 /// Writes one mesh as `<vertices>` and `<triangles>`. Indices start at `first`.
 fn mesh_rows(model: &mut String, mesh: &Mesh, vertices: bool, first: u32) {
     if vertices {
@@ -717,6 +779,34 @@ pub fn suggested_name(stem: &str, set: Option<&str>, fmt: Format) -> String {
 mod tests {
     use super::*;
     use crate::mesh::cube;
+
+    #[test]
+    fn plate_3mf_has_one_item_per_copy() {
+        let c = cube(10.0);
+        let at = glam::Mat4::from_translation(glam::Vec3::new(20.0, 30.0, 0.0));
+        let bytes = plate_3mf_bytes(
+            &[("Part 1".into(), &c)],
+            &[(0, glam::Mat4::IDENTITY), (0, at)],
+            &Meta {
+                title: "t".into(),
+                params: vec![],
+            },
+        )
+        .unwrap();
+        let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+        let mut text = String::new();
+        std::io::Read::read_to_string(&mut zip.by_name("3D/3dmodel.model").unwrap(), &mut text)
+            .unwrap();
+        assert_eq!(text.matches("<item ").count(), 2);
+        assert!(text.contains("transform=\"1 0 0 0 1 0 0 0 1 20 30 0\""), "{text}");
+        assert!(text.contains("name=\"Part 1\""));
+    }
+
+    #[test]
+    fn plate_name_goes_before_the_extension() {
+        assert_eq!(plate_name("box-big.3mf", 1), "box-big-plate2.3mf");
+        assert_eq!(plate_name("box", 0), "box-plate1");
+    }
 
     #[test]
     fn suggested_name_adds_the_set() {
