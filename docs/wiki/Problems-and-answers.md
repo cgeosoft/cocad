@@ -78,7 +78,7 @@ CoCAD cuts only with parallel planes across one axis. Turn the part with a custo
 The cut face is too small for the pins or the dovetail tabs, so that cut is a flat cut. Glue the pieces, or move the cut with its number field to a place with more material.
 
 **My STL does not contain the whole model.**
-The STL and 3MF export write the current plate of the Optimize tab. Parts with the `%` mark, parts that you turned off, and parts that are too large are not on the plate. When the parts are on two or more plates, use **All STL** or **All 3MF**. For the model as OpenSCAD built it, use **STEP**, or `cocad export --as-built` on the [command line](Command-line).
+The STL and 3MF export write the current plate of the Optimize tab. Parts with the `%` mark, parts that you turned off, and parts that are too large are not on the plate. When the parts are on two or more plates, click the arrow at the right of **Export 3MF**, then **3MF: all 2 plates** or **STL: all 2 plates**. For the model as OpenSCAD built it, use **STEP: the model as built** in the same menu, or `cocad export --as-built` on the [command line](Command-line).
 
 **I use the Bed chamfer. Must I change a setting in my slicer?**
 Yes. With the **Bed chamfer** on, set the elephant foot compensation of your slicer to 0. In PrusaSlicer and OrcaSlicer, the setting is "Elephant foot compensation". In Cura, it is "Initial Layer Horizontal Expansion". Without this, the bed edges get two corrections.

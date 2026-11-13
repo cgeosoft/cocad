@@ -1,6 +1,6 @@
 # Optimize
 
-The **Optimize** tab prepares the parts of a model for a 3D printer. It puts the parts on the bed of your printer, turns them, changes the shape where a printer has problems, and shows the print layers. The **STL** and **3MF** export write the result.
+The **Optimize** tab prepares the parts of a model for a 3D printer. It puts the parts on the bed of your printer, turns them, changes the shape where a printer has problems, and shows the print layers. The **Export** card at the bottom of the tab writes the result as a 3MF or an STL file.
 
 ![The Optimize tab with the desk dock](https://raw.githubusercontent.com/cgeosoft/cocad/main/assets/guide/app-3-fixes.jpg)
 
@@ -41,7 +41,7 @@ The Optimize tab shows no explode, no section cut and no reference parts. **Fit*
 
 ## The cards
 
-The tab has these cards, from top to bottom: **Plate**, **Orientation**, **Print fixes**, **Check**, **Layers**, **Printer** and **Print settings**. The **Export** card is below them. It is at the bottom of all tabs. See [Export](Export).
+The tab has these cards, from top to bottom: **Plate**, **Orientation**, **Print fixes**, **Check**, **Layers**, **Printer** and **Print settings**. The **Export** card is below them, at the bottom of the tab. See [Export](Export).
 
 Click the header of a card to close it or to open it. A closed card shows a short value in its header, for example the print time in the **Layers** card. **Collapse** at the top of the tab closes all cards. **Expand** opens them again. CoCAD remembers which cards are closed. The **Export** card does not close.
 
@@ -70,7 +70,7 @@ When a fix found a place that it did not change, the row shows "1 skipped". Hold
 
 CoCAD puts the parts in rows on the bed, the largest first, with a gap between them. It can turn a part by 90 degrees on the bed to fit it. This does not change how the part prints. The parts are in the center of the bed.
 
-When the parts do not fit on one plate, CoCAD fills plate 1, then plate 2, and so on. The Export card then has **All STL** and **All 3MF**, which write one file for each plate.
+When the parts do not fit on one plate, CoCAD fills plate 1, then plate 2, and so on. The menu of the **Export** card then has **3MF: all 2 plates** and **STL: all 2 plates**, with the number of plates. These items write one file for each plate. To open the menu, click the arrow at the right of **Export 3MF**.
 
 #### Split a part that is too large
 

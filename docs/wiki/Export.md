@@ -2,29 +2,30 @@
 
 Export writes a file that other programs can read: a slicer for your 3D printer, or a CAD program.
 
-![The Export card with two plates](https://raw.githubusercontent.com/cgeosoft/cocad/main/assets/guide/app-7-two-plates.jpg)
+![The menu of the Export card with two plates](https://raw.githubusercontent.com/cgeosoft/cocad/main/assets/guide/app-7-two-plates.jpg)
 
 ## How to export
 
-1. Find the **Export** card at the bottom of the right panel. It is in all three tabs: **Model**, **Optimize** and **Render**.
-2. Read the line above the buttons. It tells what the file will contain, for example "Plate: 4 parts, 6 copies. Bed chamfer, 3 teardrops."
-3. Click **STL**, **3MF** or **STEP**.
+1. Open the **Optimize** tab. The **Export** card is at the bottom of the right panel.
+2. Read the line above the button. It tells what the file will contain, for example "Plate: 4 parts, 6 copies. Bed chamfer, 3 teardrops."
+3. Click **Export 3MF** to write the current plate as a 3MF file. For a different file, click the arrow at the right of **Export 3MF**. A menu opens above the button. Click an item in the menu.
 4. Select a place and a name for the file. The proposed name is the model name. When a parameter set is active, the set name is added, for example `box-big.stl`. When the parts are on two or more plates, the plate number is added, for example `box-big-plate2.stl`. The dialog opens in the folder of your last export. Before your first export, it opens in the folder of the model.
 
-The **Model** menu has the same commands.
+The **Model** menu of the menu bar has the export commands too: **Export STL (binary)**, **Export 3MF** and **Export STEP (AP214, faceted)**. You can use them in all three tabs. They write the same files as **STL: this plate**, **Export 3MF** and **STEP: the model as built**.
 
 ## What is in the file
 
-| Button | What the file contains |
+| Command | What the file contains |
 |---|---|
-| **STL** | The current plate of the [Optimize](Optimize) tab: the print parts on the bed, in print position, with the print fixes that are on. |
-| **3MF** | The same plate. Each print part is one object, and each copy is one item, so your slicer shows them as separate objects. The file also contains the values of all parameters. |
-| **STEP** | The model as built, as OpenSCAD made it, for a CAD program. It has no plate and no print fixes. When the dropdown of the **Plate** card shows one part, the file contains only that part, in its place in the model. |
-| **All STL**, **All 3MF** | These buttons show when the parts are on two or more plates. They write one file for each plate, for example `box-plate1.3mf` and `box-plate2.3mf`. |
+| **Export 3MF** | The current plate of the [Optimize](Optimize) tab: the print parts on the bed, in print position, with the print fixes that are on. Each print part is one object, and each copy is one item, so your slicer shows them as separate objects. The file also contains the values of all parameters. |
+| **STL: this plate** | The same plate as an STL file. |
+| **3MF: all 2 plates**, **STL: all 2 plates** | These items show when the parts are on two or more plates. The number is the number of plates. They write one file for each plate, for example `box-plate1.3mf` and `box-plate2.3mf`. |
+| **STEP: the model as built** | The model as OpenSCAD made it, for a CAD program. It has no plate and no print fixes. When the dropdown of the **Plate** card shows one part, the file contains only that part, in its place in the model. |
+| **Multicolor 3MF: PrusaSlicer 2.9**, **Multicolor 3MF: OrcaSlicer** | These items show when the model has named parts. See [Multicolor prints](Multicolor-prints). |
 
-You do not have to open the **Optimize** tab before an export. When the plates are not ready, CoCAD prepares them first. A model that you did not change in the **Optimize** tab gives all parts in the rotation of the model, with no print fixes, on the print area from **File > Settings > Printer**.
+You do not have to open the **Optimize** tab before an export from the **Model** menu. When the plates are not ready, CoCAD prepares them first. A model that you did not change in the **Optimize** tab gives all parts in the rotation of the model, with no print fixes, on the print area from **File > Settings > Printer**.
 
-A part that is too large for the print area is on no plate, so it is not in the STL or the 3MF file. The message after the export names each part that it left out. [Split](Optimize#split-a-part-that-is-too-large) it in the **Optimize** tab, or set a larger print area. When no part is on a plate, the **STL** and **3MF** buttons are not available. **STEP** still works.
+A part that is too large for the print area is on no plate, so it is not in the STL or the 3MF file. The message after the export names each part that it left out. [Split](Optimize#split-a-part-that-is-too-large) it in the **Optimize** tab, or set a larger print area. When no part is on a plate, **Export 3MF** and the plate items of the menu are not available. Hold the mouse on **Export 3MF** to see the reason. **STEP** still works.
 
 For a print in more than one color, see [Multicolor prints](Multicolor-prints).
 

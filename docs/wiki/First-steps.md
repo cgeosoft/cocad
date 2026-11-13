@@ -30,7 +30,7 @@ If you have no model, start with an example. **File > Examples > Gear** is a goo
 | Menu bar | Top | All commands: **File**, **Model**, **View** and **Help** |
 | Parameters panel | Left | The values that you can change. See [Change the parameters](Parameters). |
 | 3D view | Middle | The model |
-| Sidebar | Right | Three tabs: **Model**, **Optimize** and **Render**, and the **Export** card at the bottom |
+| Sidebar | Right | Three tabs: **Model**, **Optimize** and **Render** |
 | Status bar | Bottom | The state of the model, its size and the **Console** button |
 
 The three tabs of the sidebar change what the 3D view shows:
@@ -41,7 +41,7 @@ The three tabs of the sidebar change what the 3D view shows:
 
 The tab names show the key letter underlined. Press the same key again to go back to the **Model** tab.
 
-Each tab has cards. Click the header of a card to close it or to open it. **Collapse** at the top of the tab closes all cards, and **Expand** opens them again. The **Export** card stays at the bottom of all tabs. See [Export](Export).
+Each tab has cards. Click the header of a card to close it or to open it. **Collapse** at the top of the tab closes all cards, and **Expand** opens them again. The **Optimize** tab has the **Export** card at the bottom, and the **Render** tab has the **Render** card at the bottom. These two cards do not close. The **Model** menu also has the export commands. See [Export](Export).
 
 ## Move the view
 

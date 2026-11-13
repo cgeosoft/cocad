@@ -16,7 +16,7 @@ To try it, open **File > Examples > Multicolor badge**.
 
 ## How to export
 
-When the model has named parts, the **Export** card shows a **Multicolor 3MF** row with two buttons: **PrusaSlicer 2.9** and **OrcaSlicer**. The **Model** menu has the same exports:
+When the model has named parts, the menu of the **Export** card in the **Optimize** tab has two more items: **Multicolor 3MF: PrusaSlicer 2.9** and **Multicolor 3MF: OrcaSlicer**. To open the menu, click the arrow at the right of **Export 3MF**. The **Model** menu has the same exports:
 
 - **Export multicolor 3MF for PrusaSlicer 2.9**
 - **Export multicolor 3MF for OrcaSlicer**
@@ -27,7 +27,7 @@ The multicolor 3MF contains all parts of the model as built. It does not use the
 
 ## In the Optimize tab
 
-The parts of the `cocad_part` list are the colors of one object. In the [Optimize](Optimize) tab, they stay together as one print part with the name of the model. The orientation, the print fixes and the plate apply to this object as a whole. The **STL** and **3MF** buttons write this object without colors.
+The parts of the `cocad_part` list are the colors of one object. In the [Optimize](Optimize) tab, they stay together as one print part with the name of the model. The orientation, the print fixes and the plate apply to this object as a whole. **Export 3MF** and **STL: this plate** write this object without colors.
 
 ## In the slicer
 

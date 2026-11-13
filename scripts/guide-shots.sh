@@ -82,7 +82,13 @@ shot app-6-top 3
 mcp set_view '{"view":"iso","fit":true}' >/dev/null
 # A smaller printer: two plates.
 mcp set_optimize '{"area":[180,180,180],"plate":1}' >/dev/null
-shot app-7-two-plates 4
+sleep 4
+# Open the menu of the Export card with the items for all plates: the arrow
+# is the narrow button at the right of Export 3MF. Then move the pointer off
+# the buttons, so that no tooltip shows. The next click closes the menu.
+xdotool mousemove $((width - 54)) $((height - 80)) click 1
+xdotool mousemove 700 17
+shot app-7-two-plates 2
 mcp set_optimize '{"area":[250,220,270],"plate":0}' >/dev/null
 sleep 3
 # The Layers switch of the view.

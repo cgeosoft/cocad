@@ -8,12 +8,19 @@ The **Render** tab makes a picture of the part that looks like a studio photo, w
 
 1. Click the **Render** tab on the right, or press `R`. Press `R` again to go back to the **Model** tab.
 2. Turn and move the view until you like it. The view dims the area outside the image frame, so you see what the photo will show.
-3. Let the view rest. The render starts. The image gets cleaner with time. The **Progress** card shows the number of samples.
-4. Click **Save PNG**. The dialog opens in the folder of your last export.
+3. Let the view rest. The render starts. The image gets cleaner with time. The **Render** card at the bottom of the tab shows the number of samples.
+4. Click **Save PNG** in the **Render** card. The dialog opens in the folder of your last export.
 
 When you move the view or change a setting, the render starts again.
 
 You can save at any time. **Save PNG** writes the image at its full size, with the quality that it has at that moment.
+
+The **Render** card at the bottom of the tab does not close. It shows:
+
+- The number of samples that are done, the number of samples that you set, and the size of the image in pixels.
+- A bar that shows the progress.
+- The time of the render. At the end, the card shows "Done in" and the time. Before the render starts, it shows "Waiting for the view to rest".
+- **Save PNG**.
 
 ## Settings
 
@@ -36,7 +43,7 @@ When [Part colors](Parts#part-colors) is on, each part has its own color in plac
 - **Resolution**: the size of the image in pixels. The presets are 720p, 1080p, 1440p, 4K, site preview 4:3 (1600 × 1200), square, portrait 4:5 and story 9:16. You can also type the width and the height.
 - **Swap** changes between landscape and portrait.
 
-The cards can close and open, as in the other tabs. The **Export** card is at the bottom. See [Export](Export).
+The other cards of the tab can close and open, as in the other tabs.
 
 ## Parts in the photo
 

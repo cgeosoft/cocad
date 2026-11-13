@@ -172,7 +172,7 @@ A printer with a smaller print area needs more plates. For example, with the **P
 
 ![Plate 2 of 2](https://raw.githubusercontent.com/cgeosoft/cocad/main/assets/guide/app-7-two-plates.jpg)
 
-Use the arrows in the **Plate** card to see the other plate. The **Export** card shows **All STL** and **All 3MF**, which write one file for each plate.
+Use the arrows in the **Plate** card to see the other plate. Click the arrow at the right of **Export 3MF** in the **Export** card. The menu has **3MF: all 2 plates** and **STL: all 2 plates**, which write one file for each plate.
 
 ## 8. Look at the layers
 
@@ -184,10 +184,10 @@ The **Layers** card shows a rough estimate of the print time, the weight and the
 
 ## 9. Export the plate
 
-In the **Export** card, click **3MF** or **STL**.
+In the **Export** card at the bottom of the tab, click **Export 3MF**. For an STL file, click the arrow at the right of **Export 3MF**, then **STL: this plate**.
 
-- The **3MF** file has one object for each print part, and one item for each copy. Your slicer shows the parts as separate objects, in the positions of the plate.
-- With two or more plates, **All 3MF** writes one file for each plate, for example `desk-dock-plate1.3mf` and `desk-dock-plate2.3mf`.
+- The 3MF file has one object for each print part, and one item for each copy. Your slicer shows the parts as separate objects, in the positions of the plate.
+- With two or more plates, **3MF: all 2 plates** in the same menu writes one file for each plate, for example `desk-dock-plate1.3mf` and `desk-dock-plate2.3mf`.
 
 In your slicer, set the elephant foot compensation to 0, because the bed chamfer is on.
 
