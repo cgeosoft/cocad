@@ -40,7 +40,7 @@ The chat text is scripted. The tool names and the numbers are real. The page dra
 
 ## Screenshots
 
-The files `images/screen-*.jpg` are screenshots of the app at 1600 × 1040, in the dark theme. Make them on a private display with the `gui-test` skill. The Optimize tab shots use `examples/desk-dock.scad` with all print fixes on, Auto orientation for the clips and the split that CoCAD proposes. After a change, run `scripts/website-assets.py --images-only`.
+The files `images/screen-*.jpg` are screenshots of the app at 1600 × 1040, in the dark theme. Make them on a private display with the `gui-test` skill. The Optimize tab shots use `examples/desk-dock.scad` with all print fixes on, Auto orientation for the clips and the split that CoCAD proposes. The Export shot uses `examples/lid-box.scad` in the Optimize tab, with the menu of the Export card open. After a change, run `scripts/website-assets.py --images-only`.
 
 ## Behavior
 
