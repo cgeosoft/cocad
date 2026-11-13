@@ -138,7 +138,22 @@ pub fn bed_cut_module(c: f32, layers: Layers) -> Option<String> {
     }
     let top = layers.top(n - 1);
     let zref = top + layers.height * 0.5;
-    let mut s = String::from("module bed_cut() {\n    difference() {\n        children();\n");
+    // bed_keep(s) is the section above the chamfer, made smaller by s. A
+    // wall thinner than 2 s would go away, so the parts of the section that
+    // an opening (smaller by s, then larger by s) loses stay at full size:
+    // a thin wall keeps its first layers and gets no chamfer.
+    let mut s = format!(
+        "module bed_ref() projection(cut = true) translate([0, 0, -{zref}]) children();\n\
+         module bed_keep(d) {{\n    \
+             offset(delta = -d) bed_ref() children();\n    \
+             offset(delta = 0.01) offset(delta = -0.01) difference() {{\n        \
+                 bed_ref() children();\n        \
+                 offset(delta = d) offset(delta = -d) bed_ref() children();\n    \
+             }}\n\
+         }}\n\
+         module bed_cut() {{\n    difference() {{\n        children();\n",
+        zref = scad::num(zref)
+    );
     for i in 0..n {
         let lo = if i == 0 { 0.0 } else { layers.top(i - 1) };
         let hi = layers.top(i);
@@ -146,13 +161,12 @@ pub fn bed_cut_module(c: f32, layers: Layers) -> Option<String> {
         let (z0, h) = if i == 0 { (-1.0, hi + 1.0) } else { (lo, hi - lo) };
         let _ = writeln!(
             s,
-            "        difference() {{\n            translate([-10000, -10000, {}]) cube([20000, 20000, {}]);\n            translate([0, 0, {}]) linear_extrude({}) offset(delta = -{}) projection(cut = true) translate([0, 0, -{}]) children();\n        }}",
+            "        difference() {{\n            translate([-10000, -10000, {}]) cube([20000, 20000, {}]);\n            translate([0, 0, {}]) linear_extrude({}) bed_keep({}) children();\n        }}",
             scad::num(z0),
             scad::num(h),
             scad::num(lo - 1.0),
             scad::num(hi - lo + 2.0),
             scad::num(shrink),
-            scad::num(zref),
         );
     }
     s.push_str("    }\n}\n");
@@ -258,10 +272,50 @@ mod tests {
             height: 0.2,
         };
         let m = bed_cut_module(0.4, l).unwrap();
-        assert_eq!(m.matches("projection(cut = true)").count(), 2);
-        assert!(m.contains("offset(delta = -0.4)"), "{m}");
-        assert!(m.contains("offset(delta = -0.2)"), "{m}");
+        assert_eq!(m.matches("bed_keep(").count(), 3, "{m}");
+        assert!(m.contains("bed_keep(0.4)"), "{m}");
+        assert!(m.contains("bed_keep(0.2)"), "{m}");
         assert!(bed_cut_module(0.05, l).is_none());
+    }
+
+    #[test]
+    #[ignore = "needs openscad-nightly"]
+    fn thin_wall_keeps_its_first_layer() {
+        use std::sync::atomic::AtomicBool;
+        // A block and, apart from it, a wall of 0.8 mm (thinner than two
+        // times the chamfer).
+        let path = std::env::temp_dir().join(format!("cocad-fix-thin-{}.scad", std::process::id()));
+        std::fs::write(
+            &path,
+            "cube([20, 20, 10]); translate([30, 0, 0]) cube([0.8, 20, 5]);",
+        )
+        .unwrap();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let cfg = Config::default();
+        let mesh = crate::openscad::render(&cfg, &path, &[], &cancel).unwrap().mesh;
+        let _ = std::fs::remove_file(&path);
+        let s = Settings {
+            chamfer: true,
+            ..Settings::default()
+        };
+        let (out, report) = apply(
+            &cfg,
+            &mesh,
+            &s,
+            Layers::default(),
+            &Limits::default(),
+            &Area::default(),
+            &cancel,
+        )
+        .unwrap();
+        assert!(report.chamfer);
+        let a: f32 = super::super::section(&out, 0.1)
+            .iter()
+            .map(|l| super::super::loop_area(l))
+            .sum();
+        // The block is 19.2 x 19.2 at z 0.1, the wall stays 0.8 x 20.
+        let want = 19.2 * 19.2 + 0.8 * 20.0;
+        assert!((a - want).abs() < 0.5, "area {a}, want {want}");
     }
 
     #[test]
