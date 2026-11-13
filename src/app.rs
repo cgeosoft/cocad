@@ -1829,7 +1829,7 @@ impl App {
     }
 
     fn model_panel(&mut self, ui: &mut egui::Ui) {
-        self.panel_head(ui, "Build the model and export it.");
+        self.panel_head(ui, "Build the model and look at its parts.");
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
@@ -1895,9 +1895,6 @@ impl App {
         self.cfg.bed
     }
 
-    /// The Export card. It stays at the bottom of the right panel in all
-    /// tabs, and it does not close. STL and 3MF write the current plate,
-    /// STEP writes the model as built.
     /// The fixed card at the bottom of the Optimize tab. Export 3MF writes
     /// the current plate; the arrow opens a menu above it with the other
     /// exports. The card does not close.
@@ -1931,46 +1928,62 @@ impl App {
             }
             let arrow = arrow.on_hover_text("More exports");
             let id = ui.make_persistent_id("export_menu");
-            if arrow.clicked() {
+            let toggled = arrow.clicked();
+            if toggled {
                 ui.memory_mut(|m| m.toggle_popup(id));
             }
-            let group = main.union(arrow);
-            egui::popup::popup_above_or_below_widget(
-                ui,
-                id,
-                &group,
-                egui::AboveOrBelow::Above,
-                egui::PopupCloseBehavior::CloseOnClick,
-                |ui| {
-                    ui.set_min_width(group.rect.width() - 12.0);
-                    if ui::menu_item(ui, "STL: this plate", "", plate_ok, false).clicked() {
-                        pick = Some((Format::Stl, false));
-                    }
-                    if let Some(n) = plates.filter(|n| *n > 1) {
-                        let all3 = format!("3MF: all {n} plates");
-                        if ui::menu_item(ui, &all3, "a file each", plate_ok, false).clicked() {
-                            pick = Some((Format::ThreeMf, true));
+            if !ui.memory(|m| m.is_popup_open(id)) {
+                return;
+            }
+            // The menu opens above the button group. It is at least 300 px
+            // wide and grows to the left, so that the labels fit.
+            let group = main.rect.union(arrow.rect);
+            let width = group.width().max(300.0);
+            let area = egui::Area::new(id.with("area"))
+                .kind(egui::UiKind::Popup)
+                .order(egui::Order::Foreground)
+                .fixed_pos(group.right_top() - Vec2::new(0.0, 4.0))
+                .pivot(egui::Align2::RIGHT_BOTTOM)
+                .constrain(true)
+                .show(ui.ctx(), |ui| {
+                    egui::Frame::popup(ui.style()).show(ui, |ui| {
+                        ui.set_width(width - 16.0);
+                        if ui::menu_item(ui, "STL: this plate", "", plate_ok, false).clicked() {
+                            pick = Some((Format::Stl, false));
                         }
-                        let all_stl = format!("STL: all {n} plates");
-                        if ui::menu_item(ui, &all_stl, "a file each", plate_ok, false).clicked() {
-                            pick = Some((Format::Stl, true));
-                        }
-                    }
-                    if ui::menu_item(ui, "STEP: the model as built", "", can_export, false)
-                        .clicked()
-                    {
-                        pick = Some((Format::Step, false));
-                    }
-                    if multicolor {
-                        for slicer in Slicer::ALL {
-                            let label = format!("Multicolor 3MF: {}", slicer.label());
-                            if ui::menu_item(ui, &label, "", can_export, false).clicked() {
-                                slicer_pick = Some(slicer);
+                        if let Some(n) = plates.filter(|n| *n > 1) {
+                            let all3 = format!("3MF: all {n} plates");
+                            if ui::menu_item(ui, &all3, "a file each", plate_ok, false).clicked() {
+                                pick = Some((Format::ThreeMf, true));
+                            }
+                            let all_stl = format!("STL: all {n} plates");
+                            if ui::menu_item(ui, &all_stl, "a file each", plate_ok, false).clicked() {
+                                pick = Some((Format::Stl, true));
                             }
                         }
-                    }
-                },
-            );
+                        if ui::menu_item(ui, "STEP: the model as built", "", can_export, false)
+                            .clicked()
+                        {
+                            pick = Some((Format::Step, false));
+                        }
+                        if multicolor {
+                            for slicer in Slicer::ALL {
+                                let label = format!("Multicolor 3MF: {}", slicer.label());
+                                if ui::menu_item(ui, &label, "", can_export, false).clicked() {
+                                    slicer_pick = Some(slicer);
+                                }
+                            }
+                        }
+                    });
+                });
+            // A choice, Escape or a click outside the menu closes it.
+            let outside = !toggled
+                && ui.input(|i| i.pointer.any_click())
+                && !area.response.contains_pointer();
+            let escape = ui.input(|i| i.key_pressed(egui::Key::Escape));
+            if pick.is_some() || slicer_pick.is_some() || outside || escape {
+                ui.memory_mut(|m| m.close_popup());
+            }
         });
         if let Some((fmt, all)) = pick {
             self.export(fmt, all);
