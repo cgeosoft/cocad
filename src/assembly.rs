@@ -318,11 +318,25 @@ impl Assembly {
         planes: &[Vec4],
         alpha: &[f32],
     ) -> Option<(usize, f32)> {
+        self.pick_triangle(origin, dir, offsets, planes, alpha)
+            .map(|(i, _, t)| (i, t))
+    }
+
+    /// As `pick`, and also the triangle of the hit in `mesh`: (part,
+    /// triangle, distance).
+    pub fn pick_triangle(
+        &self,
+        origin: Vec3,
+        dir: Vec3,
+        offsets: &[Vec3],
+        planes: &[Vec4],
+        alpha: &[f32],
+    ) -> Option<(usize, usize, f32)> {
         let inv = dir.recip();
         let kept = |p: Vec3| planes.iter().all(|c| c.truncate().dot(p) + c.w >= 0.0);
         // The nearest hit on a part that is not transparent, and on a
         // transparent part.
-        let mut best: [Option<(usize, f32)>; 2] = [None, None];
+        let mut best: [Option<(usize, usize, f32)>; 2] = [None, None];
         for (i, part) in self.parts.iter().enumerate() {
             let o = origin - offsets.get(i).copied().unwrap_or(Vec3::ZERO);
             let a = alpha.get(i).copied().unwrap_or(1.0);
@@ -330,7 +344,7 @@ impl Assembly {
                 continue;
             }
             let slot = &mut best[usize::from(a < 1.0)];
-            let mut limit = slot.map_or(f32::INFINITY, |b| b.1);
+            let mut limit = slot.map_or(f32::INFINITY, |b| b.2);
             match ray_box(o, inv, &part.bounds) {
                 Some(t) if t <= limit => {}
                 _ => continue,
@@ -341,7 +355,7 @@ impl Assembly {
                     && kept(o + dir * t)
                 {
                     limit = t;
-                    *slot = Some((i, t));
+                    *slot = Some((i, k, t));
                 }
             }
         }
@@ -916,6 +930,17 @@ mod tests {
         // From in the large cube: its far face, a back face.
         let o = Vec3::new(25.0, 4.0, 3.0);
         assert_eq!(a.pick(o, Vec3::X, &none, &[], &[]), Some((0, 5.0)));
+    }
+
+    #[test]
+    fn pick_triangle_gives_the_face_that_the_ray_hits() {
+        let a = two_cubes();
+        let o = Vec3::new(1.0, 3.0, 30.0);
+        let (part, tri, _) = a.pick_triangle(o, -Vec3::Z, &[], &[], &[]).unwrap();
+        assert_eq!(part, 1);
+        assert!(a.parts[1].tris.contains(&tri));
+        // The top face of the small cube.
+        assert!(a.mesh.tri(tri).iter().all(|v| (v.z - 5.0).abs() < 1e-4));
     }
 
     #[test]

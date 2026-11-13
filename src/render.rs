@@ -513,8 +513,18 @@ pub struct Renderer {
     stencil: Option<bool>,
     mesh_rev: u64,
     slice_rev: u64,
-    /// The grid cells, the floor height (bits) and the theme.
-    grid_key: (i32, i32, i32, i32, u32, bool),
+    /// What the grid buffer shows now.
+    grid_key: GridKey,
+}
+
+/// The content of the grid buffer.
+#[derive(Clone, Copy, PartialEq)]
+enum GridKey {
+    None,
+    /// The floor grid: the cells, the floor height (bits) and the theme.
+    Floor(i32, i32, i32, i32, u32, bool),
+    /// The bed of the Optimize tab: width and depth (bits) and the theme.
+    Bed(u32, u32, bool),
 }
 
 unsafe fn program(
@@ -571,7 +581,7 @@ impl Renderer {
                 stencil: None,
                 mesh_rev: u64::MAX,
                 slice_rev: u64::MAX,
-                grid_key: (0, 0, 0, -1, 0, true),
+                grid_key: GridKey::None,
             })
         }
     }
@@ -666,30 +676,24 @@ impl Renderer {
         // The floor is below the lowest point, for example a part that the
         // explode moves down.
         let z = min.z.min(0.0) - 0.01;
-        let key = (
+        let (x0, y0, x1, y1) = (
             snap(min.x - pad, false),
             snap(min.y - pad, false),
             snap(max.x + pad, true),
             snap(max.y + pad, true),
-            z.to_bits(),
-            dark,
         );
+        let key = GridKey::Floor(x0, y0, x1, y1, z.to_bits(), dark);
         if key == self.grid_key {
             return;
         }
         self.grid_key = key;
-        let (x0, y0, x1, y1, _, _) = key;
         let mut d = Vec::new();
         let mut line = |a: [f32; 2], b: [f32; 2], c: [f32; 3]| {
             d.extend_from_slice(&[
                 a[0], a[1], z, c[0], c[1], c[2], b[0], b[1], z, c[0], c[1], c[2],
             ]);
         };
-        let (minor, major) = if dark {
-            ([0.22, 0.23, 0.26], [0.34, 0.35, 0.39])
-        } else {
-            ([0.60, 0.63, 0.67], [0.47, 0.50, 0.55])
-        };
+        let (minor, major) = grid_colors(dark);
         for x in (x0..=x1).step_by(10) {
             if x != 0 {
                 line(
@@ -708,9 +712,22 @@ impl Renderer {
                 );
             }
         }
-        line([x0 as f32, 0.0], [x1 as f32, 0.0], [0.85, 0.3, 0.3]);
-        line([0.0, y0 as f32], [0.0, y1 as f32], [0.35, 0.8, 0.4]);
+        line([x0 as f32, 0.0], [x1 as f32, 0.0], AXIS_X);
+        line([0.0, y0 as f32], [0.0, y1 as f32], AXIS_Y);
         unsafe { self.grid.upload(gl, &d) };
+    }
+
+    /// The bed of the Optimize tab in the grid buffer: a grid from (0, 0) to
+    /// (`w`, `d`) at z = 0, 10 mm cells, brighter every 50 mm, and the
+    /// outline. The X and Y axes are the front and left edges.
+    pub fn set_bed(&mut self, gl: &glow::Context, w: f32, d: f32, dark: bool) {
+        let key = GridKey::Bed(w.to_bits(), d.to_bits(), dark);
+        if key == self.grid_key {
+            return;
+        }
+        self.grid_key = key;
+        let data = bed_lines(w, d, dark);
+        unsafe { self.grid.upload(gl, &data) };
     }
 
     pub fn paint(&mut self, gl: &glow::Context, view: &View) {
@@ -1029,6 +1046,55 @@ fn stencil_bits(gl: &glow::Context) -> i32 {
     }
 }
 
+/// The colors of the X and Y axis lines.
+const AXIS_X: [f32; 3] = [0.85, 0.3, 0.3];
+const AXIS_Y: [f32; 3] = [0.35, 0.8, 0.4];
+
+/// The minor and the major grid line colors.
+fn grid_colors(dark: bool) -> ([f32; 3], [f32; 3]) {
+    if dark {
+        ([0.22, 0.23, 0.26], [0.34, 0.35, 0.39])
+    } else {
+        ([0.60, 0.63, 0.67], [0.47, 0.50, 0.55])
+    }
+}
+
+/// The lines of a bed of `w` x `d` mm (see `Renderer::set_bed`): position
+/// and color of each end, 6 floats each.
+fn bed_lines(w: f32, d: f32, dark: bool) -> Vec<f32> {
+    let z = -0.01;
+    let (minor, major) = grid_colors(dark);
+    let edge = if dark {
+        [0.55, 0.57, 0.62]
+    } else {
+        [0.32, 0.35, 0.40]
+    };
+    let mut out = Vec::new();
+    let mut line = |a: [f32; 2], b: [f32; 2], c: [f32; 3]| {
+        out.extend_from_slice(&[
+            a[0], a[1], z, c[0], c[1], c[2], b[0], b[1], z, c[0], c[1], c[2],
+        ]);
+    };
+    let (w, d) = (w.max(0.0), d.max(0.0));
+    let mut x = 10;
+    while (x as f32) < w - 0.5 {
+        let c = if x % 50 == 0 { major } else { minor };
+        line([x as f32, 0.0], [x as f32, d], c);
+        x += 10;
+    }
+    let mut y = 10;
+    while (y as f32) < d - 0.5 {
+        let c = if y % 50 == 0 { major } else { minor };
+        line([0.0, y as f32], [w, y as f32], c);
+        y += 10;
+    }
+    line([w, 0.0], [w, d], edge);
+    line([0.0, d], [w, d], edge);
+    line([0.0, 0.0], [w, 0.0], AXIS_X);
+    line([0.0, 0.0], [0.0, d], AXIS_Y);
+    out
+}
+
 pub fn kind_color(k: Kind) -> [f32; 3] {
     match k {
         Kind::OuterWall => ORANGE,
@@ -1042,6 +1108,17 @@ pub fn kind_color(k: Kind) -> [f32; 3] {
 mod tests {
     use super::*;
     use std::cmp::Ordering;
+
+    #[test]
+    fn bed_lines_stay_on_the_bed() {
+        let v = bed_lines(255.0, 210.0, true);
+        assert_eq!(v.len() % 12, 0);
+        // 25 inner lines across x, 20 across y, and the 4 edges.
+        assert_eq!(v.len() / 12, 25 + 20 + 4);
+        for p in v.chunks(6) {
+            assert!((0.0..=255.0).contains(&p[0]) && (0.0..=210.0).contains(&p[1]));
+        }
+    }
 
     #[test]
     fn plane_side_of_a_box() {
