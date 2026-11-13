@@ -219,3 +219,6 @@ mod tests {
         assert!((mirrored.volume() - v).abs() < 1e-3);
     }
 }
+
+#[cfg(test)]
+mod showcase;

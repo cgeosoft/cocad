@@ -331,6 +331,23 @@ pub fn run(
         };
         match pieces {
             Ok(pieces) => {
+                // A cut with no room for its pins or tabs is a flat cut.
+                // Tell the user, so the joint is not a surprise.
+                for (c, pl) in split::places(&p.mesh, &sp).iter().enumerate() {
+                    let at = sp.cuts.get(c).map_or(0.0, |c| c.at);
+                    let none = match sp.joint {
+                        split::Joint::Pins => pl.pins.is_empty(),
+                        split::Joint::Dovetail => pl.tabs.is_empty(),
+                        split::Joint::Flat => false,
+                    };
+                    if none {
+                        errors.push(format!(
+                            "{}: the cut at {at:.1} mm has no room for {}. It is a flat cut.",
+                            p.name,
+                            if sp.joint == split::Joint::Pins { "pins" } else { "tabs" }
+                        ));
+                    }
+                }
                 for piece in pieces.iter() {
                     let name = format!("{} {}", p.name, piece.label);
                     // A piece keeps its own orientation and copies.

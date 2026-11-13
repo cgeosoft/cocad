@@ -11,3 +11,5 @@ assets/tour/** -filter -diff -merge -text
 extras/website/images/** -filter -diff -merge -text
 # Website images: plain git, so that Cloudflare Pages can build from the repo
 extras/website/public/**/*.png -filter -diff -merge -text
+# Guide pictures: plain git, so the wiki shows them
+assets/guide/** -filter -diff -merge -text
