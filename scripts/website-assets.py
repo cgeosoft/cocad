@@ -2,9 +2,10 @@
 """Makes the generated files of the website in extras/website/public/assets/.
 
 - mesh/<model>/<variant>.bin and mesh/models.json: real meshes of the example
-  models. The app CLI renders them, so the sizes, times and estimates on the
-  site are measured values.
-- img/: site images from extras/website/images/ and assets/tour/, as WebP.
+  models. The app CLI builds and slices them as built (`--as-built`, without
+  the print preparation of the Optimize tab), so the sizes, times and
+  estimates on the site are measured values.
+- img/: site images from extras/website/images/, as WebP.
 
 Needs a release build, OpenSCAD and ImageMagick.
 Usage: scripts/website-assets.py [--meshes-only | --images-only]
@@ -68,12 +69,14 @@ MODELS = {
 
 IMAGES = {
     "extras/website/images/screen-model.jpg": ("screen-model", 1600),
-    "extras/website/images/screen-slice.jpg": ("screen-slice", 1600),
-    "extras/website/images/screen-photo.jpg": ("screen-photo", 1600),
+    "extras/website/images/screen-optimize.jpg": ("screen-optimize", 1600),
+    "extras/website/images/screen-fixes.jpg": ("screen-fixes", 1600),
+    "extras/website/images/screen-layers.jpg": ("screen-layers", 1600),
+    "extras/website/images/screen-render.jpg": ("screen-render", 1600),
     "extras/website/images/screen-menu.jpg": ("screen-menu", 1600),
-    "assets/tour/3-sets.jpg": ("screen-sets", 1120),
-    "assets/tour/4-export.jpg": ("screen-export", 1120),
-    "assets/tour/7-agent.jpg": ("screen-agent", 1120),
+    "extras/website/images/screen-sets.jpg": ("screen-sets", 1600),
+    "extras/website/images/screen-export.jpg": ("screen-export", 1600),
+    "extras/website/images/screen-agent.jpg": ("screen-agent", 1600),
     "extras/website/images/render-gear.jpg": ("render-gear", 1000),
     "extras/website/images/render-honeycomb.jpg": ("render-honeycomb", 1000),
     "extras/website/images/render-knob.jpg": ("render-knob", 1000),
@@ -160,12 +163,12 @@ def make_meshes(work):
             name = variant_name(values)
             args = defines(names, values)
             stl = work / "out.stl"
-            log = run("export", model["file"], "-o", str(stl), *args)
+            log = run("export", model["file"], "-o", str(stl), "--as-built", *args)
             seconds = float(re.search(r"in ([\d.]+) s", log).group(1))
             verts, index = read_stl(stl)
             low, high, volume, open_edges = measure(verts, index)
             write_mesh(folder / f"{name}.bin", verts, index, low, high)
-            log = run("slice", model["file"], *args, "--layer-height", "0.2", "--infill", "20", "--walls", "3")
+            log = run("slice", model["file"], "--as-built", *args, "--layer-height", "0.2", "--infill", "20", "--walls", "3")
             variants[name] = {
                 "seconds": seconds,
                 "triangles": len(index) // 3,
@@ -176,6 +179,7 @@ def make_meshes(work):
                 "filament_m": float(re.search(r"filament\s+([\d.]+) m", log).group(1)),
                 "grams": float(re.search(r", ([\d.]+) g", log).group(1)),
                 "print_time": re.search(r"print time\s+(.+?) \(rough\)", log).group(1),
+                "slice_ms": int(re.search(r"sliced in\s+(\d+) ms", log).group(1)),
             }
             print(slug, name, variants[name]["triangles"], "triangles", seconds, "s", flush=True)
         manifest[slug] = {

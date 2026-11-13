@@ -14,11 +14,11 @@ The look follows the Portfolio website (`portfolio/extras/website`). The colors 
 | `public/analytics.js` | Consent box, consent record and PostHog. The key comes from `deploy.sh` |
 | `test/analytics.test.js` | Consent and allowlist tests |
 | `public/script.js` | OS detection, download links, scroll reveal, screenshot tabs, lightbox |
-| `public/viewer.js` | WebGL2 viewer: solid, wire and slice modes, with smooth shading |
+| `public/viewer.js` | WebGL2 viewer: solid, wire and slice modes, with smooth shading. The page calls the slice mode Layers |
 | `public/demo.js` | Hero loop and the agent demo |
 | `public/assets/mesh/` | Generated. Example meshes and `models.json` |
-| `images/` | Full-size screenshots and renders. Source of `public/assets/img/`. Not deployed |
-| `public/assets/img/` | Generated. WebP copies of `images/` and of some tour screenshots in `../../assets/tour/` |
+| `images/` | Full-size screenshots (1600 × 1040) and renders. Source of `public/assets/img/`. Not deployed |
+| `public/assets/img/` | Generated. WebP copies of `images/` |
 | `public/privacy/index.html` | Privacy Notice for the app and the site |
 | `public/llms.txt`, `robots.txt`, `sitemap.xml` | Files for crawlers and LLMs |
 | `public/assets/fonts/` | Self-hosted fonts (Latin subset) with their OFL licenses |
@@ -27,7 +27,7 @@ The look follows the Portfolio website (`portfolio/extras/website`). The colors 
 
 ## Demo data
 
-`scripts/website-assets.py` runs the app CLI on the example models. It writes the meshes and the measured values: render time, size, volume, open edges, layers, filament, weight and print time. It also writes the images.
+`scripts/website-assets.py` runs the app CLI on the example models, as built (`--as-built`). It writes the meshes and the measured values: build time, size, volume, open edges, layers, filament, weight, print time and slice time. It also writes the images.
 
 ```bash
 cargo build --release
@@ -37,6 +37,10 @@ scripts/website-assets.py
 Change the prebuilt parameter values in `MODELS` in that script. The prompts of the agent demo are in `PROMPTS` in `public/demo.js`. Each prompt must name values that `MODELS` has.
 
 The chat text is scripted. The tool names and the numbers are real. The page draws the layers on the model surface, and the outline of the current layer. The app draws walls, infill and skin.
+
+## Screenshots
+
+The files `images/screen-*.jpg` are screenshots of the app at 1600 × 1040, in the dark theme. Make them on a private display with the `gui-test` skill. The Optimize tab shots use `examples/desk-dock.scad` with all print fixes on, Auto orientation for the clips and the split that CoCAD proposes. After a change, run `scripts/website-assets.py --images-only`.
 
 ## Behavior
 
