@@ -46,6 +46,7 @@ Usage:
                                                --for writes a multicolor 3MF for that slicer.
   cocad slice FILE.scad [-P SET] [-D name=value]... [PRINT OPTIONS]
                     [--layer-height MM] [--first-layer MM] [--infill PCT] [--walls N]
+                    [--line-width MM] [--solid-layers N] [--speed MM/S]
                                                Slice the plates and print estimates
   cocad photo FILE.scad -o OUT.png [-P SET] [-D name=value]... [--size WxH] [--samples N]
                     [--color RRGGBB] [--finish matte|satin|gloss] [--studio dark|light] [--layer-lines]
