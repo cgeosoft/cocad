@@ -16,7 +16,7 @@ To try it, open **File > Examples > Multicolor badge**.
 
 ## How to export
 
-When the model has named parts, the menu of the **Export** card in the **Optimize** tab has two more items: **Multicolor 3MF: PrusaSlicer 2.9** and **Multicolor 3MF: OrcaSlicer**. To open the menu, click the arrow at the right of **Export 3MF**. The **Model** menu has the same exports:
+When the model has named parts, the export menu in the **Optimize** tab has two more items: **Multicolor 3MF: PrusaSlicer 2.9** and **Multicolor 3MF: OrcaSlicer**. To open the menu, click the arrow at the right of **Export 3MF**. The **Model** menu has the same exports:
 
 - **Export multicolor 3MF for PrusaSlicer 2.9**
 - **Export multicolor 3MF for OrcaSlicer**

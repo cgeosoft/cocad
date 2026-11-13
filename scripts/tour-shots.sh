@@ -116,7 +116,7 @@ mcp set_view '{"view":"iso","fit":true}'
 sleep 3
 xdotool mousemove 565 360 click 4 click 4 click 4
 sleep 1
-xdotool mousemove $((width - 39)) $((height - 60)) click 1
+xdotool mousemove $((width - 39)) $((height - 60)) sleep 0.5 click 1
 # Move the pointer off the buttons, so that no tooltip shows. The menu stays
 # open. Then put it back in the middle for the next shots.
 xdotool mousemove 600 17
@@ -156,7 +156,7 @@ shot 8-agent
 # Settings on the MCP server page (the fifth page in the list).
 xdotool key ctrl+comma
 sleep 1
-xdotool mousemove 300 334 click 1
+xdotool mousemove 300 334 sleep 0.5 click 1
 shot 9-connect
 xdotool key Escape
 sleep 0.5

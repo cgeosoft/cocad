@@ -45,7 +45,7 @@ The **Section** bar at the top right of the 3D view cuts the plate across the ax
 
 The tab has these cards, from top to bottom: **Plate**, **Orientation**, **Print fixes**, **Check**, **Layers**, **Printer** and **Print settings**. **Export 3MF** is below them, at the bottom of the tab. See [Export](Export).
 
-Click the header of a card to close it or to open it. A closed card shows a short value in its header, for example the print time in the **Layers** card. CoCAD remembers which cards are closed. The **Export** card does not close.
+Click the header of a card to close it or to open it. A closed card shows a short value in its header, for example the print time in the **Layers** card. CoCAD remembers which cards are closed. **Export 3MF** at the bottom of the tab is not in a card: it is always there.
 
 ### Plate
 

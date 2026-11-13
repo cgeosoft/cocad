@@ -47,11 +47,11 @@ To set the print area for all models that you open for the first time, use **Fil
 
 ## 4. Turn on the print fixes
 
-Open the **Print fixes** card and turn on all four fixes.
+Open the **Print fixes** card. Turn on **Teardrop holes**, **Bridges**, **Bed chamfer** and **Brim on small islands**.
 
-![All print fixes on](https://raw.githubusercontent.com/cgeosoft/cocad/main/assets/guide/app-3-fixes.jpg)
+![Four print fixes on](https://raw.githubusercontent.com/cgeosoft/cocad/main/assets/guide/app-3-fixes.jpg)
 
-Each fix shows the number of places that it changed. The stand now has the status **Fits**: the fixes removed all its problems. The line of the **Export** card names the fixes: "Bed chamfer, 4 teardrops, 6 bridge fixes".
+Each fix shows the number of places that it changed. The stand now has the status **Fits**: the fixes removed all its problems. Hold the mouse on **Export 3MF** to see the fixes: "Bed chamfer, 4 teardrops, 6 bridge fixes".
 
 The sections below show each fix on a part of the desk dock. The parts are in print position. In the section pictures, the bed is at the bottom.
 

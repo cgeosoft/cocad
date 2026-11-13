@@ -92,7 +92,7 @@ mcp set_view '{"view":"top","fit":true}' >/dev/null
 # Open the export menu: the arrow
 # is the narrow button at the right of Export 3MF. Then move the pointer off
 # the buttons, so that no tooltip shows. The next click closes the menu.
-xdotool mousemove $((width - 39)) $((height - 60)) click 1
+xdotool mousemove $((width - 39)) $((height - 60)) sleep 0.5 click 1
 xdotool mousemove 700 17
 shot app-7-small-bed 2
 mcp set_optimize '{"area":[250,220,270]}' >/dev/null

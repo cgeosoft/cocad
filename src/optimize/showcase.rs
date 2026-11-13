@@ -393,3 +393,54 @@ fn showcase_pins_without_room_are_reported() {
     );
 }
 
+#[test]
+#[ignore = "needs openscad-nightly"]
+fn showcase_split_pieces_lie_as_the_whole_part() {
+    use super::pipeline::{self, Input, Job, PartState, State};
+    let raw = std::sync::Arc::new(part("plate()"));
+    // Auto puts the whole plate on its bottom face: the wordmark is on top.
+    let down = orient::auto_down(&raw, &Limits::default());
+    let mut state = State::new(AREA);
+    state.fixes.bridges = true;
+    let sp = split::propose(&raw, &AREA, split::Joint::Dovetail).unwrap();
+    state.parts.insert(
+        "plate".into(),
+        PartState {
+            split: Some(sp),
+            ..PartState::default()
+        },
+    );
+    let job = Job {
+        whole_volume: raw.volume(),
+        parts: vec![Input {
+            name: "plate".into(),
+            mesh: raw,
+        }],
+        multicolor: false,
+        model_name: "desk-dock".into(),
+        state,
+        layers: Layers::default(),
+        limits: Limits::default(),
+    };
+    let o = pipeline::run(
+        &Config::default(),
+        &job,
+        &std::sync::Mutex::new(pipeline::Cache::default()),
+        &cancel(),
+    )
+    .unwrap();
+    let pieces: Vec<&pipeline::PrintPart> = o.parts.iter().filter(|p| p.piece.is_some()).collect();
+    assert_eq!(pieces.len(), 2, "two pieces");
+    let mut bridges = 0;
+    for p in pieces {
+        // Each piece on Auto has the bed face of the whole part.
+        let d = p.matrix.transform_vector3(down).normalize();
+        assert!(d.distance(glam::Vec3::NEG_Z) < 1e-3, "{}: down goes to {d}", p.name);
+        // The stored choice of the piece stays Auto.
+        assert_eq!(p.state.orientation.choice, Choice::Auto, "{}", p.name);
+        println!("{}: bridges {}", p.name, p.report.bridges);
+        bridges += p.report.bridges;
+    }
+    // The two counterbores and the four magnet pockets open to the bed.
+    assert!(bridges >= 6, "bridges {bridges}");
+}
