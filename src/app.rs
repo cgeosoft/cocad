@@ -98,9 +98,7 @@ impl Mode {
                 "Printer",
                 "Print settings",
             ],
-            Mode::Render => &[
-                "Progress", "Material", "Parts", "Explode", "Scene", "Quality",
-            ],
+            Mode::Render => &["Material", "Parts", "Explode", "Scene", "Quality"],
         }
     }
 
@@ -1900,79 +1898,86 @@ impl App {
     /// The Export card. It stays at the bottom of the right panel in all
     /// tabs, and it does not close. STL and 3MF write the current plate,
     /// STEP writes the model as built.
+    /// The fixed card at the bottom of the Optimize tab. Export 3MF writes
+    /// the current plate; the arrow opens a menu above it with the other
+    /// exports. The card does not close.
     fn export_card(&mut self, ui: &mut egui::Ui) {
         let plates = self.current_plates();
-        let empty = plates == Some(0);
         let parts_ready = self.parts_job.is_none();
+        let can_export = self.can_export();
+        let plate_ok = can_export && parts_ready && plates != Some(0);
+        let why = if !parts_ready {
+            "CoCAD is still finding the parts"
+        } else if plates == Some(0) {
+            "No part is on the plate"
+        } else {
+            "Build the model first"
+        };
+        let multicolor = !crate::parts::names(&self.params).is_empty();
+        let summary = self.export_summary();
+        let mut pick: Option<(Format, bool)> = None;
+        let mut slicer_pick = None;
         ui::card(ui, |ui| {
             ui::section(ui, "Export");
-            ui.add(egui::Label::new(ui::dim(self.export_summary())).wrap());
-            let can_export = self.can_export();
-            let w = (ui.available_width() - 2.0 * ui.spacing().item_spacing.x) / 3.0;
-            let mut pick = None;
-            ui.horizontal(|ui| {
-                for fmt in Format::ALL {
-                    let b = ui::primary(&fmt.ext().to_uppercase()).min_size(Vec2::new(w, 34.0));
-                    let (enabled, hover) = if fmt == Format::Step {
-                        (
-                            can_export,
-                            "STEP (AP214, faceted): the model as built".to_string(),
-                        )
-                    } else if !parts_ready {
-                        (false, "CoCAD is still finding the parts".to_string())
-                    } else if empty {
-                        (false, "No part is on the plate".to_string())
-                    } else {
-                        (can_export, format!("{}: the current plate", fmt.label()))
-                    };
-                    let r = ui.add_enabled(enabled, b);
-                    let r = if enabled {
-                        r.on_hover_text(hover)
-                    } else {
-                        r.on_disabled_hover_text(hover)
-                    };
-                    if r.clicked() {
-                        pick = Some((fmt, false));
+            ui.add(egui::Label::new(ui::dim(summary)).wrap());
+            let (main, arrow) = ui::split_button(ui, "Export 3MF", plate_ok, can_export);
+            let main = if plate_ok {
+                main.on_hover_text("The current plate as 3MF: one object for each part")
+            } else {
+                main.on_disabled_hover_text(why)
+            };
+            if main.clicked() {
+                pick = Some((Format::ThreeMf, false));
+            }
+            let arrow = arrow.on_hover_text("More exports");
+            let id = ui.make_persistent_id("export_menu");
+            if arrow.clicked() {
+                ui.memory_mut(|m| m.toggle_popup(id));
+            }
+            let group = main.union(arrow);
+            egui::popup::popup_above_or_below_widget(
+                ui,
+                id,
+                &group,
+                egui::AboveOrBelow::Above,
+                egui::PopupCloseBehavior::CloseOnClick,
+                |ui| {
+                    ui.set_min_width(group.rect.width() - 12.0);
+                    if ui::menu_item(ui, "STL: this plate", "", plate_ok, false).clicked() {
+                        pick = Some((Format::Stl, false));
                     }
-                }
-            });
-            if let Some(n) = plates.filter(|n| *n > 1) {
-                ui.label(ui::dim(format!("All {n} plates, one file each")));
-                let w = (ui.available_width() - ui.spacing().item_spacing.x) / 2.0;
-                ui.horizontal(|ui| {
-                    for fmt in [Format::Stl, Format::ThreeMf] {
-                        let b = ui::primary(&format!("All {}", fmt.ext().to_uppercase()))
-                            .min_size(Vec2::new(w, 34.0));
-                        if ui
-                            .add_enabled(can_export, b)
-                            .on_hover_text("Export all plates")
-                            .clicked()
-                        {
-                            pick = Some((fmt, true));
+                    if let Some(n) = plates.filter(|n| *n > 1) {
+                        let all3 = format!("3MF: all {n} plates");
+                        if ui::menu_item(ui, &all3, "a file each", plate_ok, false).clicked() {
+                            pick = Some((Format::ThreeMf, true));
+                        }
+                        let all_stl = format!("STL: all {n} plates");
+                        if ui::menu_item(ui, &all_stl, "a file each", plate_ok, false).clicked() {
+                            pick = Some((Format::Stl, true));
                         }
                     }
-                });
-            }
-            if let Some((fmt, all)) = pick {
-                self.export(fmt, all);
-            }
-            if !crate::parts::names(&self.params).is_empty() {
-                ui.label(ui::dim("Multicolor 3MF"));
-                let w = (ui.available_width() - ui.spacing().item_spacing.x) / 2.0;
-                let mut pick = None;
-                ui.horizontal(|ui| {
-                    for slicer in Slicer::ALL {
-                        let b = ui::primary(slicer.label()).min_size(Vec2::new(w, 34.0));
-                        if ui.add_enabled(can_export, b).clicked() {
-                            pick = Some(slicer);
+                    if ui::menu_item(ui, "STEP: the model as built", "", can_export, false)
+                        .clicked()
+                    {
+                        pick = Some((Format::Step, false));
+                    }
+                    if multicolor {
+                        for slicer in Slicer::ALL {
+                            let label = format!("Multicolor 3MF: {}", slicer.label());
+                            if ui::menu_item(ui, &label, "", can_export, false).clicked() {
+                                slicer_pick = Some(slicer);
+                            }
                         }
                     }
-                });
-                if let Some(slicer) = pick {
-                    self.export_parts(slicer);
-                }
-            }
+                },
+            );
         });
+        if let Some((fmt, all)) = pick {
+            self.export(fmt, all);
+        }
+        if let Some(slicer) = slicer_pick {
+            self.export_parts(slicer);
+        }
     }
 
     fn set_mode(&mut self, mode: Mode) {
@@ -2770,49 +2775,55 @@ impl App {
         self.toast = Some((msg, Instant::now()));
     }
 
+    /// The fixed card at the bottom of the Render tab: the progress of the
+    /// render and Save PNG. It does not close.
+    fn render_card(&mut self, ui: &mut egui::Ui) {
+        let samples = self.photo_samples();
+        let target = self.photo.samples;
+        ui::card(ui, |ui| {
+            ui::section(ui, "Render");
+            let waiting = self.photo_job.is_none() && self.mesh.is_some();
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(format!("{samples}")).size(22.0));
+                ui.label(ui::dim(format!(
+                    "of {target} samples   ·   {} × {} px",
+                    self.photo.width, self.photo.height
+                )));
+            });
+            ui.add(
+                egui::ProgressBar::new(samples as f32 / target.max(1) as f32)
+                    .desired_height(6.0)
+                    .fill(ui::ACCENT),
+            );
+            let status = if waiting {
+                "Waiting for the view to rest…".to_string()
+            } else if samples >= target {
+                format!(
+                    "Done in {:.0} s",
+                    self.photo_started.elapsed().as_secs_f32()
+                )
+            } else {
+                format!("{:.0} s", self.photo_started.elapsed().as_secs_f32())
+            };
+            ui.label(ui::dim(status));
+            ui.add_space(4.0);
+            let w = ui.available_width();
+            let save = ui
+                .add_enabled_ui(samples > 0, |ui| {
+                    ui.add_sized(Vec2::new(w, 34.0), ui::primary("Save PNG"))
+                })
+                .inner;
+            if save.on_hover_text("Save the image at its full size").clicked() {
+                self.save_photo();
+            }
+        });
+    }
+
     fn render_panel(&mut self, ui: &mut egui::Ui) {
         self.panel_head(ui, "Path-traced render of the current view.");
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
-                let samples = self.photo_samples();
-                ui::card(ui, |ui| {
-                    let target = self.photo.samples;
-                    let note = format!("{samples} / {target}");
-                    if !self.card_head(ui, "Progress", &note) {
-                        return;
-                    }
-                    let waiting = self.photo_job.is_none() && self.mesh.is_some();
-                    ui.horizontal(|ui| {
-                        ui.label(RichText::new(format!("{samples}")).size(22.0));
-                        ui.label(ui::dim(format!("of {target} samples")));
-                    });
-                    ui.add(
-                        egui::ProgressBar::new(samples as f32 / target.max(1) as f32)
-                            .desired_height(6.0)
-                            .fill(ui::ACCENT),
-                    );
-                    let status = if waiting {
-                        "Waiting for the view to rest…".to_string()
-                    } else if samples >= target {
-                        format!(
-                            "Done in {:.0} s",
-                            self.photo_started.elapsed().as_secs_f32()
-                        )
-                    } else {
-                        format!("{:.0} s", self.photo_started.elapsed().as_secs_f32())
-                    };
-                    ui.label(ui::dim(status));
-                    ui.add_space(4.0);
-                    if ui
-                        .add_enabled(samples > 0, ui::primary("Save PNG"))
-                        .clicked()
-                    {
-                        self.save_photo();
-                    }
-                });
-                ui.add_space(4.0);
-
                 let part_colors = self.view3d.part_colors;
                 ui::card(ui, |ui| {
                     let note = match self.photo.finish {
@@ -3820,15 +3831,26 @@ impl eframe::App for App {
                 if ui::tabs(ui, &mut mode, &tabs) {
                     self.set_mode(mode);
                 }
-                // The Export card first, so that the tab gets the height
-                // that is left above it.
-                egui::TopBottomPanel::bottom("export")
-                    .frame(egui::Frame::NONE.inner_margin(egui::Margin {
-                        top: 10,
-                        ..Default::default()
-                    }))
-                    .show_separator_line(false)
-                    .show_inside(ui, |ui| self.export_card(ui));
+                // The fixed card at the bottom first, so that the tab gets
+                // the height that is left above it: Export in the Optimize
+                // tab, Save in the Render tab. The Model tab has none.
+                let bottom = |id: &'static str| {
+                    egui::TopBottomPanel::bottom(id)
+                        .frame(egui::Frame::NONE.inner_margin(egui::Margin {
+                            top: 10,
+                            ..Default::default()
+                        }))
+                        .show_separator_line(false)
+                };
+                match self.mode {
+                    Mode::Model => {}
+                    Mode::Optimize => {
+                        bottom("export").show_inside(ui, |ui| self.export_card(ui));
+                    }
+                    Mode::Render => {
+                        bottom("render").show_inside(ui, |ui| self.render_card(ui));
+                    }
+                }
                 match self.mode {
                     Mode::Model => self.model_panel(ui),
                     Mode::Optimize => self.optimize_panel(ui),

@@ -477,6 +477,59 @@ pub fn primary(text: &str) -> egui::Button<'static> {
         .corner_radius(8)
 }
 
+/// A button group: a wide accent button and a narrow accent button with
+/// an arrow up, for a menu that opens above it. Returns (main, arrow).
+pub fn split_button(
+    ui: &mut egui::Ui,
+    text: &str,
+    main_enabled: bool,
+    menu_enabled: bool,
+) -> (egui::Response, egui::Response) {
+    const H: f32 = 34.0;
+    const ARROW_W: f32 = 38.0;
+    const GAP: f32 = 2.0;
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = GAP;
+        let main_w = (ui.available_width() - ARROW_W - GAP).max(40.0);
+        let main = ui.add_enabled(
+            main_enabled,
+            egui::Button::new(RichText::new(text.to_string()).color(Color32::BLACK))
+                .fill(ACCENT)
+                .corner_radius(egui::CornerRadius {
+                    nw: 8,
+                    sw: 8,
+                    ne: 2,
+                    se: 2,
+                })
+                .min_size(vec2(main_w, H)),
+        );
+        let arrow = ui.add_enabled(
+            menu_enabled,
+            egui::Button::new("")
+                .fill(ACCENT)
+                .corner_radius(egui::CornerRadius {
+                    nw: 2,
+                    sw: 2,
+                    ne: 8,
+                    se: 8,
+                })
+                .min_size(vec2(ARROW_W, H)),
+        );
+        let c = arrow.rect.center();
+        let color = if menu_enabled {
+            Color32::BLACK
+        } else {
+            Color32::from_black_alpha(100)
+        };
+        ui.painter().add(egui::Shape::line(
+            vec![c + vec2(-5.0, 2.5), c + vec2(0.0, -2.5), c + vec2(5.0, 2.5)],
+            Stroke::new(1.8_f32, color),
+        ));
+        (main, arrow)
+    })
+    .inner
+}
+
 /// Borderless icon-ish button for toolbars.
 pub fn ghost(text: &str, active: bool) -> egui::Button<'static> {
     let color = if active { ACCENT } else { c().text };
