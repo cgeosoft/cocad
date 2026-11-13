@@ -39,7 +39,7 @@ Usage:
                                                other MCP clients. Controls the open window.
   cocad params FILE.scad                 List the Customizer parameters
   cocad export FILE.scad -o OUT [-P SET] [-D name=value]... [--for prusa|orca]
-                                               Render and write OUT (.stl, .3mf or .step).
+                                               Build and write OUT (.stl, .3mf or .step).
                                                --for writes a multicolor 3MF for that slicer.
   cocad slice FILE.scad [-P SET] [-D name=value]... [--layer-height MM] [--infill PCT] [--walls N]
                                                Slice and print estimates
@@ -229,7 +229,7 @@ fn parse_batch(args: &[String]) -> Result<Batch> {
     })
 }
 
-fn render(b: &Batch) -> Result<mesh::Mesh> {
+fn build(b: &Batch) -> Result<mesh::Mesh> {
     let cancel = Arc::new(AtomicBool::new(false));
     let out = openscad::render(
         &openscad::Config::load(),
@@ -240,7 +240,7 @@ fn render(b: &Batch) -> Result<mesh::Mesh> {
     let bb = out.mesh.bounds().unwrap();
     let s = bb.size();
     eprintln!(
-        "rendered {} triangles, {:.2} x {:.2} x {:.2} mm in {:.2} s",
+        "built {} triangles, {:.2} x {:.2} x {:.2} mm in {:.2} s",
         out.mesh.triangles.len(),
         s.x,
         s.y,
@@ -316,7 +316,7 @@ fn cmd_export(args: &[String]) -> Result<()> {
             );
         }
     } else {
-        export::write(&out, &render(&b)?, &meta)?;
+        export::write(&out, &build(&b)?, &meta)?;
     }
     eprintln!("wrote {}", out.display());
     Ok(())
@@ -324,7 +324,7 @@ fn cmd_export(args: &[String]) -> Result<()> {
 
 fn cmd_slice(args: &[String]) -> Result<()> {
     let b = parse_batch(args)?;
-    let mesh = render(&b)?;
+    let mesh = build(&b)?;
     let t = std::time::Instant::now();
     let r = slicer::slice(&mesh, &b.settings);
     let st = &r.stats;
@@ -339,7 +339,7 @@ fn cmd_slice(args: &[String]) -> Result<()> {
 fn cmd_photo(args: &[String]) -> Result<()> {
     let b = parse_batch(args)?;
     let out = b.out.clone().context("missing -o OUT.png")?;
-    let mesh = std::sync::Arc::new(render(&b)?);
+    let mesh = std::sync::Arc::new(build(&b)?);
     let p = &b.photo;
     let look = pathtrace::Look {
         color: pathtrace::srgb(p.color),

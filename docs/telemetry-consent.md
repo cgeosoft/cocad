@@ -484,7 +484,7 @@ This run checks the MCP text in `README.md` and the Privacy Notice. It used a re
 | `set_view` with `yaw`, `pitch`, `fit`, `wireframe` and `explode` | 0 |
 | `save_photo`, in the model view and in the photo view | 0. The tool writes the PNG |
 | `export_model` to STL, and to a multicolor 3MF with `slicer` | 0. The tool writes the file |
-| `get_state`, `get_params`, `get_source`, `list_windows`, `set_params`, `reset_params`, `render`, `save_parameter_set`, `load_parameter_set`, `view_model`, `slice` | 0 |
+| `get_state`, `get_params`, `get_source`, `list_windows`, `set_params`, `reset_params`, `build` (old name `render`), `save_parameter_set`, `load_parameter_set`, `view_model`, `slice` | 0 |
 
 I did not test `select_window`. It runs in the `cocad mcp` process, and in the window it calls only `get_state`.
 

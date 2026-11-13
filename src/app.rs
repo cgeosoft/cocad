@@ -124,7 +124,7 @@ const SHORTCUTS: [(&str, &str); 16] = [
     ("Ctrl+,", "Settings"),
     ("Ctrl+Q", "Quit"),
     ("Alt+F, M, V, H", "Open a menu"),
-    ("F5", "Render now"),
+    ("F5", "Build now"),
     ("F, double click", "Fit the model"),
     ("W", "Wireframe"),
     ("E", "Explode the parts"),
@@ -794,7 +794,7 @@ impl App {
         };
         let cfg = self.cfg.clone();
         if crate::parts::needs_render(&params) {
-            self.start_parts_job(false, "Rendering the named parts…", move |cancel| {
+            self.start_parts_job(false, "Building the named parts…", move |cancel| {
                 crate::parts::render(&cfg, &file, &params, cancel).map(Some)
             });
         } else if crate::parts::names(&params).is_empty() {
@@ -1256,10 +1256,10 @@ impl App {
     }
 
     fn model_menu(&mut self, ui: &mut egui::Ui) {
-        if ui::menu_item(ui, "Render now", "F5", self.file.is_some(), false).clicked() {
+        if ui::menu_item(ui, "Build now", "F5", self.file.is_some(), false).clicked() {
             self.start_render();
         }
-        if ui::menu_item(ui, "Auto render", "", true, self.auto_render).clicked() {
+        if ui::menu_item(ui, "Auto build", "", true, self.auto_render).clicked() {
             self.auto_render = !self.auto_render;
         }
         ui::menu_separator(ui);
@@ -1536,24 +1536,24 @@ impl App {
     }
 
     fn model_panel(&mut self, ui: &mut egui::Ui) {
-        ui.label(ui::dim("Render the model and export it."));
+        ui.label(ui::dim("Build the model and export it."));
         ui.add_space(4.0);
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 ui::card(ui, |ui| {
-                    ui::section(ui, "Render");
+                    ui::section(ui, "Build");
                     ui.horizontal(|ui| {
-                        ui.label("Auto render");
+                        ui.label("Auto build");
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             ui::toggle(ui, &mut self.auto_render)
-                                .on_hover_text("Render when a parameter changes");
+                                .on_hover_text("Build when a parameter changes");
                         });
                     });
-                    let render =
-                        egui::Button::new("Render").min_size(Vec2::new(ui.available_width(), 34.0));
+                    let build =
+                        egui::Button::new("Build").min_size(Vec2::new(ui.available_width(), 34.0));
                     if ui
-                        .add_enabled(self.file.is_some(), render)
+                        .add_enabled(self.file.is_some(), build)
                         .on_hover_text("F5")
                         .clicked()
                     {
@@ -2127,7 +2127,7 @@ impl App {
                 ui.add(egui::Spinner::new().size(12.0).color(ui::ACCENT));
                 ui.label(
                     small(format!(
-                        "Rendering {:.1} s",
+                        "Building {:.1} s",
                         job.started.elapsed().as_secs_f32()
                     ))
                     .color(ui::ACCENT),

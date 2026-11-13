@@ -48,7 +48,7 @@ const STEPS: [Step; 10] = [
         points: &[
             "Sliders, dropdowns, switches, text and vectors are in collapsible groups.",
             "A parameter with a description comment shows the description as its label.",
-            "The model renders again when you change a value.",
+            "The model builds again when you change a value.",
             "A dot marks a changed value. The arrow sets it back.",
         ],
         image: shot!("2-customizer"),
@@ -112,7 +112,7 @@ const STEPS: [Step; 10] = [
         intro: "An AI agent can work with the open window through MCP. You see each change live.",
         points: &[
             "The agent reads the model, its parameters and its source.",
-            "It changes values, renders, and gets the result as an image.",
+            "It changes values, builds the model, and gets the result as an image.",
             "It slices, exports, and saves photos and parameter sets.",
             "A message in the view names each change.",
             "It cannot delete a file or a parameter set.",

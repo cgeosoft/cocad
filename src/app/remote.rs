@@ -1,7 +1,7 @@
 //! Runs MCP tool calls inside the window. `crate::mcp` receives them.
 //!
 //! Calls run on the UI thread in `App::poll`. A call that needs the mesh of a
-//! finished render stays in the queue until the render ends or `WAIT` passes.
+//! finished build stays in the queue until the build ends or `WAIT` passes.
 //! Slow work (exports, photos) runs on its own thread, which sends the reply.
 
 use super::*;
@@ -212,7 +212,8 @@ impl App {
             }
             "set_params" => self.set_params(args, reply),
             "reset_params" => self.reset_params(args, reply),
-            "render" => {
+            // "render" is the name before 0.7.
+            "build" | "render" => {
                 self.need_model()?;
                 if self.file.as_deref().and_then(mtime) != self.mtime {
                     self.reload();
@@ -244,26 +245,26 @@ impl App {
         self.need_model()?;
         if let Some(e) = &self.error {
             return Err(format!(
-                "The last render failed, so the mesh is out of date: {e}"
+                "The last build failed, so the mesh is out of date: {e}"
             ));
         }
         if self.dirty_since.is_some() {
-            return Err("The values changed after the last render. Call render first.".into());
+            return Err("The values changed after the last build. Call build first.".into());
         }
         self.mesh
             .clone()
-            .ok_or_else(|| "The model has no mesh yet. Call render first.".to_string())
+            .ok_or_else(|| "The model has no mesh yet. Call build first.".to_string())
     }
 
     fn state(&self) -> Json {
         let status = if self.file.is_none() {
             "no model"
         } else if self.job.is_some() {
-            "rendering"
+            "building"
         } else if self.error.is_some() {
             "failed"
         } else if self.dirty_since.is_some() {
-            "needs render"
+            "needs build"
         } else if self.mesh.is_some() {
             "ready"
         } else {
@@ -309,8 +310,8 @@ impl App {
             "file": self.file,
             "status": status,
             "error": self.error,
-            "render_seconds": self.last_time.map(|t| t.as_secs_f32()),
-            "auto_render": self.auto_render,
+            "build_seconds": self.last_time.map(|t| t.as_secs_f32()),
+            "auto_build": self.auto_render,
             "mesh": mesh,
             "parameter_count": self.params.len(),
             "changed_params": changed,
@@ -366,7 +367,8 @@ impl App {
         self.mark_set_edited();
         let names: Vec<&str> = values.keys().map(String::as_str).collect();
         self.note(format!("changed {}", names.join(", ")));
-        if flag(args, "render", true) {
+        // "render" is the name of the flag before 0.7.
+        if flag(args, "build", flag(args, "render", true)) {
             self.start_render();
             self.state_after(args, reply)
         } else {
