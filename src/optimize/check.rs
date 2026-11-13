@@ -61,6 +61,9 @@ pub struct Issue {
 /// Regions smaller than this (mm²) are mesh slivers. The check does not
 /// list them (`overhang.py`).
 pub const SLIVER_MM2: f32 = 0.5;
+/// A bed island thinner than this (mm) is a mesh sliver: no printer makes
+/// a line so thin.
+const SLIVER_MM: f32 = 0.1;
 /// A face with a normal z below this is flat in the check: within about
 /// 8 degrees of horizontal (`overhang.py`).
 const FLAT_NZ: f32 = -0.99;
@@ -130,11 +133,11 @@ fn too_large(mesh: &Mesh, b: &Bounds, area: &Area) -> Option<Issue> {
 }
 
 /// A `SmallIsland` issue for each small bed island. An island smaller
-/// than `SLIVER_MM2` is a mesh sliver, for example the tip of a cusp that
-/// the bed chamfer keeps: it is not listed.
+/// than `SLIVER_MM2` or thinner than `SLIVER_MM` is a mesh sliver, for
+/// example the tip of a cusp that the bed chamfer keeps: it is not listed.
 fn small_islands(mesh: &Mesh, layers: Layers, out: &mut Vec<Issue>) {
     let islands = brim::islands(mesh, layers);
-    let listed = |i: &brim::Island| i.small() && i.area >= SLIVER_MM2;
+    let listed = |i: &brim::Island| i.small() && i.area >= SLIVER_MM2 && i.width >= SLIVER_MM;
     if !islands.iter().any(listed) {
         return;
     }
@@ -1048,10 +1051,12 @@ mod tests {
 
     #[test]
     fn a_sliver_on_the_bed_is_no_small_island() {
-        // A block, and a spike of 0.2 x 0.2 mm (0.04 mm²) on the bed.
+        // A block, a spike of 0.2 x 0.2 mm (0.04 mm²) and a strip of
+        // 0.04 x 20 mm (0.8 mm²) on the bed.
         let m = mesh(&[
             block(Vec3::ZERO, Vec3::new(30.0, 30.0, 2.0)),
             block(Vec3::new(35.0, 0.0, 0.0), Vec3::new(35.2, 0.2, 1.0)),
+            block(Vec3::new(40.0, 0.0, 0.0), Vec3::new(40.04, 20.0, 1.0)),
         ]);
         let i = run(&m, Layers::default(), &Limits::default(), &Area::default());
         assert!(i.iter().all(|i| i.kind != Kind::SmallIsland), "{i:?}");
