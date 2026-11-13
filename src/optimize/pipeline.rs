@@ -726,6 +726,12 @@ fn vec3_of(v: Option<&Json>) -> Option<Vec3> {
     ))
 }
 
+/// `x` as a JSON number with at most 4 decimals, so that 0.4 stays 0.4 and
+/// does not become 0.4000000059604645.
+fn r4(x: f32) -> f64 {
+    (x as f64 * 1e4).round() / 1e4
+}
+
 fn fixes_json(f: &fixes::Settings) -> Json {
     json!({
         "teardrops": f.teardrops,
@@ -733,10 +739,10 @@ fn fixes_json(f: &fixes::Settings) -> Json {
         "hole_above": f.hole_above.name(),
         "sacrificial_layers": f.sacrificial_layers,
         "chamfer": f.chamfer,
-        "chamfer_mm": f.chamfer_mm,
+        "chamfer_mm": r4(f.chamfer_mm),
         "brim": f.brim,
-        "brim_w": f.brim_w,
-        "brim_gap": f.brim_gap,
+        "brim_w": r4(f.brim_w),
+        "brim_gap": r4(f.brim_gap),
     })
 }
 
@@ -770,14 +776,14 @@ fn split_json(s: &split::Split) -> Json {
     let v = &s.values;
     json!({
         "joint": s.joint.name(),
-        "cuts": s.cuts.iter().map(|c| json!([c.axis, c.at])).collect::<Vec<_>>(),
-        "clearance": v.clearance,
-        "pin_d": v.pin_d,
-        "pin_depth": v.pin_depth,
-        "tab_root": v.tab_root,
-        "tab_tip": v.tab_tip,
-        "tab_depth": v.tab_depth,
-        "tab_pitch": v.tab_pitch,
+        "cuts": s.cuts.iter().map(|c| json!([c.axis, r4(c.at)])).collect::<Vec<_>>(),
+        "clearance": r4(v.clearance),
+        "pin_d": r4(v.pin_d),
+        "pin_depth": r4(v.pin_depth),
+        "tab_root": r4(v.tab_root),
+        "tab_tip": r4(v.tab_tip),
+        "tab_depth": r4(v.tab_depth),
+        "tab_pitch": r4(v.tab_pitch),
     })
 }
 
@@ -831,7 +837,7 @@ impl PartState {
             }
             orient::Choice::Face(d) => {
                 m.insert("orient".into(), json!("face"));
-                m.insert("down".into(), json!([d.x, d.y, d.z]));
+                m.insert("down".into(), json!([r4(d.x), r4(d.y), r4(d.z)]));
             }
         }
         if !o.quarter_turns.is_multiple_of(4) {
@@ -871,9 +877,9 @@ impl State {
         let mut m = Map::new();
         m.insert(
             "area".into(),
-            json!([self.area.w, self.area.d, self.area.h]),
+            json!([r4(self.area.w), r4(self.area.d), r4(self.area.h)]),
         );
-        m.insert("gap".into(), json!(self.gap));
+        m.insert("gap".into(), json!(r4(self.gap)));
         if let Some(o) = &self.only {
             m.insert("only".into(), json!(o));
         }

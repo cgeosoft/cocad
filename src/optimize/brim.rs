@@ -43,14 +43,7 @@ pub struct Island {
 impl Island {
     /// True when the island needs a brim.
     pub fn small(&self) -> bool {
-        self.small_after(0.0)
-    }
-
-    /// True when the island needs a brim after its edge moves in by
-    /// `shrink` (the bed chamfer takes this much from the first layer).
-    pub fn small_after(&self, shrink: f32) -> bool {
-        let p: f32 = self.loops().iter().map(|l| perimeter(l)).sum();
-        self.width - 2.0 * shrink < THIN_MM || self.area - p * shrink < TINY_MM2
+        self.width < THIN_MM || self.area < TINY_MM2
     }
 
     /// The outer loop and the holes.
@@ -198,11 +191,9 @@ pub fn plan(mesh: &Mesh, s: &Settings, layers: Layers, area: &Area) -> Plan {
         return plan;
     };
     let all = islands(mesh, layers);
-    // With the bed chamfer, the first layer is smaller by the chamfer: an
-    // island that the chamfer makes small gets a brim too.
-    let shrink = if s.chamfer { s.chamfer_mm } else { 0.0 };
-    let (small, rest): (Vec<&Island>, Vec<&Island>) =
-        all.iter().partition(|i| i.small_after(shrink));
+    // With the bed chamfer on, `fixes::apply` gives the chamfered part, so
+    // an island that the chamfer makes small is small here.
+    let (small, rest): (Vec<&Island>, Vec<&Island>) = all.iter().partition(|i| i.small());
     if small.is_empty() {
         return plan;
     }
@@ -274,23 +265,6 @@ fn statement(
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn chamfer_makes_an_island_small() {
-        // A wall of 3.4 mm is not small, but 3.4 - 2 x 0.4 = 2.6 is.
-        let wall = Island {
-            outer: vec![
-                Vec2::new(0.0, 0.0),
-                Vec2::new(3.4, 0.0),
-                Vec2::new(3.4, 40.0),
-                Vec2::new(0.0, 40.0),
-            ],
-            holes: Vec::new(),
-            area: 136.0,
-            width: 3.4,
-        };
-        assert!(!wall.small());
-        assert!(wall.small_after(0.4));
-    }
 
     use super::super::check::test_util::*;
     use super::super::fixes::apply;
