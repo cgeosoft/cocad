@@ -242,6 +242,25 @@ struct Pre {
     mesh: Arc<Mesh>,
     piece: Option<(String, String)>,
     state: PartState,
+    /// For a piece of a split part: how the whole part lies. A piece on
+    /// Auto lies the same way, so that all pieces have the same face on the
+    /// bed.
+    lie_as: Option<orient::Choice>,
+}
+
+/// The bed face that Auto finds for `mesh`, as the direction that points
+/// down. The cache keeps it, so the slow search runs one time.
+fn auto_down(mesh: &Mesh, limits: &Limits, cache: &Mutex<Cache>) -> Vec3 {
+    let key = hash_of(&[&mesh_hash(mesh), limits]);
+    let hit = cache.lock().unwrap().auto.get(&key).copied();
+    match hit {
+        Some(d) => d,
+        None => {
+            let d = orient::auto_down(mesh, limits);
+            cache.lock().unwrap().auto.insert(key, d);
+            d
+        }
+    }
 }
 
 /// Runs the pipeline. A failed fix or split of one part goes to
@@ -326,6 +345,7 @@ pub fn run(
             mesh: mesh.clone(),
             piece: None,
             state: st.part(name),
+            lie_as: None,
         });
     }
 
@@ -372,9 +392,18 @@ pub fn run(
                         ));
                     }
                 }
+                // The pieces lie as the whole part lies. Auto finds the bed
+                // face of the whole part, not of each piece.
+                let whole = match p.state.orientation.choice {
+                    orient::Choice::Auto => {
+                        orient::Choice::Face(auto_down(&p.mesh, &job.limits, cache))
+                    }
+                    c => c,
+                };
                 for piece in pieces.iter() {
                     let name = format!("{} {}", p.name, piece.label);
-                    // A piece keeps its own orientation and copies.
+                    // A piece keeps its own orientation and copies. A pin is
+                    // a part of its own: it does not lie as the whole part.
                     let mut state = st.part(&name);
                     state.split = None;
                     split_pres.push(Pre {
@@ -384,6 +413,7 @@ pub fn run(
                         mesh: Arc::new(piece.mesh.clone()),
                         piece: Some((p.name.clone(), piece.label.clone())),
                         state,
+                        lie_as: (piece.label != "pin").then_some(whole),
                     });
                 }
             }
@@ -519,20 +549,12 @@ fn prepare(
 ) -> Result<PrintPart> {
     let st = &job.state;
     let mut o = p.state.orientation;
-    let hash = mesh_hash(&p.mesh);
-    // Auto: keep the found direction, so the slow search runs one time.
     if o.choice == orient::Choice::Auto {
-        let key = hash_of(&[&hash, &job.limits]);
-        let hit = cache.lock().unwrap().auto.get(&key).copied();
-        let down = match hit {
-            Some(d) => d,
-            None => {
-                let d = orient::auto_down(&p.mesh, &job.limits);
-                cache.lock().unwrap().auto.insert(key, d);
-                d
-            }
+        o.choice = match p.lie_as {
+            // A piece of a split part on Auto lies as the whole part.
+            Some(c) => c,
+            None => orient::Choice::Face(auto_down(&p.mesh, &job.limits, cache)),
         };
-        o.choice = orient::Choice::Face(down);
     }
     let matrix = orient::matrix(&p.mesh, &o, &st.area, &job.limits);
     let print = super::transformed(&p.mesh, matrix);
