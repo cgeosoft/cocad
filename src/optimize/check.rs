@@ -853,8 +853,15 @@ pub(super) fn hull(pts: &[Vec2]) -> Vec<Vec2> {
     }
     let cross = |o: Vec2, a: Vec2, b: Vec2| (a - o).perp_dot(b - o);
     let mut h: Vec<Vec2> = Vec::with_capacity(p.len() * 2);
-    for &q in p.iter().chain(p.iter().rev().skip(1)) {
-        while h.len() >= 2 && cross(h[h.len() - 2], h[h.len() - 1], q) <= 0.0 {
+    // The lower hull from left to right, then the upper hull from right to
+    // left. The upper hull does not remove points of the lower hull: two
+    // points with the largest x (a straight edge on the right) stay.
+    let mut floor = 2;
+    for (k, &q) in p.iter().chain(p.iter().rev().skip(1)).enumerate() {
+        if k == p.len() {
+            floor = h.len() + 1;
+        }
+        while h.len() >= floor && cross(h[h.len() - 2], h[h.len() - 1], q) <= 0.0 {
             h.pop();
         }
         h.push(q);
@@ -1317,6 +1324,38 @@ mod tests {
         ]);
         let i = run(&m, Layers::default(), &Limits::default(), &Area::default());
         assert!(i.iter().all(|i| i.kind != Kind::SmallIsland), "{i:?}");
+    }
+
+    #[test]
+    fn hull_keeps_a_straight_edge_on_the_right() {
+        let sq = [
+            Vec2::new(0.0, 0.0),
+            Vec2::new(1.0, 0.0),
+            Vec2::new(1.0, 1.0),
+            Vec2::new(0.0, 1.0),
+        ];
+        let h = hull(&sq);
+        assert_eq!(h.len(), 4, "{h:?}");
+        assert!(sq.iter().all(|p| h.contains(p)), "{h:?}");
+    }
+
+    /// A plate with round corners on the left and a straight cut on the
+    /// right, as a piece of a split plate.
+    #[test]
+    fn min_rect_holds_a_piece_with_a_straight_cut() {
+        let mut pts = vec![Vec2::new(65.0, -40.0), Vec2::new(65.0, 40.0)];
+        for (c, a0) in [
+            (Vec2::new(-59.0, 34.0), 90.0f32),
+            (Vec2::new(-59.0, -34.0), 180.0),
+        ] {
+            for k in 0..=6 {
+                let a = (a0 + 15.0 * k as f32).to_radians();
+                pts.push(c + Vec2::new(a.cos(), a.sin()) * 6.0);
+            }
+        }
+        let r = min_rect(&pts).unwrap();
+        assert!((r.length() - 130.0).abs() < 1e-3, "{r:?}");
+        assert!((r.width() - 80.0).abs() < 1e-3, "{r:?}");
     }
 
     #[test]
