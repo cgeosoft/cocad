@@ -261,16 +261,6 @@ pub fn plate_3mf_bytes(
     ])
 }
 
-/// `name` with `-plate<n>` before the extension, for plate `plate` (0 is
-/// plate 1).
-#[allow(dead_code)]
-pub fn plate_name(name: &str, plate: usize) -> String {
-    match name.rsplit_once('.') {
-        Some((stem, ext)) => format!("{stem}-plate{}.{ext}", plate + 1),
-        None => format!("{name}-plate{}", plate + 1),
-    }
-}
-
 /// Writes one mesh as `<vertices>` and `<triangles>`. Indices start at `first`.
 fn mesh_rows(model: &mut String, mesh: &Mesh, vertices: bool, first: u32) {
     if vertices {
@@ -803,12 +793,6 @@ mod tests {
             "{text}"
         );
         assert!(text.contains("name=\"Part 1\""));
-    }
-
-    #[test]
-    fn plate_name_goes_before_the_extension() {
-        assert_eq!(plate_name("box-big.3mf", 1), "box-big-plate2.3mf");
-        assert_eq!(plate_name("box", 0), "box-plate1");
     }
 
     #[test]

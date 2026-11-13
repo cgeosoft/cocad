@@ -33,7 +33,7 @@ The **Plate** card shows three print parts:
 | **Stand** | The stand | 7 problems |
 | **Cable clip 1 ×3** | The clips. CoCAD found three parts with the same shape. | 5 problems |
 
-The print area is 220 × 220 × 250 mm, the default. The base plate is 260 mm long, so it is on no plate. Below its row, a **Split** section shows a proposal. You split the plate in [step 6](#6-split-the-base-plate).
+The print area is 220 × 220 × 250 mm, the default. The base plate is 260 mm long, so it is too large. It stays on the plate, but your printer cannot print it. Below its row, a **Split** section shows a proposal. You split the plate in [step 6](#6-split-the-base-plate).
 
 The **Check** card lists the problems. Click a problem to see its faces in purple in the 3D view. The stand has overhangs at the cable arch and the cable hole, bridges with a round outline at the pilot holes, and a small bed island at its front foot.
 
@@ -172,7 +172,7 @@ Click **Split**. The plate becomes two print parts:
 - **Base plate 1/2**, 134.9 × 80.0 × 6.0 mm, with the tabs.
 - **Base plate 2/2**, 129.9 × 80.0 × 6.0 mm, with the sockets.
 
-All parts are now on one plate.
+All parts now fit on the bed.
 
 ![The split plate](https://raw.githubusercontent.com/cgeosoft/cocad/main/assets/guide/app-5-split.jpg)
 
@@ -184,13 +184,15 @@ The print fixes also apply to the pieces. The **Bridges** fix now also changes t
 
 To change the split, select a piece. **Remove split** makes the plate whole again.
 
-## 7. More than one plate
+## 7. A smaller printer
 
-A printer with a smaller print area needs more plates. For example, with the **Prusa MINI+** (180 × 180 × 180 mm), the parts need two plates. Plate 1 holds the two pieces of the plate and two clips. Plate 2 holds the stand and one clip.
+CoCAD has one plate. The print area sets the bed, the fit of each part and the splits. Your slicer puts the parts on its plates.
 
-![Plate 2 of 2](https://raw.githubusercontent.com/cgeosoft/cocad/main/assets/guide/app-7-two-plates.jpg)
+For example, select the **Prusa MINI+** (180 × 180 × 180 mm) in the **Printer** card. Each part still fits, but all parts together need more room than the bed. CoCAD keeps all parts on the plate, and some are outside the bed. The label at the top left of the 3D view shows "Larger than the bed. The slicer arranges the parts."
 
-Use the arrows in the **Plate** card to see the other plate. Click the arrow at the right of **Export 3MF** in the **Export** card. The menu has **3MF: all 2 plates** and **STL: all 2 plates**, which write one file for each plate.
+![The parts on the bed of a Prusa MINI+, from above](https://raw.githubusercontent.com/cgeosoft/cocad/main/assets/guide/app-7-small-bed.jpg)
+
+Export the plate as usual. The file contains all parts. In your slicer, arrange the parts on its plates.
 
 ## 8. Look at the layers
 
@@ -198,14 +200,14 @@ Click **Layers** at the top left of the 3D view. The view shows the print layers
 
 ![The layers of the plate](https://raw.githubusercontent.com/cgeosoft/cocad/main/assets/guide/app-8-layers.jpg)
 
-The **Layers** card shows a rough estimate of the print time, the weight and the filament for the current plate.
+The **Layers** card shows a rough estimate of the print time, the weight and the filament for all parts on the plate.
 
 ## 9. Export the plate
 
-At the bottom of the tab, click **Export 3MF**. For an STL file, click the arrow at the right of **Export 3MF**, then **STL: this plate**.
+At the bottom of the tab, click **Export 3MF**. For an STL file, click the arrow at the right of **Export 3MF**, then **STL: the plate**.
 
 - The 3MF file has one object for each print part, and one item for each copy. Your slicer shows the parts as separate objects, in the positions of the plate.
-- With two or more plates, **3MF: all 2 plates** in the same menu writes one file for each plate, for example `desk-dock-plate1.3mf` and `desk-dock-plate2.3mf`.
+- When the parts need more room than the bed, the file still contains all of them. Your slicer arranges them on its plates.
 
 In your slicer, set the elephant foot compensation to 0, because the bed chamfer is on.
 

@@ -70,7 +70,7 @@ const STEPS: [Step; 10] = [
         points: &[
             "Check the size, volume, triangles and open edges.",
             "Back faces show in purple. Press W for the wireframe.",
-            "Export 3MF writes the print plate. The arrow opens a menu with STL, all plates and STEP of the model as built.",
+            "Export 3MF writes the print plate. The arrow opens a menu with STL and STEP of the model as built.",
             "A model with a multicolor part list shows each part in its color and exports a multicolor 3MF.",
             "The Model menu has the export commands in all tabs.",
         ],
@@ -91,7 +91,7 @@ const STEPS: [Step; 10] = [
         title: "Optimize for the printer",
         intro: "The Optimize tab puts the parts on the bed of your printer. Press O to open it.",
         points: &[
-            "Same parts show as one row with a count. When the parts do not fit on one plate, CoCAD fills more plates.",
+            "All parts go on one plate. Same parts show as one row with a count. Your slicer arranges the parts on its plates.",
             "CoCAD puts each part on its best face. You can also click the face that goes on the bed.",
             "Turn on print fixes: teardrop holes, hole size, bridges, bed chamfer, brims and mouse ears.",
             "Split a part that is too large. The Check card lists the problems.",

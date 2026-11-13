@@ -24,7 +24,7 @@ use crate::part_param;
 use crate::parts;
 use anyhow::{Context, Result, bail};
 use serde_json::Value as Json;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -228,20 +228,10 @@ fn stored_state_in(dir: &Path, file: &Path, area: Area) -> Option<State> {
 
 // ----------------------------------------------------------------- options
 
-/// The plates that a command writes or slices.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Plates {
-    /// One plate (0 is plate 1).
-    One(usize),
-    All,
-}
-
 /// The print options of `cocad export` and `cocad slice`. Each option
 /// changes the stored state of the model. A missing option keeps it.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Options {
-    /// `--plate N` or `--plate all`. `None`: the default of the command.
-    pub plate: Option<Plates>,
     /// `--part NAME`: only this print part. "all": all print parts.
     pub part: Option<String>,
     /// `--bed WxDxH`.
@@ -270,16 +260,6 @@ fn arg(inline: Option<&str>, next: impl FnOnce() -> Result<String>) -> Result<St
     match inline {
         Some(v) => Ok(v.to_string()),
         None => next(),
-    }
-}
-
-fn parse_plate(v: &str) -> Result<Plates> {
-    if v.eq_ignore_ascii_case("all") {
-        return Ok(Plates::All);
-    }
-    match v.trim().parse::<usize>() {
-        Ok(n) if n >= 1 => Ok(Plates::One(n - 1)),
-        _ => bail!("--plate needs a plate number (1 or more) or all, got {v}"),
     }
 }
 
@@ -332,7 +312,7 @@ fn parse_hole_above(v: &str) -> Result<fixes::HoleAbove> {
 impl Options {
     /// Reads the print option `flag`. `next` gives the next argument, for
     /// an option with a value. An option with a value also takes the form
-    /// `--plate=2`. Returns false when `flag` is not a print option.
+    /// `--bed=250x210x220`. Returns false when `flag` is not a print option.
     pub fn parse_flag(
         &mut self,
         flag: &str,
@@ -346,7 +326,10 @@ impl Options {
             None => (flag, None),
         };
         match (name, inline) {
-            ("--plate", v) => self.plate = Some(parse_plate(&arg(v, next)?)?),
+            ("--plate", _) => bail!(
+                "--plate is not an option now. CoCAD puts all parts on one plate, and the slicer \
+                 arranges them on its plates."
+            ),
             ("--part", v) => {
                 let v = arg(v, next)?;
                 if v.trim().is_empty() {
@@ -372,8 +355,7 @@ impl Options {
     /// True when an option changes the print preparation. `--part` and
     /// `--as-built` do not count: they also apply to the model as built.
     pub fn changes_print(&self) -> bool {
-        self.plate.is_some()
-            || self.bed.is_some()
+        self.bed.is_some()
             || self.orient.is_some()
             || self.chamfer.is_some()
             || self.teardrops
@@ -579,7 +561,7 @@ fn check_only(st: &State, o: &Outcome, stored: bool) -> Result<()> {
 
 // ------------------------------------------------------------------ output
 
-/// The copies of each print part on the plates.
+/// The copies of each print part on the plate.
 fn placed(o: &Outcome) -> Vec<usize> {
     let mut n = vec![0; o.parts.len()];
     for i in &o.instances {
@@ -614,7 +596,7 @@ fn size_text(m: &Mesh) -> String {
 const MAX_SKIPPED: usize = 20;
 
 /// A short report of the print preparation: the print parts with their
-/// copies, the plates, the fixes with the number of changed places, the
+/// copies, the plate, the fixes with the number of changed places, the
 /// skipped places, the check problems of each kind and the errors. Each
 /// line starts with a label of 12 characters, as the slice estimate.
 pub fn report(built: &Built, p: &Prepared) -> String {
@@ -653,7 +635,9 @@ pub fn report(built: &Built, p: &Prepared) -> String {
         .min(32);
     let _ = writeln!(s, "print parts {}", o.parts.len());
     for (k, q) in o.parts.iter().enumerate() {
-        let what = if !q.fits {
+        let what = if q.copies == 0 {
+            "not printed".to_string()
+        } else if !q.fits {
             let why = match &q.proposal {
                 Some(sp) => format!(
                     " A split in {} pieces fits: split it in the Optimize tab.",
@@ -667,11 +651,10 @@ pub fn report(built: &Built, p: &Prepared) -> String {
                 None => String::new(),
             };
             format!(
-                "{}: too large for the print area, not on a plate.{why}",
+                "x{}  {}: too large for the print area.{why}",
+                on[k],
                 size_text(&q.mesh)
             )
-        } else if q.copies == 0 {
-            "not printed".to_string()
         } else {
             let model = if q.copies != q.count {
                 format!(" (model: {})", q.count)
@@ -684,24 +667,18 @@ pub fn report(built: &Built, p: &Prepared) -> String {
     }
     let _ = writeln!(
         s,
-        "plates      {} (print area {} x {} x {} mm)",
-        o.plates, st.area.w, st.area.d, st.area.h
+        "plate       {} (print area {} x {} x {} mm)",
+        count(o.instances.len(), "copy", "copies"),
+        st.area.w,
+        st.area.d,
+        st.area.h
     );
-    for plate in 0..o.plates {
-        let mut counts: BTreeMap<usize, usize> = BTreeMap::new();
-        for (part, _) in o.on_plate(plate) {
-            *counts.entry(part).or_default() += 1;
-        }
-        let list: Vec<String> = (counts.iter())
-            .map(|(&k, &n)| {
-                if n == 1 {
-                    o.parts[k].name.clone()
-                } else {
-                    format!("{} x{n}", o.parts[k].name)
-                }
-            })
-            .collect();
-        let _ = writeln!(s, "  plate {}  {}", plate + 1, list.join(", "));
+    // A part that is too large has its own line above.
+    if o.overflow && o.too_large().is_empty() {
+        let _ = writeln!(
+            s,
+            "note        The parts do not fit on one bed. The slicer can arrange them on more plates."
+        );
     }
     s.push_str(&fixes_line(st, o));
     // The same text of one part is one line with a count.
@@ -800,13 +777,13 @@ fn fixes_line(st: &State, o: &Outcome) -> String {
     format!("fixes       {}\n", list.join(", "))
 }
 
-/// A 3MF file of `plate`: one object for each print part on the plate, one
-/// build item for each copy.
-pub fn plate_3mf(o: &Outcome, plate: usize, meta: &export::Meta) -> Result<Vec<u8>> {
+/// A 3MF file of the plate: one object for each print part on the plate,
+/// one build item for each copy.
+pub fn plate_3mf(o: &Outcome, meta: &export::Meta) -> Result<Vec<u8>> {
     let mut index: HashMap<usize, usize> = HashMap::new();
     let mut objects: Vec<(String, &Mesh)> = Vec::new();
     let mut items = Vec::new();
-    for (part, at) in o.on_plate(plate) {
+    for (part, at) in o.on_plate() {
         let k = *index.entry(part).or_insert_with(|| {
             objects.push((o.parts[part].name.clone(), o.parts[part].mesh.as_ref()));
             objects.len() - 1
@@ -836,8 +813,6 @@ mod tests {
     #[test]
     fn flags_parse() {
         let o = parse(&[
-            "--plate",
-            "2",
             "--part",
             "Part 1",
             "--bed",
@@ -851,7 +826,6 @@ mod tests {
             "--no-fixes",
         ])
         .unwrap();
-        assert_eq!(o.plate, Some(Plates::One(1)));
         assert_eq!(o.part.as_deref(), Some("Part 1"));
         assert_eq!(
             o.bed,
@@ -867,8 +841,7 @@ mod tests {
         assert_eq!(o.bridges, Some(Some(fixes::HoleAbove::Stepped)));
         assert!(o.changes_print());
 
-        let o = parse(&["--plate=all", "--chamfer=0.6", "--bridges", "--as-built"]).unwrap();
-        assert_eq!(o.plate, Some(Plates::All));
+        let o = parse(&["--chamfer=0.6", "--bridges", "--as-built"]).unwrap();
         assert_eq!(o.chamfer, Some(Some(0.6)));
         assert_eq!(o.bridges, Some(None));
         assert!(o.as_built);
@@ -884,9 +857,8 @@ mod tests {
     #[test]
     fn bad_flags_fail() {
         for bad in [
-            &["--plate", "0"][..],
-            &["--plate", "x"],
-            &["--plate"],
+            &["--plate", "1"][..],
+            &["--plate=all"],
             &["--bed", "100x100"],
             &["--bed", "5x100x100"],
             &["--bed", "axbxc"],
@@ -1114,24 +1086,23 @@ mod tests {
         let (_, p) = cubes_outcome(Area::default());
         // Three same cubes: one print part with three copies.
         assert_eq!(p.outcome.parts.len(), 1);
-        assert_eq!(p.outcome.plates, 1);
-        let bytes = plate_3mf(&p.outcome, 0, &export::Meta::default()).unwrap();
+        let bytes = plate_3mf(&p.outcome, &export::Meta::default()).unwrap();
         let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
         let text = std::io::read_to_string(zip.by_name("3D/3dmodel.model").unwrap()).unwrap();
         assert_eq!(text.matches("<object ").count(), 1);
         assert_eq!(text.matches("<item ").count(), 3);
-        assert!(plate_3mf(&p.outcome, 1, &export::Meta::default()).is_err());
     }
 
     #[test]
-    fn report_lists_parts_plates_and_fixes() {
-        // A bed for one cube with its gap: three plates.
+    fn report_lists_parts_the_plate_and_fixes() {
+        // A bed for one cube with its gap: the three copies do not fit it.
         let (built, p) = cubes_outcome(Area {
             w: 15.0,
             d: 15.0,
             h: 15.0,
         });
-        assert_eq!(p.outcome.plates, 3);
+        assert_eq!(p.outcome.instances.len(), 3);
+        assert!(p.outcome.overflow);
         let r = report(&built, &p);
         assert!(
             r.contains("parts       3 from the module split, 1 reference part"),
@@ -1142,10 +1113,9 @@ mod tests {
             "{r}"
         );
         assert!(
-            r.contains("plates      3 (print area 15 x 15 x 15 mm)"),
+            r.contains("plate       3 copies (print area 15 x 15 x 15 mm)\nnote        The parts do not fit on one bed."),
             "{r}"
         );
-        assert!(r.contains("  plate 3  Part 1\n"), "{r}");
         assert!(r.contains("fixes       off\n"), "{r}");
         assert!(r.contains("check       no problems\n"), "{r}");
     }

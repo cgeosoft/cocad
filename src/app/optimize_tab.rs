@@ -6,8 +6,10 @@
 //! - The pipeline (`crate::optimize::pipeline::run`) runs in a background
 //!   thread when the tab or an export needs it and an input changed: the
 //!   parts of the model, the state, the layer heights or the limits.
-//! - The 3D view of the tab shows the current plate on the bed, or the
-//!   layers of the slice preview of the plate.
+//! - The 3D view of the tab shows the plate on the bed, or the layers of
+//!   the slice preview of the plate. There is one plate: the print area
+//!   sets the fit of the parts and the splits. When the parts need more room
+//!   than the bed, the slicer arranges them on its plates.
 //! - The STL and 3MF exports write the plate. STEP writes the model.
 
 use super::{App, Mode, fmt_duration, rgb, setting, stat};
@@ -23,7 +25,7 @@ use glam::{Mat3, Mat4, Vec3};
 use serde_json::{Map, Value as Json, json};
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, channel};
 use std::sync::{Arc, Mutex};
@@ -64,16 +66,13 @@ pub(super) struct Inputs {
 }
 
 impl Inputs {
-    /// A key that changes when an input of the pipeline changes. The plate
-    /// that the view shows is not an input.
+    /// A key that changes when an input of the pipeline changes.
     pub fn key(&self) -> u64 {
         let mut h = std::collections::hash_map::DefaultHasher::new();
         self.assembly_rev.hash(&mut h);
         self.multicolor.hash(&mut h);
         self.model_name.hash(&mut h);
-        let mut st = self.state.clone();
-        st.plate = 0;
-        format!("{st:?} {:?} {:?}", self.layers, self.limits).hash(&mut h);
+        format!("{:?} {:?} {:?}", self.state, self.layers, self.limits).hash(&mut h);
         h.finish()
     }
 
@@ -100,7 +99,7 @@ impl Inputs {
     }
 }
 
-/// Where an export gets the plates from.
+/// Where an export gets the plate from.
 pub(super) enum PlateSource {
     /// The outcome of the window is current.
     Ready(Arc<pipeline::Outcome>),
@@ -127,13 +126,6 @@ impl PlateSource {
     }
 }
 
-/// Which plates an export writes.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum Plates {
-    One(usize),
-    All,
-}
-
 /// A pipeline run in the background.
 struct Run {
     rx: Receiver<(u64, Result<pipeline::Outcome, String>, Duration)>,
@@ -152,10 +144,10 @@ pub(super) struct Owner {
     pub issue: Option<usize>,
 }
 
-/// The display of one plate.
+/// The display of the plate.
 struct PlateMesh {
-    /// Outcome revision, plate, all issues shown, marked issue.
-    key: (u64, usize, bool, Option<(usize, usize)>),
+    /// Outcome revision, all issues shown, marked issue.
+    key: (u64, bool, Option<(usize, usize)>),
     assembly: Arc<Assembly>,
     owners: Vec<Owner>,
 }
@@ -282,15 +274,15 @@ fn tri_mesh(mesh: &Mesh, tris: &[u32]) -> Mesh {
     out
 }
 
-/// The print parts on `plate`, each one time, in part order.
-fn parts_on(o: &pipeline::Outcome, plate: usize) -> Vec<usize> {
-    let mut v: Vec<usize> = o.on_plate(plate).iter().map(|(p, _)| *p).collect();
+/// The print parts on the plate, each one time, in part order.
+fn parts_on(o: &pipeline::Outcome) -> Vec<usize> {
+    let mut v: Vec<usize> = o.instances.iter().map(|i| i.part).collect();
     v.sort_unstable();
     v.dedup();
     v
 }
 
-/// The fix counts of the print parts on a plate.
+/// The fix counts of the print parts on the plate.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(super) struct FixCounts {
     pub teardrops: usize,
@@ -304,11 +296,11 @@ pub(super) struct FixCounts {
     pub skipped: Vec<String>,
 }
 
-/// The sums of the fix reports of the print parts on `plate`. Each print
+/// The sums of the fix reports of the print parts on the plate. Each print
 /// part counts one time, also with more copies.
-pub(super) fn fix_counts(o: &pipeline::Outcome, plate: usize) -> FixCounts {
+pub(super) fn fix_counts(o: &pipeline::Outcome) -> FixCounts {
     let mut c = FixCounts::default();
-    for k in parts_on(o, plate) {
+    for k in parts_on(o) {
         let p = &o.parts[k];
         let r = &p.report;
         c.teardrops += r.teardrops;
@@ -327,26 +319,20 @@ fn plural(n: usize, one: &str, many: &str) -> String {
     format!("{n} {}", if n == 1 { one } else { many })
 }
 
-/// The text about the export of `plate` of `o`, for example
-/// "Plate 1 of 2: 5 parts, 7 copies. Bed chamfer, 4 teardrops." A plate
-/// with no part gives "Model as built.": only STEP can export.
-pub(super) fn summary(o: &pipeline::Outcome, plate: usize) -> String {
-    let on = o.on_plate(plate);
-    if on.is_empty() {
+/// The text about the export of the plate of `o`, for example
+/// "Plate: 5 parts, 7 copies. Bed chamfer, 4 teardrops." A plate with no
+/// part gives "Model as built.": only STEP can export.
+pub(super) fn summary(o: &pipeline::Outcome) -> String {
+    if o.instances.is_empty() {
         return "Model as built.".to_string();
     }
-    let parts = parts_on(o, plate).len();
-    let head = if o.plates > 1 {
-        format!("Plate {} of {}", plate + 1, o.plates)
-    } else {
-        "Plate".to_string()
-    };
+    let parts = parts_on(o).len();
     let mut s = format!(
-        "{head}: {}, {}.",
+        "Plate: {}, {}.",
         plural(parts, "part", "parts"),
-        plural(on.len(), "copy", "copies")
+        plural(o.instances.len(), "copy", "copies")
     );
-    let c = fix_counts(o, plate);
+    let c = fix_counts(o);
     let mut fixes = Vec::new();
     if c.chamfers > 0 {
         fixes.push("Bed chamfer".to_string());
@@ -374,15 +360,11 @@ pub(super) fn summary(o: &pipeline::Outcome, plate: usize) -> String {
     s
 }
 
-/// The 3MF of `plate`: one object for each print part on the plate, named
-/// as the print part, and one build item for each copy.
-pub(super) fn plate_3mf(
-    o: &pipeline::Outcome,
-    plate: usize,
-    meta: &Meta,
-) -> anyhow::Result<Vec<u8>> {
-    let on = o.on_plate(plate);
-    let parts = parts_on(o, plate);
+/// The 3MF of the plate: one object for each print part on the plate,
+/// named as the print part, and one build item for each copy.
+pub(super) fn plate_3mf(o: &pipeline::Outcome, meta: &Meta) -> anyhow::Result<Vec<u8>> {
+    let on = o.on_plate();
+    let parts = parts_on(o);
     let objects: Vec<(String, &Mesh)> = (parts.iter())
         .map(|&k| (o.parts[k].name.clone(), o.parts[k].mesh.as_ref()))
         .collect();
@@ -392,49 +374,27 @@ pub(super) fn plate_3mf(
     export::plate_3mf_bytes(&objects, &items, meta)
 }
 
-/// The file of plate `plate` for an export of all plates to `path`.
-pub(super) fn plate_path(path: &Path, plate: usize) -> PathBuf {
-    let name = path
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    path.with_file_name(export::plate_name(&name, plate))
-}
-
-/// Writes the plates of `o` to `path` (STL or 3MF, from the extension).
-/// With `Plates::All`, one file for each plate (see `plate_path`). `check`
-/// can refuse a file before it is written. Returns the files.
-pub(super) fn write_plates(
+/// Writes the plate of `o` to `path` (STL or 3MF, from the extension).
+/// `check` can refuse the file before it is written.
+pub(super) fn write_plate(
     path: &Path,
     o: &pipeline::Outcome,
-    which: Plates,
     meta: &Meta,
     check: impl Fn(&Path) -> Result<(), String>,
-) -> Result<Vec<PathBuf>, String> {
-    if o.plates == 0 {
+) -> Result<(), String> {
+    if o.instances.is_empty() {
         return Err(
-            "No part is on a plate. In the Optimize tab, check the parts in the Plate card, \
-             or split a part that is too large for the print area."
+            "No part is on the plate. In the Optimize tab, check the parts in the Plate card."
                 .into(),
         );
     }
-    let fmt = Format::from_path(path);
-    let list: Vec<(usize, PathBuf)> = match which {
-        Plates::One(k) => vec![(k.min(o.plates - 1), path.to_path_buf())],
-        Plates::All => (0..o.plates).map(|k| (k, plate_path(path, k))).collect(),
+    check(path)?;
+    let bytes = match Format::from_path(path) {
+        Some(Format::Stl) => export::stl_bytes(&o.plate_mesh()),
+        Some(Format::ThreeMf) => plate_3mf(o, meta).map_err(|e| e.to_string())?,
+        _ => return Err("A plate is STL or 3MF.".into()),
     };
-    for (_, p) in &list {
-        check(p)?;
-    }
-    for (k, p) in &list {
-        let bytes = match fmt {
-            Some(Format::Stl) => export::stl_bytes(&o.plate_mesh(*k)),
-            Some(Format::ThreeMf) => plate_3mf(o, *k, meta).map_err(|e| e.to_string())?,
-            _ => return Err("A plate is STL or 3MF.".into()),
-        };
-        std::fs::write(p, bytes).map_err(|e| format!("{}: {e}", p.display()))?;
-    }
-    Ok(list.into_iter().map(|(_, p)| p).collect())
+    std::fs::write(path, bytes).map_err(|e| format!("{}: {e}", path.display()))
 }
 
 /// The model mesh of the print part `only` for a STEP export: the part in
@@ -460,21 +420,17 @@ pub(super) fn only_mesh(o: &pipeline::Outcome, only: &str) -> Result<Mesh, Strin
     }
 }
 
-/// The plate assembly of `plate`: one part for each copy, in print
-/// position on the bed. Then the faces of the check problems in the warning
-/// color: all problems with `all_issues`, else only `marked`.
+/// The plate assembly: one part for each copy, in print position on the
+/// bed. Then the faces of the check problems in the warning color: all
+/// problems with `all_issues`, else only `marked`.
 fn plate_assembly(
     o: &pipeline::Outcome,
-    plate: usize,
     all_issues: bool,
     marked: Option<(usize, usize)>,
 ) -> (Assembly, Vec<Owner>) {
     let mut base = Vec::new();
     let mut overlays = Vec::new();
     for (k, inst) in o.instances.iter().enumerate() {
-        if inst.plate != plate {
-            continue;
-        }
         let p = &o.parts[inst.part];
         base.push((
             p.name.clone(),
@@ -546,7 +502,7 @@ fn box_fits(size: Vec3, area: &opt::Area) -> bool {
 }
 
 /// The top level keys of the Optimize state (`State::to_json`).
-const STATE_KEYS: [&str; 6] = ["area", "gap", "only", "plate", "fixes", "parts"];
+const STATE_KEYS: [&str; 5] = ["area", "gap", "only", "fixes", "parts"];
 
 /// Merges `patch` into `target` as a JSON merge patch (RFC 7386): objects
 /// merge key by key, `null` removes a key, other values replace.
@@ -648,18 +604,25 @@ impl App {
 
     /// A key of the plate that the view and the slice show.
     pub(super) fn plate_key(&self) -> u64 {
-        (self.opt.outcome_rev << 16) ^ (self.opt.state.plate as u64 & 0xffff)
+        self.opt.outcome_rev
     }
 
-    /// The bed of the model print area, as high as the plate.
+    /// The bed of the model print area, as high as the plate, with the
+    /// parts that are outside the bed. Fit shows all of it.
     pub(super) fn bed_bounds(&self) -> Bounds {
         let a = self.opt.state.area;
-        let top = (self.opt.plate.as_ref())
-            .and_then(|p| p.assembly.bounds(&[]))
-            .map_or(10.0, |b| b.max.z.max(10.0));
-        Bounds {
+        let plate = (self.opt.plate.as_ref()).and_then(|p| p.assembly.bounds(&[]));
+        let top = plate.map_or(10.0, |b| b.max.z.max(10.0));
+        let bed = Bounds {
             min: Vec3::ZERO,
             max: Vec3::new(a.w, a.d, top),
+        };
+        match plate {
+            Some(b) => Bounds {
+                min: bed.min.min(b.min),
+                max: bed.max.max(b.max),
+            },
+            None => bed,
         }
     }
 
@@ -673,16 +636,12 @@ impl App {
             self.opt.run = None;
             match r {
                 Ok(o) => {
-                    let plates = o.plates;
                     self.opt.outcome = Some(Arc::new(o));
                     self.opt.outcome_key = Some(key);
                     self.opt.outcome_rev += 1;
                     self.opt.error = None;
                     self.opt.time = Some(t);
                     self.opt.issue = None;
-                    if self.opt.state.plate >= plates.max(1) {
-                        self.opt.state.plate = plates.saturating_sub(1);
-                    }
                 }
                 Err(e) if e == "cancelled" => {}
                 Err(e) => {
@@ -757,7 +716,7 @@ impl App {
         });
     }
 
-    /// The plates for an export: the outcome when it is current, else the
+    /// The plate for an export: the outcome when it is current, else the
     /// inputs to run the pipeline in the export thread.
     pub(super) fn plate_source(&self) -> Result<PlateSource, String> {
         let inputs = self.opt_inputs().ok_or(if self.parts_job.is_some() {
@@ -788,7 +747,7 @@ impl App {
         if self.outcome_current()
             && let Some(o) = &self.opt.outcome
         {
-            return summary(o, self.opt.state.plate);
+            return summary(o);
         }
         if self.opt.running() {
             return "Preparing the plate…".to_string();
@@ -796,15 +755,15 @@ impl App {
         "STL and 3MF: the print plate. STEP: the model as built.".to_string()
     }
 
-    /// The plates of the current outcome, when it is current.
-    pub(super) fn current_plates(&self) -> Option<usize> {
+    /// The copies on the plate, when the outcome is current.
+    pub(super) fn plate_copies(&self) -> Option<usize> {
         (self.outcome_current())
-            .then(|| self.opt.outcome.as_ref().map(|o| o.plates))
+            .then(|| self.opt.outcome.as_ref().map(|o| o.instances.len()))
             .flatten()
     }
 
-    /// Builds the plate assembly when the outcome, the plate or the shown
-    /// problems changed.
+    /// Builds the plate assembly when the outcome or the shown problems
+    /// changed.
     pub(super) fn ensure_plate(&mut self) {
         // A new print area: the camera fits the bed again.
         if self.opt.fit_area != Some(self.opt.state.area) {
@@ -818,16 +777,11 @@ impl App {
             return;
         };
         let all = !self.card_closed("Check");
-        let key = (
-            self.opt.outcome_rev,
-            self.opt.state.plate,
-            all,
-            self.opt.issue,
-        );
+        let key = (self.opt.outcome_rev, all, self.opt.issue);
         if self.opt.plate.as_ref().is_some_and(|p| p.key == key) {
             return;
         }
-        let (assembly, owners) = plate_assembly(&o, self.opt.state.plate, all, self.opt.issue);
+        let (assembly, owners) = plate_assembly(&o, all, self.opt.issue);
         self.opt.plate = Some(PlateMesh {
             key,
             assembly: Arc::new(assembly),
@@ -929,8 +883,8 @@ impl App {
         }
     }
 
-    /// The view switch and the plate number at the top left of the 3D view.
-    /// Returns the rectangle that they use.
+    /// The view switch and the state of the plate at the top left of the 3D
+    /// view. Returns the rectangle that they use.
     pub(super) fn plate_overlay(&mut self, ui: &mut egui::Ui, rect: egui::Rect) -> egui::Rect {
         let m = 16.0;
         let area = egui::Rect::from_min_size(
@@ -960,10 +914,16 @@ impl App {
                 } else if self.parts_job.is_some() {
                     Some("Finding the parts…".to_string())
                 } else {
-                    self.opt.outcome.as_ref().map(|o| match o.plates {
-                        0 => "No part on the plate".to_string(),
-                        1 => "Plate 1 of 1".to_string(),
-                        n => format!("Plate {} of {n}", self.opt.state.plate + 1),
+                    self.opt.outcome.as_ref().and_then(|o| {
+                        if o.instances.is_empty() {
+                            Some("No part on the plate".to_string())
+                        } else if !o.too_large().is_empty() {
+                            Some("A part is too large for the print area".to_string())
+                        } else if o.overflow {
+                            Some("Larger than the bed. The slicer arranges the parts.".to_string())
+                        } else {
+                            None
+                        }
                     })
                 };
                 if let Some(text) = text {
@@ -1015,14 +975,14 @@ impl App {
     fn plate_card(&mut self, ui: &mut egui::Ui) {
         let o = self.opt.outcome.clone();
         let note = match &o {
-            Some(o) if o.plates > 1 => {
-                format!("Plate {} of {}", self.opt.state.plate + 1, o.plates)
-            }
             Some(o) => plural(o.instances.len(), "copy", "copies"),
             None => String::new(),
         };
         ui::card(ui, |ui| {
-            if !self.card_head(ui, "Plate", &note) {
+            let info = "All print parts go on one plate. The print area sets the bed, the fit \
+                        of each part and the splits. When the parts need more room than the \
+                        bed, some are outside it: the slicer arranges them on its plates.";
+            if !self.card_head_info(ui, "Plate", &note, info) {
                 return;
             }
             if self.parts_job.is_some() {
@@ -1065,28 +1025,12 @@ impl App {
             if only != self.opt.state.only {
                 self.opt.state.only = only;
             }
-            // The plate number.
-            ui.horizontal(|ui| {
-                let n = o.plates;
-                let k = self.opt.state.plate;
-                if ui.add_enabled(k > 0, ui::ghost("‹", false)).clicked() {
-                    self.opt.state.plate = k - 1;
-                }
-                ui.label(match n {
-                    0 => "No plate".to_string(),
-                    _ => format!("Plate {} of {n}", k.min(n - 1) + 1),
-                });
-                if ui.add_enabled(k + 1 < n, ui::ghost("›", false)).clicked() {
-                    self.opt.state.plate = k + 1;
-                }
-            });
             ui.add_space(4.0);
-            let plate = self.opt.state.plate;
             for (k, p) in o.parts.iter().enumerate() {
                 // The name row and the size row of a part close together.
                 ui.scope(|ui| {
                     ui.spacing_mut().item_spacing.y = 2.0;
-                    self.part_row(ui, &o, k, plate);
+                    self.part_row(ui, &o, k);
                 });
                 // After the pieces of a split part: its split.
                 let parent = p.piece.as_ref().map(|(parent, _)| parent);
@@ -1115,7 +1059,7 @@ impl App {
     }
 
     /// One print part in the Plate card.
-    fn part_row(&mut self, ui: &mut egui::Ui, o: &pipeline::Outcome, k: usize, plate: usize) {
+    fn part_row(&mut self, ui: &mut egui::Ui, o: &pipeline::Outcome, k: usize) {
         let p = &o.parts[k];
         let name = p.name.clone();
         let ps = self.opt.state.part(&name);
@@ -1173,22 +1117,12 @@ impl App {
         });
         // Size and status.
         let size = opt::bounds_or_zero(&p.mesh).size();
-        let here = o.on_plate(plate).iter().filter(|(q, _)| *q == k).count();
-        let mut plates: Vec<usize> = (o.instances.iter())
-            .filter(|i| i.part == k)
-            .map(|i| i.plate)
-            .collect();
-        plates.sort_unstable();
-        plates.dedup();
         let (status, color) = if !ps.include {
             ("Not printed".to_string(), ui::c().dim)
         } else if p.copies == 0 {
-            ("Not on the plates".to_string(), ui::c().dim)
+            ("Not on the plate".to_string(), ui::c().dim)
         } else if !p.fits {
             ("Too large".to_string(), ui::c().danger)
-        } else if here == 0 {
-            let list: Vec<String> = plates.iter().map(|n| (n + 1).to_string()).collect();
-            (format!("On plate {}", list.join(", ")), ui::c().dim)
         } else if p.issues.is_empty() {
             ("Fits".to_string(), ui::GOOD)
         } else {
@@ -1417,8 +1351,7 @@ impl App {
     }
 
     fn fixes_card(&mut self, ui: &mut egui::Ui) {
-        let plate = self.opt.state.plate;
-        let counts = (self.opt.outcome.as_ref()).map(|o| fix_counts(o, plate));
+        let counts = (self.opt.outcome.as_ref()).map(|o| fix_counts(o));
         let f = self.opt.state.fixes;
         let on = [
             f.teardrops,
@@ -1597,16 +1530,14 @@ impl App {
         ui.add_space(4.0);
     }
 
-    /// The problems of the parts on the current plate, and of the parts
-    /// that do not fit.
+    /// The problems of the parts on the plate.
     fn issues(&self) -> Vec<(usize, usize)> {
         let Some(o) = &self.opt.outcome else {
             return Vec::new();
         };
-        let on = parts_on(o, self.opt.state.plate);
         let mut out = Vec::new();
         for (k, p) in o.parts.iter().enumerate() {
-            if on.contains(&k) || (!p.fits && p.copies > 0) {
+            if p.copies > 0 {
                 out.extend((0..p.issues.len()).map(|j| (k, j)));
             }
         }
@@ -1861,19 +1792,11 @@ impl App {
         }
         let o = (self.opt.outcome.as_ref())
             .filter(|_| self.outcome_current())
-            .ok_or("The plates are not ready. Call get_optimize again.")?;
-        let plate = self.opt.state.plate;
+            .ok_or("The plate is not ready. Call get_optimize again.")?;
         let parts: Vec<Json> = o
             .parts
             .iter()
-            .enumerate()
-            .map(|(k, p)| {
-                let mut plates: Vec<usize> = (o.instances.iter())
-                    .filter(|i| i.part == k)
-                    .map(|i| i.plate + 1)
-                    .collect();
-                plates.sort_unstable();
-                plates.dedup();
+            .map(|p| {
                 let issues: Vec<Json> = (p.issues.iter())
                     .map(|i| json!({ "kind": kind_label(i.kind).1, "text": i.text }))
                     .collect();
@@ -1884,7 +1807,6 @@ impl App {
                     "copies": p.copies,
                     "fits": p.fits,
                     "size_mm": opt::bounds_or_zero(&p.mesh).size().to_array(),
-                    "plates": plates,
                     "orientation": p.state.to_json().get("orient").cloned().unwrap_or(json!("model")),
                     "issues": issues,
                     "fixes": {
@@ -1912,9 +1834,11 @@ impl App {
             .collect();
         Ok(json!({
             "state": self.opt.state.to_json(),
-            "plates": o.plates,
-            "plate": plate + 1,
-            "summary": summary(o, plate),
+            "plate": {
+                "copies": o.instances.len(),
+                "overflow": o.overflow,
+            },
+            "summary": summary(o),
             "parts": parts,
             "errors": o.errors,
             "seconds": self.opt.time.map(|t| t.as_secs_f32()),
@@ -2036,20 +1960,11 @@ mod tests {
             },
         );
         let at = |x: f32| Mat4::from_translation(Vec3::new(x, 10.0, 0.0));
-        let inst = |part, plate, x| pipeline::Instance {
-            part,
-            plate,
-            at: at(x),
-        };
+        let inst = |part, x| pipeline::Instance { part, at: at(x) };
         pipeline::Outcome {
             parts: vec![a, b],
-            instances: vec![
-                inst(0, 0, 10.0),
-                inst(1, 0, 40.0),
-                inst(1, 0, 60.0),
-                inst(0, 1, 10.0),
-            ],
-            plates: 2,
+            instances: vec![inst(0, 10.0), inst(1, 40.0), inst(1, 60.0)],
+            overflow: false,
             errors: Vec::new(),
         }
     }
@@ -2083,21 +1998,16 @@ mod tests {
     fn summary_names_the_plate_parts_and_fixes() {
         let o = outcome();
         assert_eq!(
-            summary(&o, 0),
-            "Plate 1 of 2: 2 parts, 3 copies. Bed chamfer, 4 teardrops."
-        );
-        assert_eq!(
-            summary(&o, 1),
-            "Plate 2 of 2: 1 part, 1 copy. Bed chamfer, 3 teardrops."
+            summary(&o),
+            "Plate: 2 parts, 3 copies. Bed chamfer, 4 teardrops."
         );
         let empty = pipeline::Outcome::default();
-        assert_eq!(summary(&empty, 0), "Model as built.");
+        assert_eq!(summary(&empty), "Model as built.");
         let mut one = outcome();
         one.instances.truncate(1);
-        one.plates = 1;
         one.parts[0].report = fixes::Report::default();
-        assert_eq!(summary(&one, 0), "Plate: 1 part, 1 copy.");
-        let c = fix_counts(&o, 0);
+        assert_eq!(summary(&one), "Plate: 1 part, 1 copy.");
+        let c = fix_counts(&o);
         assert_eq!(
             c.skipped,
             ["Lid: Hole d 3.0 mm at z 2.0: wall above too thin"]
@@ -2107,7 +2017,7 @@ mod tests {
     #[test]
     fn plate_3mf_has_one_object_per_part_and_one_item_per_copy() {
         let o = outcome();
-        let bytes = plate_3mf(&o, 0, &Meta::default()).unwrap();
+        let bytes = plate_3mf(&o, &Meta::default()).unwrap();
         let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
         let mut text = String::new();
         std::io::Read::read_to_string(&mut zip.by_name("3D/3dmodel.model").unwrap(), &mut text)
@@ -2119,34 +2029,22 @@ mod tests {
     }
 
     #[test]
-    fn all_plates_write_one_file_each() {
-        let dir = std::env::temp_dir().join(format!("cocad-plates-{}", std::process::id()));
+    fn the_plate_goes_to_one_file() {
+        let dir = std::env::temp_dir().join(format!("cocad-plate-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let o = outcome();
-        let path = dir.join("box.stl");
-        let files = write_plates(&path, &o, Plates::All, &Meta::default(), |_| Ok(())).unwrap();
-        assert_eq!(
-            files,
-            [dir.join("box-plate1.stl"), dir.join("box-plate2.stl")]
-        );
-        let m = crate::mesh::read_stl(&std::fs::read(&files[0]).unwrap()).unwrap();
-        assert_eq!(m.triangles.len(), 3 * 12);
         // A refused file stops the export before a write.
-        let refused = write_plates(&path, &o, Plates::One(5), &Meta::default(), |_| {
-            Err("no".into())
-        });
+        let path = dir.join("box.stl");
+        let refused = write_plate(&path, &o, &Meta::default(), |_| Err("no".into()));
         assert!(refused.is_err() && !path.exists());
+        write_plate(&path, &o, &Meta::default(), |_| Ok(())).unwrap();
+        let m = crate::mesh::read_stl(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(m.triangles.len(), 3 * 12);
+        let empty = dir.join("empty.stl");
+        let none = pipeline::Outcome::default();
+        assert!(write_plate(&empty, &none, &Meta::default(), |_| Ok(())).is_err());
+        assert!(!empty.exists());
         std::fs::remove_dir_all(&dir).unwrap();
-        assert!(
-            write_plates(
-                &path,
-                &pipeline::Outcome::default(),
-                Plates::All,
-                &Meta::default(),
-                |_| Ok(())
-            )
-            .is_err()
-        );
     }
 
     #[test]
@@ -2158,13 +2056,13 @@ mod tests {
             area: 1.0,
             text: "Overhang".into(),
         });
-        let (a, owners) = plate_assembly(&o, 0, false, None);
+        let (a, owners) = plate_assembly(&o, false, None);
         assert_eq!(a.parts.len(), 3);
         assert!(owners.iter().all(|w| w.issue.is_none()));
         // The copies are in bed position.
         let b = a.bounds(&[]).unwrap();
         assert!((b.min.x - 10.0).abs() < 1e-4 && (b.max.x - 65.0).abs() < 1e-4);
-        let (a, owners) = plate_assembly(&o, 0, true, None);
+        let (a, owners) = plate_assembly(&o, true, None);
         assert_eq!(a.parts.len(), 5);
         assert_eq!(
             owners[3],
@@ -2174,7 +2072,7 @@ mod tests {
             }
         );
         assert_eq!(a.parts[3].tris.len(), 2);
-        let (a, _) = plate_assembly(&o, 0, false, Some((1, 0)));
+        let (a, _) = plate_assembly(&o, false, Some((1, 0)));
         assert_eq!(a.parts.len(), 5);
     }
 

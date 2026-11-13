@@ -31,7 +31,7 @@ Start with get_state, then get_params to see the Customizer parameters and their
 Use get_source to read the model code. Use view_model to see the model as an image. \
 set_params changes values in the window and waits for the build (the OpenSCAD run). \
 The mesh data in the reply shows the result. If the status is failed, read the error and the log. \
-get_optimize shows the print preparation: the print parts, the plates, the fixes and the problems. \
+get_optimize shows the print preparation: the print parts, the plate, the fixes and the problems. \
 set_optimize changes it. export_model writes the plate as STL or 3MF, and the model as STEP.";
 
 fn endpoint_dir() -> Option<PathBuf> {
@@ -318,7 +318,7 @@ pub(crate) fn tools() -> Json {
         ),
         tool(
             "get_state",
-            "Get the loaded model and the app state: file, build status, last error, mesh size, volume and open edges, changed parameters, parameter sets, view mode, parts, part colors, explode, section cut, the plates of the Optimize tab and the end of the OpenSCAD log.",
+            "Get the loaded model and the app state: file, build status, last error, mesh size, volume and open edges, changed parameters, parameter sets, view mode, parts, part colors, explode, section cut, the copies on the plate of the Optimize tab and the end of the OpenSCAD log.",
             true,
             false,
             no_args()
@@ -441,21 +441,14 @@ pub(crate) fn tools() -> Json {
         ),
         tool(
             "export_model",
-            "Save the model. The file extension sets the format. .stl and .3mf write a print plate of the Optimize tab, as the window does: the print parts in print orientation, with the print fixes that are on, in the plate layout. A .3mf has one object for each print part and one build item for each copy. .step writes the model as built (with only set in the Optimize state: that part). With slicer, builds each part of the multicolor part list and writes a multicolor .3mf for that slicer. Prepares the plates when they are not ready. Waits for a running build. Fails when the last build failed.",
+            "Save the model. The file extension sets the format. .stl and .3mf write the plate of the Optimize tab, as the window does: all print parts in print orientation, with the print fixes that are on, in the plate layout. There is one plate: when the parts need more room than the bed, the slicer arranges them on its plates. A .3mf has one object for each print part and one build item for each copy. .step writes the model as built (with only set in the Optimize state: that part). With slicer, builds each part of the multicolor part list and writes a multicolor .3mf for that slicer. Prepares the plate when it is not ready. Waits for a running build. Fails when the last build failed.",
             false,
             true,
             json!({
                 "type": "object",
                 "properties": {
-                    "path": { "type": "string", "description": "Absolute path of the output file. With plate all, each plate goes to its own file with -plateN before the extension." },
+                    "path": { "type": "string", "description": "Absolute path of the output file" },
                     "overwrite": { "type": "boolean", "description": "Replace an existing file" },
-                    "plate": {
-                        "oneOf": [
-                            { "type": "integer", "minimum": 1 },
-                            { "type": "string", "enum": ["all"] },
-                        ],
-                        "description": "The plate to write, from 1, or all. Default: the plate that the window shows. Only for .stl and .3mf.",
-                    },
                     "slicer": { "type": "string", "enum": ["prusa", "orca"], "description": "Write a multicolor 3MF for this slicer" },
                 },
                 "required": ["path"],
@@ -463,7 +456,7 @@ pub(crate) fn tools() -> Json {
         ),
         tool(
             "get_optimize",
-            "Get the print preparation of the Optimize tab: the state (print area, gap, the part on the plates, the plate, the fixes and the values of each print part) and the result: the print parts with count, copies, size, fit, orientation, fix counts, problems and split proposal; the number of plates; errors. Prepares the plates when they are not ready.",
+            "Get the print preparation of the Optimize tab: the state (print area, gap, the part on the plate, the fixes and the values of each print part) and the result: the print parts with count, copies, size, fit, orientation, fix counts, problems and split proposal; the copies on the plate and whether they need more room than the bed; errors. The print area sets the fit and the splits. All print parts are on the one plate. Prepares the plate when it is not ready.",
             true,
             false,
             no_args()
@@ -477,9 +470,8 @@ pub(crate) fn tools() -> Json {
                 "type": "object",
                 "properties": {
                     "area": { "type": "array", "items": { "type": "number" }, "description": "Print area [width, depth, height] in mm" },
-                    "gap": { "type": "number", "description": "Gap between the parts on a plate, in mm" },
-                    "only": { "type": ["string", "null"], "description": "Put only this print part on the plates. null: all parts." },
-                    "plate": { "type": "integer", "description": "The plate that the window and the export show, from 0" },
+                    "gap": { "type": "number", "description": "Gap between the parts on the plate, in mm" },
+                    "only": { "type": ["string", "null"], "description": "Put only this print part on the plate. null: all parts." },
                     "fixes": {
                         "type": "object",
                         "description": "The print fixes",
@@ -505,7 +497,7 @@ pub(crate) fn tools() -> Json {
                         "description": "Values of each print part, by name: {\"include\": bool, \"copies\": n, \"orient\": \"model\" | \"auto\" | \"face\", \"down\": [x, y, z] (with face: the model direction that goes down), \"turns\": quarter turns about z, \"split\": {\"joint\": \"flat\" | \"pins\" | \"dovetail\", \"cuts\": [[axis 0 to 2, position mm]], \"clearance\": mm}}. A split_proposal of get_optimize is a valid split.",
                         "additionalProperties": { "type": ["object", "null"] },
                     },
-                    "wait": { "type": "boolean", "description": "Wait for the plates. Default: true." },
+                    "wait": { "type": "boolean", "description": "Wait for the plate. Default: true." },
                 },
             })
         ),
@@ -518,7 +510,7 @@ pub(crate) fn tools() -> Json {
         ),
         tool(
             "slice",
-            "Slice the current plate of the Optimize tab and return layers, filament, weight and a rough print time. Given values also change the print settings of the Optimize tab.",
+            "Slice the plate of the Optimize tab and return layers, filament, weight and a rough print time. Given values also change the print settings of the Optimize tab.",
             false,
             false,
             json!({

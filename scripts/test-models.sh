@@ -2,8 +2,8 @@
 # Builds every model in examples/, exports STL, 3MF and STEP, and slices it.
 # STL and 3MF get the print plate, STEP gets the model as built.
 # Models with "// expect: error" must fail with a clear message.
-# Then two print preparation runs: all fixes on a model with holes, and
-# --plate all with a small print area that needs two plates.
+# Then two print preparation runs: all fixes on a model with holes, and a
+# small print area: all parts stay on the one plate, with a note.
 #
 # Usage: scripts/test-models.sh [--release] [model.scad...]
 set -uo pipefail
@@ -97,21 +97,23 @@ if [ -f "$m" ] && [[ " ${models[*]} " == *" $m "* ]]; then
     fi
 fi
 
-# A print area for the box or the lid, not both: two plates, one file each.
+# A print area for the box or the lid, not both: all copies stay on the one
+# plate, in one file, and the report says that they need more than one bed.
 m=examples/lid-box.scad
 if [ -f "$m" ] && [[ " ${models[*]} " == *" $m "* ]]; then
-    if log=$("$bin" export "$m" -o "$out/plates.3mf" --plate all --bed 100x60x60 2>&1); then
-        a=$out/plates-plate1.3mf b=$out/plates-plate2.3mf
-        if ! echo "$log" | grep -q '^plates      2 '; then row plates FAIL "not 2 plates"
-        elif [ ! -s "$a" ] || [ ! -s "$b" ] || [ -e "$out/plates-plate3.3mf" ]; then row plates FAIL "not 2 files"
-        elif [ "$(items "$a")" != 2 ] && [ "$(items "$a")" != "?" ]; then row plates FAIL "plate 1 has $(items "$a") items, not 2"
-        elif [ "$(items "$b")" != 1 ] && [ "$(items "$b")" != "?" ]; then row plates FAIL "plate 2 has $(items "$b") items, not 1"
-        elif ! s=$("$bin" slice "$m" --bed 100x60x60 2>/dev/null) || [ "$(echo "$s" | grep -c '^plate ')" != 2 ]; then
-            row plates FAIL "slice has no estimate for each plate"
-        else row plates PASS "lid-box: 2 plates, $(items "$a") + $(items "$b") items, $(echo "$s" | awk '/^filament/{print $4}') g"
+    if log=$("$bin" export "$m" -o "$out/plate.3mf" --bed 100x60x60 2>&1); then
+        a=$out/plate.3mf
+        n=$(echo "$log" | sed -n 's/^plate  *\([0-9]*\) cop.*/\1/p')
+        if [ -z "$n" ] || [ "$n" -lt 2 ]; then row plate FAIL "not 2 or more copies on the plate"
+        elif ! echo "$log" | grep -q '^note .*do not fit on one bed'; then row plate FAIL "no note about the bed"
+        elif [ ! -s "$a" ]; then row plate FAIL "empty 3mf"
+        elif [ "$(items "$a")" != "$n" ] && [ "$(items "$a")" != "?" ]; then row plate FAIL "the 3mf has $(items "$a") items, not $n"
+        elif ! s=$("$bin" slice "$m" --bed 100x60x60 2>/dev/null) || ! echo "$s" | grep -q '^layers '; then
+            row plate FAIL "slice has no estimate"
+        else row plate PASS "lid-box: $n copies on one plate, $(echo "$s" | awk '/^filament/{print $4}') g"
         fi
     else
-        row plates FAIL "$(echo "$log" | grep -m1 -i 'error' | cut -c1-70)"
+        row plate FAIL "$(echo "$log" | grep -m1 -i 'error' | cut -c1-70)"
     fi
 fi
 exit $fail

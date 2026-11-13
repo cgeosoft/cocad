@@ -31,13 +31,13 @@ Short meanings of the words that these pages use.
 | **Model definition** | The `.yml` file next to a model. It holds the title, the part names and the parameter sets. See [Model definition](Model-definition). |
 | **Open edge** | A place where the surface of a mesh has a hole. A mesh with open edges is not a closed solid. |
 | **OpenSCAD** | A free program in which you describe a 3D shape with text. CoCAD uses it to calculate the shape. |
-| **Optimize** | The tab of CoCAD that prepares the parts for the printer: plates, orientation, print fixes, check and layers. |
+| **Optimize** | The tab of CoCAD that prepares the parts for the printer: the plate, orientation, print fixes, check and layers. |
 | **Overhang** | A face that points down and is steeper than the overhang limit. It needs support. |
 | **Parameter** | A value of the model that you can change, such as a width. |
 | **Parameter set** | A named group of parameter values that you can save and load. The sets are in the model definition. |
 | **Part** | One separate solid of a model, for example the lid of a box. |
 | **Path tracer** | A method to make a picture that calculates how light moves in a scene. It gives soft shadows and real reflections. |
-| **Plate** | One print job on the bed: the print parts and their positions. When the parts do not fit on one bed, CoCAD makes more plates. |
+| **Plate** | The print parts on the bed, with their positions. CoCAD has one plate. When the parts need more room than the bed, your slicer arranges them on its plates. |
 | **Print area** | The width, depth and height that your printer can print, in mm. |
 | **Print fix** | A change of the shape that helps the printer: teardrop holes, hole size, bridges, bed chamfer, brim or mouse ears. |
 | **Print part** | One row of the Plate card: a part, parts that overlap and join, or a piece of a split part. Parts with the same shape are one print part with a count. |

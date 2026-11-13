@@ -33,11 +33,11 @@ Two buttons at the top left of the 3D view change what the view shows:
 | **Plate** | The parts on the bed, in print position. Each print part has its own color. The grid is the print area of your printer. |
 | **Layers** | The print layers of the plate. See [Layers](#layers). |
 
-The label next to the buttons shows the plate, for example "Plate 1 of 2". The **Layers** card has the same two buttons.
+When the parts need more room than the bed, the label next to the buttons shows "Larger than the bed. The slicer arranges the parts." When a part is too large for the print area, the label shows "A part is too large for the print area" instead. The **Layers** card has the same two buttons.
 
 In the **Plate** view, click a part to select it. The **Plate** card marks its row, and the **Orientation** card shows its values. Click the background to clear the selection.
 
-The Optimize tab shows no explode and no reference parts. **Fit** and the `F` key show the full bed.
+The Optimize tab shows no explode and no reference parts. **Fit** and the `F` key show the full bed, and the parts that are outside it.
 
 The **Section** bar at the top right of the 3D view cuts the plate across the axes of the bed. The cuts that you turn on in the other tabs stay on. The plate has its own positions, at first the center of the plate. The **Layers** view shows the cut too. **Export 3MF** does not use the cut. See [Section](Parts#section).
 
@@ -49,8 +49,7 @@ Click the header of a card to close it or to open it. A closed card shows a shor
 
 ### Plate
 
-- The dropdown at the top: **All parts** (the default), or one print part. With one part, the plates hold only this part and its copies.
-- The plate number, for example **Plate 1 of 2**. The arrows show the plate before and the next plate. The 3D view, the layers and the export use this plate.
+- The dropdown at the top: **All parts** (the default), or one print part. With one part, the plate holds only this part and its copies.
 - One row for each print part:
   - The check box. Clear it to not print the part, for example when you printed it already.
   - The color of the part on the plate, and its name. Click the name to select the part.
@@ -61,18 +60,19 @@ Click the header of a card to close it or to open it. A closed card shows a shor
 |---|---|
 | **Fits** | The part fits the print area. The Check found no problems. |
 | **3 problems** | The **Check** card lists problems of this part. |
-| **On plate 2** | The part is on a different plate. |
-| **Too large** | The part does not fit the print area. A **Split** section shows below the row. |
+| **Too large** | The part does not fit the print area. It is on the plate, but your printer cannot print it. A **Split** section shows below the row. |
 | **Not printed** | You cleared the check box. |
-| **Not on the plates** | The dropdown shows a different part, or the copies are 0. |
+| **Not on the plate** | The dropdown shows a different part, or the copies are 0. |
 
 When a fix found a place that it did not change, the row shows "1 skipped". Hold the mouse on it to see the place and the reason.
 
-#### More than one plate
+#### One plate
+
+CoCAD puts all print parts on one plate. CoCAD uses the print area for three things: the bed in the 3D view, the fit of each part, and the [splits](#split-a-part-that-is-too-large).
 
 CoCAD puts the parts in rows on the bed, the largest first, with a gap between them. It can turn a part by 90 degrees on the bed to fit it. This does not change how the part prints. The parts are in the center of the bed.
 
-When the parts do not fit on one plate, CoCAD fills plate 1, then plate 2, and so on. The menu of the **Export** card then has **3MF: all 2 plates** and **STL: all 2 plates**, with the number of plates. These items write one file for each plate. To open the menu, click the arrow at the right of **Export 3MF**.
+When the parts need more room than the bed, CoCAD makes the rows longer, and some parts are outside the bed. The export writes all parts in one file. Your slicer arranges them on its plates.
 
 #### Split a part that is too large
 
@@ -209,7 +209,7 @@ A model that you open for the first time gets the default print area of **File >
 | Speed | 80 mm/s | The print speed, 10 to 300 mm/s. It changes the time estimate. |
 | Overhang limit | 45° | A face that points down and is steeper than this angle from the vertical is an overhang, 20 to 80° |
 | Bridge limit | 12 mm | A longer bridge is a problem. The **Bridges** fix does not change it. 1 to 100 mm |
-| Gap | 10 mm | The distance between the parts on a plate, 0 to 50 mm |
+| Gap | 10 mm | The distance between the parts on the plate, 0 to 50 mm |
 
 The layer heights also set the steps of the bed chamfer, the height of the brim and the thickness of the sacrificial layers.
 
@@ -219,7 +219,7 @@ The layer heights also set the steps of the bed chamfer, the height of the brim 
 - A split cuts with parallel planes across one axis of the part. You move a cut with its number field, not in the 3D view. The joints are flat, pins and dovetail.
 - **Teardrop holes** changes round holes with a diameter of 1 to 40 mm, with an axis that is less than 10 degrees from the bed.
 - **Bridges** changes only ceilings with a round outline, and only when the bridge is not longer than the bridge limit.
-- The estimate of the **Layers** card is for the current plate only. `cocad slice` gives the sum of all plates.
+- The estimate of the **Layers** card is for all parts on the plate, also when they need more than one bed.
 
 ---
 

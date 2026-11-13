@@ -975,7 +975,7 @@ impl App {
         });
     }
 
-    /// Slices the current plate in the background.
+    /// Slices the plate in the background.
     fn start_slice(&mut self) {
         let Some(o) = self.opt.outcome.clone() else {
             return;
@@ -984,10 +984,9 @@ impl App {
         let (tx, rx) = channel();
         let s = self.settings;
         let rev = self.plate_key();
-        let plate = self.opt.state.plate;
         std::thread::spawn(move || {
             let t = Instant::now();
-            let mesh = o.plate_mesh(plate);
+            let mesh = o.plate_mesh();
             let r = slicer::slice(&mesh, &s);
             let _ = tx.send((rev, r, t.elapsed()));
         });
@@ -1124,8 +1123,7 @@ impl App {
         if self.slice_dirty_since.is_some() && self.slice_wanted() {
             ctx.request_repaint_after(DEBOUNCE);
         }
-        // The slice follows the current plate, after the print settings
-        // settle.
+        // The slice follows the plate, after the print settings settle.
         if self.slice_wanted()
             && self.slice_job.is_none()
             && self
@@ -1203,11 +1201,11 @@ impl App {
         }
     }
 
-    /// Exports STL or 3MF of the current plate (`all`: of all plates, one
-    /// file each), or STEP of the model as built. With one print part
-    /// selected in the Plate card, STEP writes only that part. When the
-    /// plates are not ready, the export thread prepares them first.
-    fn export(&mut self, fmt: Format, all: bool) {
+    /// Exports STL or 3MF of the plate, or STEP of the model as built. With
+    /// one print part selected in the Plate card, STEP writes only that
+    /// part. When the plate is not ready, the export thread prepares it
+    /// first.
+    fn export(&mut self, fmt: Format) {
         let Some(mesh) = self.mesh.clone() else {
             return;
         };
@@ -1223,11 +1221,7 @@ impl App {
         } else {
             None
         };
-        let plate = self.opt.state.plate;
-        let mut name = export::suggested_name(&self.stem(), self.active_set.as_deref(), fmt);
-        if fmt != Format::Step && !all && self.current_plates().is_some_and(|n| n > 1) {
-            name = export::plate_name(&name, plate);
-        }
+        let name = export::suggested_name(&self.stem(), self.active_set.as_deref(), fmt);
         let mut dialog = rfd::FileDialog::new()
             .set_file_name(name)
             .add_filter(fmt.label(), &[fmt.ext()]);
@@ -1252,13 +1246,8 @@ impl App {
                         .map_err(|e| e.to_string())
                 }),
                 (_, Some(src)) => src.outcome().and_then(|o| {
-                    let which = if all {
-                        optimize_tab::Plates::All
-                    } else {
-                        optimize_tab::Plates::One(plate)
-                    };
-                    let files = optimize_tab::write_plates(&path, &o, which, &meta, |_| Ok(()))?;
-                    Ok((files, o.left_out_note()))
+                    optimize_tab::write_plate(&path, &o, &meta, |_| Ok(()))?;
+                    Ok((vec![path], o.too_large_note()))
                 }),
                 (_, None) => Err("no plate".to_string()),
             };
@@ -1470,7 +1459,7 @@ impl App {
         for fmt in Format::ALL {
             let label = format!("Export {}", fmt.label());
             if ui::menu_item(ui, &label, "", can_export, false).clicked() {
-                self.export(fmt, false);
+                self.export(fmt);
             }
         }
         if !crate::parts::names(&self.params).is_empty() {
@@ -1940,35 +1929,34 @@ impl App {
     }
 
     /// The bar at the bottom of the Optimize tab. Export 3MF writes the
-    /// current plate; the arrow opens a menu above it with the other
-    /// exports.
+    /// plate; the arrow opens a menu above it with the other exports.
     fn export_bar(&mut self, ui: &mut egui::Ui) {
-        let plates = self.current_plates();
+        let copies = self.plate_copies();
         let parts_ready = self.parts_job.is_none();
         let can_export = self.can_export();
-        let plate_ok = can_export && parts_ready && plates != Some(0);
+        let plate_ok = can_export && parts_ready && copies != Some(0);
         let why = if !parts_ready {
             "CoCAD is still finding the parts"
-        } else if plates == Some(0) {
+        } else if copies == Some(0) {
             "No part is on the plate"
         } else {
             "Build the model first"
         };
         let multicolor = !crate::parts::names(&self.params).is_empty();
         let summary = self.export_summary();
-        let mut pick: Option<(Format, bool)> = None;
+        let mut pick: Option<Format> = None;
         let mut slicer_pick = None;
         ui.scope(|ui| {
             let (main, arrow) = ui::split_button(ui, "Export 3MF", plate_ok, can_export);
             let main = if plate_ok {
                 main.on_hover_text(format!(
-                    "The current plate as 3MF: one object for each part.\n{summary}"
+                    "The plate as 3MF: one object for each part.\n{summary}"
                 ))
             } else {
                 main.on_disabled_hover_text(why)
             };
             if main.clicked() {
-                pick = Some((Format::ThreeMf, false));
+                pick = Some(Format::ThreeMf);
             }
             let arrow = arrow.on_hover_text("More exports");
             let id = ui.make_persistent_id("export_menu");
@@ -1992,24 +1980,13 @@ impl App {
                 .show(ui.ctx(), |ui| {
                     egui::Frame::popup(ui.style()).show(ui, |ui| {
                         ui.set_width(width - 16.0);
-                        if ui::menu_item(ui, "STL: this plate", "", plate_ok, false).clicked() {
-                            pick = Some((Format::Stl, false));
-                        }
-                        if let Some(n) = plates.filter(|n| *n > 1) {
-                            let all3 = format!("3MF: all {n} plates");
-                            if ui::menu_item(ui, &all3, "a file each", plate_ok, false).clicked() {
-                                pick = Some((Format::ThreeMf, true));
-                            }
-                            let all_stl = format!("STL: all {n} plates");
-                            if ui::menu_item(ui, &all_stl, "a file each", plate_ok, false).clicked()
-                            {
-                                pick = Some((Format::Stl, true));
-                            }
+                        if ui::menu_item(ui, "STL: the plate", "", plate_ok, false).clicked() {
+                            pick = Some(Format::Stl);
                         }
                         if ui::menu_item(ui, "STEP: the model as built", "", can_export, false)
                             .clicked()
                         {
-                            pick = Some((Format::Step, false));
+                            pick = Some(Format::Step);
                         }
                         if multicolor {
                             for slicer in Slicer::ALL {
@@ -2030,8 +2007,8 @@ impl App {
                 ui.memory_mut(|m| m.close_popup());
             }
         });
-        if let Some((fmt, all)) = pick {
-            self.export(fmt, all);
+        if let Some(fmt) = pick {
+            self.export(fmt);
         }
         if let Some(slicer) = slicer_pick {
             self.export_parts(slicer);
@@ -2663,16 +2640,6 @@ impl App {
             // Mode details.
             match self.mode {
                 Mode::Optimize => {
-                    if let Some(o) = &self.opt.outcome
-                        && o.plates > 1
-                    {
-                        sep(ui);
-                        ui.label(small(format!(
-                            "Plate {} of {}",
-                            self.opt.state.plate + 1,
-                            o.plates
-                        )));
-                    }
                     if let Some(sl) = (self.sliced.as_ref())
                         .filter(|s| self.sliced_for == self.plate_key() && !s.layers.is_empty())
                     {

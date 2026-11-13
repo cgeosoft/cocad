@@ -21,7 +21,7 @@ The model file needs only the assembled model. The **Optimize** tab does the pri
 | Sliders, lists and switches for the Customizer parameters | [Change the parameters](https://github.com/cgeosoft/cocad/wiki/Parameters) |
 | Named sets of values in a `.yml` file next to the model, with the title and the part names | [Parameter sets](https://github.com/cgeosoft/cocad/wiki/Parameter-sets) |
 | Part colors, select, focus, explode, section cut, and `%` reference parts that are not printed | [Parts](https://github.com/cgeosoft/cocad/wiki/Parts) |
-| Print plates for your printer: same parts with copies, more plates, custom orientation, print fixes, a print check and a split with flat, pin or dovetail joints | [Optimize](https://github.com/cgeosoft/cocad/wiki/Optimize) |
+| A print plate for your printer: same parts with copies, custom orientation, print fixes, a print check and a split with flat, pin or dovetail joints | [Optimize](https://github.com/cgeosoft/cocad/wiki/Optimize) |
 | Print layers of the plate with a time, length and weight estimate | [Optimize](https://github.com/cgeosoft/cocad/wiki/Optimize#layers) |
 | STL and 3MF of the print plate, STEP of the model, with a mesh check | [Export](https://github.com/cgeosoft/cocad/wiki/Export) |
 | Multicolor 3MF for PrusaSlicer 2.9 and OrcaSlicer | [Multicolor prints](https://github.com/cgeosoft/cocad/wiki/Multicolor-prints) |

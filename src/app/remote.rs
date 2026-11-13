@@ -407,8 +407,7 @@ impl App {
             "part_colors": v.part_colors,
             "explode": explode,
             "section": v.section.to_json(self.section_space()),
-            "plates": self.current_plates(),
-            "plate": self.opt.state.plate + 1,
+            "plate_copies": self.plate_copies(),
             "render": {
                 "running": self.photo_on,
                 "samples": self.photo_samples(),
@@ -532,9 +531,8 @@ impl App {
         Ok(Some(json!({ "saved": name, "file": self.def_file })))
     }
 
-    /// `export_model`: STL and 3MF write the plate as the window does (the
-    /// current plate, a plate number from 1, or "all"), STEP writes the
-    /// model, and `slicer` writes a multicolor 3MF.
+    /// `export_model`: STL and 3MF write the plate as the window does, STEP
+    /// writes the model, and `slicer` writes a multicolor 3MF.
     fn export_to(&mut self, args: &Json, reply: &Reply) -> Outcome {
         let mesh = self.current_mesh()?;
         let target = absolute(args)?;
@@ -547,16 +545,16 @@ impl App {
             ),
             None => None,
         };
-        let which = match &args["plate"] {
-            Json::Null => optimize_tab::Plates::One(self.opt.state.plate),
-            Json::String(s) if s == "all" => optimize_tab::Plates::All,
-            v => match v.as_u64() {
-                Some(n) if n >= 1 => optimize_tab::Plates::One(n as usize - 1),
-                _ => return Err(format!("plate must be a number from 1 or \"all\", got {v}")),
-            },
-        };
+        if !args["plate"].is_null() {
+            return Err(
+                "plate is not an argument now. CoCAD puts all parts on one plate, and the slicer \
+                 arranges them on its plates."
+                    .into(),
+            );
+        }
         let overwrite = flag(args, "overwrite", false);
-        // Each file that the export writes must pass the checks of `output`.
+        // The file must pass the checks of `output` again when the export
+        // thread writes it.
         let check = move |p: &std::path::Path| -> Result<(), String> {
             if p.symlink_metadata()
                 .is_ok_and(|m| m.file_type().is_symlink())
@@ -571,9 +569,7 @@ impl App {
             }
             Ok(())
         };
-        if which != optimize_tab::Plates::All || slicer.is_some() || fmt == Format::Step {
-            output(args)?;
-        }
+        output(args)?;
         let only = self.opt.state.only.clone();
         let source = match (slicer, fmt) {
             (Some(_), _) => None,
@@ -590,44 +586,33 @@ impl App {
         self.note(format!("exporting {}", target.display()));
         let reply = reply.clone();
         std::thread::spawn(move || {
-            let mut left_out: Vec<String> = Vec::new();
-            let written: Result<Vec<PathBuf>, String> = match (job, slicer, source) {
+            let mut too_large: Vec<String> = Vec::new();
+            let written: Result<(), String> = match (job, slicer, source) {
                 (Some((file, cfg, params)), Some(slicer), _) => {
                     let cancel = Arc::new(AtomicBool::new(false));
                     crate::parts::render(&cfg, &file, &params, &cancel)
                         .and_then(|parts| export::write_parts(&target, &parts, &meta, slicer))
-                        .map(|_| vec![target.clone()])
                         .map_err(|e| e.to_string())
                 }
-                (_, _, None) => export::write(&target, &mesh, &meta)
-                    .map(|_| vec![target.clone()])
-                    .map_err(|e| e.to_string()),
+                (_, _, None) => export::write(&target, &mesh, &meta).map_err(|e| e.to_string()),
                 (_, _, Some(src)) if fmt == Format::Step => src.outcome().and_then(|o| {
                     let m = optimize_tab::only_mesh(&o, only.as_deref().unwrap_or_default())?;
-                    export::write(&target, &m, &meta)
-                        .map(|_| vec![target.clone()])
-                        .map_err(|e| e.to_string())
+                    export::write(&target, &m, &meta).map_err(|e| e.to_string())
                 }),
                 (_, _, Some(src)) => src.outcome().and_then(|o| {
-                    let files = optimize_tab::write_plates(&target, &o, which, &meta, check)?;
-                    left_out = o.left_out().iter().map(|s| s.to_string()).collect();
-                    Ok(files)
+                    optimize_tab::write_plate(&target, &o, &meta, check)?;
+                    too_large = o.too_large().iter().map(|s| s.to_string()).collect();
+                    Ok(())
                 }),
             };
-            let r = written.map(|files| {
-                let bytes = |p: &PathBuf| std::fs::metadata(p).map(|m| m.len()).unwrap_or(0);
-                let mut v = if files.len() == 1 {
-                    json!({ "path": files[0], "bytes": bytes(&files[0]) })
-                } else {
-                    let list: Vec<Json> = (files.iter())
-                        .map(|p| json!({ "path": p, "bytes": bytes(p) }))
-                        .collect();
-                    json!({ "files": list })
-                };
-                // Parts that are too large for the print area are not in the file.
-                if !left_out.is_empty() {
-                    v["left_out"] = json!(left_out);
-                    v["note"] = json!("These print parts are too large for the print area and are not in the file. Split or turn them with set_optimize.");
+            let r = written.map(|()| {
+                let bytes = std::fs::metadata(&target).map(|m| m.len()).unwrap_or(0);
+                let mut v = json!({ "path": target, "bytes": bytes });
+                // Parts that are too large for the print area are in the
+                // file, but the printer cannot print them.
+                if !too_large.is_empty() {
+                    v["too_large"] = json!(too_large);
+                    v["note"] = json!("These print parts are too large for the print area. Split or turn them with set_optimize.");
                 }
                 v
             });
@@ -775,10 +760,7 @@ impl App {
             .filter(|_| self.sliced_for == self.plate_key() && self.outcome_current())
             .ok_or("The slice result is out of date. Call slice again.")?;
         let st = &r.stats;
-        let plates = self.opt.outcome.as_ref().map_or(0, |o| o.plates);
         Ok(json!({
-            "plate": self.opt.state.plate + 1,
-            "plates": plates,
             "layers": st.layers,
             "path_m": st.path_mm / 1000.0,
             "filament_m": st.filament_m,
@@ -797,7 +779,7 @@ impl App {
     }
 
     /// `set_optimize`: merges a partial state into the Optimize state, then
-    /// waits for the plates.
+    /// waits for the plate.
     fn set_optimize(&mut self, args: &Json, reply: &Reply) -> Outcome {
         self.need_model()?;
         let mut patch = args.as_object().cloned().unwrap_or_default();
@@ -807,7 +789,7 @@ impl App {
             .unwrap_or(true);
         if patch.is_empty() {
             return Err(
-                "Give one or more state keys: area, gap, only, plate, fixes, parts.".into(),
+                "Give one or more state keys: area, gap, only, fixes, parts.".into(),
             );
         }
         self.apply_optimize(&Json::Object(patch))?;

@@ -1,5 +1,5 @@
-//! Plates (feature 6 of `docs/optimize-tab.md`): parts with the same shape,
-//! parts that overlap, and the layout of the parts on one or more plates.
+//! The plate (feature 6 of `docs/optimize-tab.md`): parts with the same
+//! shape, parts that overlap, and the layout of the parts on the plate.
 
 use super::Area;
 use crate::assembly::ray_triangle;
@@ -633,151 +633,159 @@ fn bounds(pts: &[DVec3]) -> Option<(DVec3, DVec3)> {
     )
 }
 
-/// The place of one part on the plates.
+/// The place of one part on the plate.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Placed {
-    /// The plate (0 is the first), or None when the part does not fit the
-    /// bed.
-    pub plate: Option<usize>,
-    /// The center of the footprint on the bed. The bed goes from (0, 0) to
-    /// (area.w, area.d).
+    /// The center of the footprint. The bed goes from (0, 0) to
+    /// (area.w, area.d). When the parts do not fit the bed, some centers
+    /// are outside it.
     pub center: Vec2,
     /// The part is turned by 90 degrees about z.
     pub turned: bool,
 }
 
-/// Puts footprints of the sizes `sizes` (x, y in print frame) on plates of
-/// `area.w` x `area.d`, with `gap` between the parts. Returns one place for
-/// each size, in the order of `sizes`.
+/// Puts footprints of the sizes `sizes` (x, y in print frame) on the one
+/// plate of `area.w` x `area.d`, with `gap` between the parts. Returns one
+/// place for each size, in the order of `sizes`. All parts get a place:
+/// the slicer arranges the parts again on its own plates.
 ///
-/// The method is shelf packing: the parts go in rows, the tallest (in y)
-/// first. A part turns so that its short side is along y, when it fits the
-/// bed so. In a row that has room, a part also turns when only the turned
-/// part fits the row. A part goes in the first row (of all plates) where it
-/// fits, else in a new row, else on a new plate. The block of rows is
-/// centered on each plate. There is no gap at the edge of the bed.
+/// The method is skyline packing: the parts go on the bed one by one, the
+/// tallest (in y) first. Each part goes to the place where its top edge is
+/// lowest, and then most to the left. A part turns so that its short side
+/// is along y, when it fits the bed so. It also turns when the turned part
+/// gets a lower place. A part that does not fit the bed does not turn. The
+/// block of parts is centered on the bed. There is no gap at the edge of
+/// the bed. When the block is deeper than the bed, the block gets wider,
+/// until it has about the shape of the bed. The block is then larger than
+/// the bed.
 pub fn layout(sizes: &[Vec2], area: &Area, gap: f32) -> Vec<Placed> {
     const EPS: f32 = 1e-3;
     let gap = gap.max(0.0);
-    let on_bed = |s: Vec2| s.x <= area.w + EPS && s.y <= area.d + EPS;
+    let bed = Vec2::new(area.w.max(1.0), area.d.max(1.0));
+    let on_bed = |s: Vec2| s.x <= bed.x + EPS && s.y <= bed.y + EPS;
 
     struct Item {
         index: usize,
-        size: Vec2,
-        turned: bool,
+        /// The sizes that the part can have, with the turn. The first one
+        /// is the preferred one.
+        options: Vec<(Vec2, bool)>,
     }
     let mut items = Vec::new();
     for (index, s) in sizes.iter().enumerate() {
         let s = s.max(Vec2::ZERO);
         let t = Vec2::new(s.y, s.x);
-        let options = if s.y > s.x {
+        let order = if s.y > s.x {
             [(t, true), (s, false)]
         } else {
             [(s, false), (t, true)]
         };
-        if let Some(&(size, turned)) = options.iter().find(|o| on_bed(o.0)) {
-            items.push(Item {
-                index,
-                size,
-                turned,
-            });
+        let mut options: Vec<(Vec2, bool)> = order.into_iter().filter(|o| on_bed(o.0)).collect();
+        if options.is_empty() {
+            options.push((s, false));
         }
+        items.push(Item { index, options });
     }
     items.sort_by(|a, b| {
-        (b.size.y.total_cmp(&a.size.y))
-            .then(b.size.x.total_cmp(&a.size.x))
+        let (sa, sb) = (a.options[0].0, b.options[0].0);
+        (sb.y.total_cmp(&sa.y))
+            .then(sb.x.total_cmp(&sa.x))
             .then(a.index.cmp(&b.index))
     });
 
-    struct Row {
-        y: f32,
-        h: f32,
-        /// The right end of the last part in the row.
-        x: f32,
-    }
-    struct Plate {
-        rows: Vec<Row>,
-        /// The top of the last row.
-        top: f32,
-    }
-    let mut plates: Vec<Plate> = Vec::new();
-    // Plate, lower left corner, size, turned.
-    let mut spots: Vec<(usize, Vec2, Vec2, bool)> =
-        vec![(0, Vec2::ZERO, Vec2::ZERO, false); sizes.len()];
-    let mut placed = vec![false; sizes.len()];
-    for it in &items {
-        let turned_size = Vec2::new(it.size.y, it.size.x);
-        let mut options = vec![(it.size, it.turned)];
-        if on_bed(turned_size) {
-            options.push((turned_size, !it.turned));
-        }
-        let mut spot = None;
-        'plates: for (p, plate) in plates.iter_mut().enumerate() {
-            for row in &mut plate.rows {
-                for &(size, turned) in &options {
-                    if size.y <= row.h + EPS && row.x + gap + size.x <= area.w + EPS {
-                        let x = row.x + gap;
-                        row.x = x + size.x;
-                        spot = Some((p, Vec2::new(x, row.y), size, turned));
-                        break 'plates;
+    // Lower left corner, size and turn of each part in a block of `width`,
+    // and the size of the block. Each part takes its size plus `gap` to the
+    // right and to the top, in a block of `width + gap`. So the gap is
+    // between the parts and not at the edges.
+    let pack = |width: f32| -> (Vec<(Vec2, Vec2, bool)>, Vec2) {
+        let bin = width + gap;
+        // The skyline: segments (x, width, top) from left to right.
+        let mut sky: Vec<(f32, f32, f32)> = vec![(0.0, bin, 0.0)];
+        let mut spots = vec![(Vec2::ZERO, Vec2::ZERO, false); sizes.len()];
+        let mut extent = Vec2::ZERO;
+        for it in &items {
+            // Top, x, y, size, turn.
+            let mut best: Option<(f32, f32, f32, Vec2, bool)> = None;
+            for &(size, turned) in &it.options {
+                let (w, h) = (size.x + gap, size.y + gap);
+                for (i, seg) in sky.iter().enumerate() {
+                    let x = seg.0;
+                    if x + w > bin + EPS {
+                        break;
+                    }
+                    let y = (sky[i..].iter())
+                        .take_while(|s| s.0 < x + w - EPS)
+                        .fold(0.0f32, |y, s| y.max(s.2));
+                    let top = y + h;
+                    let better = best.is_none_or(|(bt, bx, ..)| {
+                        top < bt - EPS || (top <= bt + EPS && x < bx - EPS)
+                    });
+                    if better {
+                        best = Some((top, x, y, size, turned));
                     }
                 }
             }
-        }
-        if spot.is_none() {
-            for (p, plate) in plates.iter_mut().enumerate() {
-                let y = plate.top + gap;
-                if y + it.size.y <= area.d + EPS {
-                    plate.rows.push(Row {
-                        y,
-                        h: it.size.y,
-                        x: it.size.x,
-                    });
-                    plate.top = y + it.size.y;
-                    spot = Some((p, Vec2::new(0.0, y), it.size, it.turned));
-                    break;
+            // `width` is at least the width of the first option, so the
+            // left end always has room. The fallback is for safety only.
+            let (top, x, y, size, turned) = best.unwrap_or_else(|| {
+                let (size, turned) = it.options[0];
+                let y = sky.iter().fold(0.0f32, |y, s| y.max(s.2));
+                (y + size.y + gap, 0.0, y, size, turned)
+            });
+            let w = size.x + gap;
+            let mut next: Vec<(f32, f32, f32)> = Vec::with_capacity(sky.len() + 2);
+            for &(sx, sw, sy) in &sky {
+                let end = sx + sw;
+                if end <= x + EPS || sx >= x + w - EPS {
+                    next.push((sx, sw, sy));
+                    continue;
+                }
+                if sx < x - EPS {
+                    next.push((sx, x - sx, sy));
+                }
+                if end > x + w + EPS {
+                    next.push((x + w, end - x - w, sy));
                 }
             }
+            next.push((x, w, top));
+            next.sort_by(|a, b| a.0.total_cmp(&b.0));
+            sky.clear();
+            for seg in next {
+                match sky.last_mut() {
+                    Some(last) if (last.2 - seg.2).abs() < EPS => last.1 += seg.1,
+                    _ => sky.push(seg),
+                }
+            }
+            let at = Vec2::new(x, y);
+            spots[it.index] = (at, size, turned);
+            extent = extent.max(at + size);
         }
-        let spot = spot.unwrap_or_else(|| {
-            plates.push(Plate {
-                rows: vec![Row {
-                    y: 0.0,
-                    h: it.size.y,
-                    x: it.size.x,
-                }],
-                top: it.size.y,
-            });
-            (plates.len() - 1, Vec2::ZERO, it.size, it.turned)
-        });
-        spots[it.index] = spot;
-        placed[it.index] = true;
+        (spots, extent)
+    };
+
+    let widest = (items.iter())
+        .map(|it| it.options[0].0.x)
+        .fold(bed.x, f32::max);
+    let (mut spots, mut extent) = pack(widest);
+    if extent.y > bed.y + EPS {
+        // A wider block, until it fits a bed that is `scale` times larger.
+        let mut scale = widest / bed.x;
+        for _ in 0..200 {
+            scale *= 1.1;
+            let (s, e) = pack(bed.x * scale);
+            (spots, extent) = (s, e);
+            if extent.y <= bed.y * scale + EPS {
+                break;
+            }
+        }
     }
 
-    // Center the block of each plate on the bed.
-    let mut extent = vec![Vec2::ZERO; plates.len()];
-    for (i, &(p, at, size, _)) in spots.iter().enumerate() {
-        if placed[i] {
-            extent[p] = extent[p].max(at + size);
-        }
-    }
-    let bed = Vec2::new(area.w, area.d);
-    (0..sizes.len())
-        .map(|i| {
-            if !placed[i] {
-                return Placed {
-                    plate: None,
-                    center: Vec2::ZERO,
-                    turned: false,
-                };
-            }
-            let (p, at, size, turned) = spots[i];
-            let offset = ((bed - extent[p]) * 0.5).max(Vec2::ZERO);
-            Placed {
-                plate: Some(p),
-                center: at + size * 0.5 + offset,
-                turned,
-            }
+    // Center the block on the bed.
+    let offset = (bed - extent) * 0.5;
+    spots
+        .into_iter()
+        .map(|(at, size, turned)| Placed {
+            center: at + size * 0.5 + offset,
+            turned,
         })
         .collect()
 }
@@ -969,18 +977,14 @@ mod tests {
         (p.center - s * 0.5, p.center + s * 0.5)
     }
 
+    /// The layout of `sizes`, with a check that no two parts are nearer
+    /// than `gap`.
     fn check_layout(sizes: &[Vec2], area: &Area, gap: f32) -> Vec<Placed> {
         let out = layout(sizes, area, gap);
         assert_eq!(out.len(), sizes.len());
         for (i, p) in out.iter().enumerate() {
-            let Some(plate) = p.plate else { continue };
             let (lo, hi) = rect(p, sizes[i]);
-            assert!(lo.x >= -1e-3 && lo.y >= -1e-3, "{i}: {lo}");
-            assert!(hi.x <= area.w + 1e-3 && hi.y <= area.d + 1e-3, "{i}: {hi}");
             for (j, q) in out.iter().enumerate().skip(i + 1) {
-                if q.plate != Some(plate) {
-                    continue;
-                }
                 let (l2, h2) = rect(q, sizes[j]);
                 let apart = l2.x - hi.x >= gap - 1e-3
                     || lo.x - h2.x >= gap - 1e-3
@@ -990,6 +994,14 @@ mod tests {
             }
         }
         out
+    }
+
+    /// The smallest and the largest corner of all footprints.
+    fn block(out: &[Placed], sizes: &[Vec2]) -> (Vec2, Vec2) {
+        let rects: Vec<_> = out.iter().zip(sizes).map(|(p, s)| rect(p, *s)).collect();
+        let lo = rects.iter().fold(Vec2::MAX, |a, r| a.min(r.0));
+        let hi = rects.iter().fold(Vec2::MIN, |a, r| a.max(r.1));
+        (lo, hi)
     }
 
     #[test]
@@ -1004,11 +1016,10 @@ mod tests {
             Vec2::new(45.0, 25.0),
         ];
         let out = check_layout(&sizes, &area, 10.0);
-        assert!(out.iter().all(|p| p.plate == Some(0)), "{out:?}");
-        // The block is centered: the margins are equal.
-        let rects: Vec<_> = out.iter().zip(&sizes).map(|(p, s)| rect(p, *s)).collect();
-        let lo = rects.iter().fold(Vec2::MAX, |a, r| a.min(r.0));
-        let hi = rects.iter().fold(Vec2::MIN, |a, r| a.max(r.1));
+        // The block is on the bed and centered: the margins are equal.
+        let (lo, hi) = block(&out, &sizes);
+        assert!(lo.x >= -1e-3 && lo.y >= -1e-3, "{lo}");
+        assert!(hi.x <= area.w + 1e-3 && hi.y <= area.d + 1e-3, "{hi}");
         assert!((lo.x - (area.w - hi.x)).abs() < 1e-3, "{lo} {hi}");
         assert!((lo.y - (area.d - hi.y)).abs() < 1e-3, "{lo} {hi}");
         // A part goes with its short side along y.
@@ -1016,29 +1027,64 @@ mod tests {
     }
 
     #[test]
-    fn layout_uses_more_plates_and_skips_large_parts() {
+    fn layout_puts_all_parts_on_one_plate() {
         let area = Area {
             w: 100.0,
             d: 100.0,
             h: 100.0,
         };
-        let sizes = vec![Vec2::splat(45.0); 5];
+        // Four fit the bed. Nine need a block larger than the bed, with
+        // about the shape of the bed, centered on it.
+        let sizes = vec![Vec2::splat(45.0); 9];
         let out = check_layout(&sizes, &area, 10.0);
-        let plates: Vec<_> = out.iter().map(|p| p.plate).collect();
-        assert_eq!(plates.iter().filter(|p| **p == Some(0)).count(), 4);
-        assert_eq!(plates[4], Some(1));
-        // One part alone is centered on its plate.
-        assert!((out[4].center - Vec2::splat(50.0)).length() < 1e-3);
+        let (lo, hi) = block(&out, &sizes);
+        let size = hi - lo;
+        assert!(size.x > area.w && size.y > area.d, "{size}");
+        assert!((size.x / size.y - 1.0).abs() < 0.3, "{size}");
+        assert!(((lo + hi) * 0.5 - Vec2::splat(50.0)).length() < 1e-3, "{lo} {hi}");
 
+        // Parts that are too large for the bed are on the plate too. They do
+        // not turn.
         let sizes = [
             Vec2::new(120.0, 10.0),
             Vec2::new(20.0, 20.0),
             Vec2::new(10.0, 101.0),
         ];
         let out = check_layout(&sizes, &area, 5.0);
-        assert_eq!(out[0].plate, None);
-        assert_eq!(out[1].plate, Some(0));
-        assert_eq!(out[2].plate, None);
+        assert!(!out[0].turned && !out[2].turned, "{out:?}");
+        let (lo, hi) = block(&out, &sizes);
+        assert!(hi.x - lo.x >= 120.0 - 1e-3, "{lo} {hi}");
+    }
+
+    #[test]
+    fn layout_fills_the_room_beside_a_tall_stack() {
+        // The split desk dock on a 220 x 220 bed: two pieces of the base
+        // plate, the stand and three clips. Rows do not fit them; the
+        // stand turned beside the two pieces does.
+        let area = Area {
+            w: 220.0,
+            d: 220.0,
+            h: 250.0,
+        };
+        let mut sizes = vec![
+            Vec2::new(135.0, 80.0),
+            Vec2::new(130.0, 80.0),
+            Vec2::new(100.0, 60.0),
+        ];
+        sizes.extend([Vec2::new(17.0, 14.0); 3]);
+        let out = check_layout(&sizes, &area, 10.0);
+        let (lo, hi) = block(&out, &sizes);
+        assert!(lo.x >= -1e-3 && lo.y >= -1e-3, "{lo}");
+        assert!(hi.x <= area.w + 1e-3 && hi.y <= area.d + 1e-3, "{hi}");
+    }
+
+    #[test]
+    fn layout_of_many_copies_is_fast() {
+        let sizes = vec![Vec2::new(12.0, 7.0); 999];
+        let t = std::time::Instant::now();
+        let out = layout(&sizes, &Area::default(), 5.0);
+        assert_eq!(out.len(), 999);
+        assert!(t.elapsed().as_secs_f32() < 2.0, "{:?}", t.elapsed());
     }
 
     #[test]
@@ -1050,7 +1096,6 @@ mod tests {
         };
         let sizes = [Vec2::new(150.0, 20.0)];
         let out = check_layout(&sizes, &area, 10.0);
-        assert_eq!(out[0].plate, Some(0));
         assert!(out[0].turned);
         assert!((out[0].center - Vec2::new(50.0, 100.0)).length() < 1e-3);
     }

@@ -2,13 +2,14 @@
 
 Status: Implemented in 0.7.0. The rest of this page is the design record of 2026-11-13. The user documentation is in `docs/wiki/Optimize.md` and `docs/wiki/Prepare-a-model-for-printing.md`.
 
+After 0.7.1, the owner changed decision 5: CoCAD has one plate. See [One plate](#one-plate).
+
 Features 10 to 12 came after 0.7.1. Features 10 (hole size), 11 (mouse ears) and 12 (the thin wall check) are implemented. See [Proposal: features 10 to 12](#proposal-features-10-to-12).
 
 ## Differences from this design
 
 What 0.7.0 does not do, or does in a different way:
 
-- The estimate of the **Layers** card shows the current plate only, not the total of all plates. `cocad slice` shows each plate and the sum.
 - The user moves a cut with its number field in the Split section. The 3D view shows no cut plane for the split.
 - The Optimize tab has no part menu (right click), so there is no **Print only this part**. The dropdown of the Plate card does this.
 - A split has parallel cuts across one axis only. There are no cuts at an angle and no cuts across two axes.
@@ -133,8 +134,8 @@ Proposal:
 
 What the export contains (decision, owner):
 
-- **STL and 3MF**: the print result of the current plate. This is the selected parts, in print orientation, with the fixes that are on, in the plate layout. Parts with the `%` mark are not in it (feature 6).
-- **Export all plates**: when the parts need more than one plate, one file for each plate, with the plate number in the name (for example `box-big-plate2.3mf`).
+- **STL and 3MF**: the print result of the plate. This is the selected parts, in print orientation, with the fixes that are on, in the plate layout. Parts with the `%` mark are not in it (feature 6).
+- ~~**Export all plates**~~: removed after 0.7.1. There is one plate (see [One plate](#one-plate)).
 - **STEP**: the model as OpenSCAD made it, for a CAD program. With one part selected, only that part, in its model position. The print fixes are for the printer, not for CAD.
 - **3MF of a plate**: one object for each different part, and one build item for each copy. The slicer then shows separate objects. The scad-models rule "split it to objects in the slicer" goes away.
 - **Multicolor 3MF**: as today.
@@ -312,14 +313,16 @@ What CoCAD does:
 - A reference part is never in the Plate card, the plate, the slice preview or the export. It shows in the Parts card with a "not printed" mark.
 - `*` (disabled) objects stay hidden, as in OpenSCAD.
 
-### More than one plate
+### One plate
 
-Decision (owner): more plates are in the first version.
+Decision (owner, after 0.7.1): CoCAD has one plate. This replaces the first decision, "more plates in the first version". 0.7.0 and 0.7.1 filled plate 1, then plate 2, and so on, and exported one file for each plate.
 
-- When the parts do not fit on one bed, CoCAD fills plate 1, then plate 2, and so on.
-- The Plate card shows "Plate 1 of 3", with buttons for the next and the previous plate. The 3D view shows the current plate.
-- The Export card exports the current plate, and has **Export all plates** (feature 1).
-- The slice estimate shows the current plate and the total of all plates.
+- The print area has three uses: the bed in the 3D view, the fit check of each part, and the split proposals.
+- All print parts are always on the plate, also a part that is too large. The Plate card shows its status **Too large** and the Split section.
+- When the parts need more room than the bed, the rows get longer, until the block has about the shape of the bed. The block is centered on the bed, and some parts are outside it. The view label and the report say so.
+- The export writes all parts in one file. The slicer arranges them on its plates.
+- There is no plate number, no `--plate` option, and no `plate` key in the state or in `export_model`.
+- The slice estimate is for all parts on the plate.
 
 ### Same parts
 
@@ -812,7 +815,7 @@ The owner answered the first open questions on 2026-11-13:
 | 2 | Parts that are not printed | They are never on the bed. The `.scad` file marks them with `%` (feature 6). |
 | 3 | Fixes on by default | No. All fixes are off by default. When the user turns one on, CoCAD stores it per model with the existing mechanism (`models.json`). |
 | 4 | Orientation | Custom orientation is an option, off by default. With it on: Auto, or the user selects the face on the bed. No hint in the model. |
-| 5 | More than one plate | Yes, in the first version. |
+| 5 | More than one plate | Yes, in the first version. Changed after 0.7.1: one plate, and the slicer arranges the parts. |
 | 6 | Tab names and keys | The tab is **Optimize**, key `O`. The Photo tab becomes **Render**, key `R`. The tab label underlines the key letter. |
 | | Name of the OpenSCAD step | **Build**, so that "Render" names only the Render tab. |
 | 7 | OpenSCAD in the `.deb` | Remove it. A check at start shows how to get the nightly. |

@@ -2,7 +2,7 @@
 
 *Advanced topic. This page is for technical readers. For a simple introduction, see [AI assistant](AI-assistant).*
 
-CoCAD has an MCP server, so that an AI client can work with the open window. The client can read the model and its parameters, change values, see the result as an image, prepare the print plates, and run app commands.
+CoCAD has an MCP server, so that an AI client can work with the open window. The client can read the model and its parameters, change values, see the result as an image, prepare the print plate, and run app commands.
 
 ## Setup
 
@@ -40,7 +40,7 @@ The client starts `cocad mcp`. This process has no window. It sends each tool ca
 
 | Tool | Action |
 |---|---|
-| `get_state` | Loaded file, build status, last error, mesh data, changed parameters, parameter sets, the [model definition](Model-definition) (file, title, description, problems), tab, parts and reference parts, part colors, explode, section cut, the plates of the Optimize tab, end of the OpenSCAD log |
+| `get_state` | Loaded file, build status, last error, mesh data, changed parameters, parameter sets, the [model definition](Model-definition) (file, title, description, problems), tab, parts and reference parts, part colors, explode, section cut, the copies on the plate of the Optimize tab (`plate_copies`), end of the OpenSCAD log |
 | `get_params` | All Customizer parameters with type, value, default, limits and options |
 | `get_source` | Source of the `.scad` file |
 | `view_model` | Render an image and return it to the client |
@@ -51,9 +51,9 @@ The client starts `cocad mcp`. This process has no window. It sends each tool ca
 | `load_parameter_set`, `save_parameter_set` | Load or save a parameter set. The sets are in `<model>.yml`. |
 | `get_optimize` | The print preparation of the Optimize tab: the state and the result |
 | `set_optimize` | Change the print preparation of the Optimize tab |
-| `export_model` | Write a plate as STL or 3MF, or the model as STEP. With `slicer`, write a multicolor 3MF |
+| `export_model` | Write the plate as STL or 3MF, or the model as STEP. With `slicer`, write a multicolor 3MF |
 | `save_photo` | Write a path traced PNG |
-| `slice` | Slice the current plate and return layers, filament, weight and a rough print time |
+| `slice` | Slice the plate and return layers, filament, weight and a rough print time |
 | `set_view` | Change the tab, camera direction, wireframe, grid, part colors, explode, section cut and the layer of the Optimize tab. Start or stop the render of the Render tab |
 | `list_windows`, `select_window` | Choose a window when more than one is open |
 
@@ -71,17 +71,19 @@ The client starts `cocad mcp`. This process has no window. It sends each tool ca
 `get_optimize` returns:
 
 - `state`: the values of the Optimize tab, in the form that `set_optimize` takes.
-- `parts`: one entry for each print part: `name`, `count`, `copies`, `fits`, `size_mm`, `plates`, `orientation`, `issues` (the problems of the Check card), `fixes` (the number of places that each fix changed, and the places that it skipped), and for a part that does not fit, `split_proposal`. A piece of a split part has `piece`.
-- `plates`, `plate` (from 1), `summary` (the text that shows when you hold the mouse on **Export 3MF**), `errors` and `seconds`.
+- `parts`: one entry for each print part: `name`, `count`, `copies`, `fits`, `size_mm`, `orientation`, `issues` (the problems of the Check card), `fixes` (the number of places that each fix changed, and the places that it skipped), and for a part that does not fit, `split_proposal`. A piece of a split part has `piece`.
+- `plate`: `copies` (the copies on the plate) and `overflow` (true when the parts need more room than the bed. The slicer arranges them on its plates).
+- `summary` (the text that shows when you hold the mouse on **Export 3MF**), `errors` and `seconds`.
 
-`set_optimize` merges the given keys into the state, as a JSON merge patch: objects merge key by key, and `null` removes a key. Then it waits for the plates and returns the result as `get_optimize` does.
+There is one plate. All print parts are on it, also a part that is too large for the print area. The print area sets the fit of each part and the split proposals.
+
+`set_optimize` merges the given keys into the state, as a JSON merge patch: objects merge key by key, and `null` removes a key. Then it waits for the plate and returns the result as `get_optimize` does.
 
 | Key | Value |
 |---|---|
 | `area` | The print area `[width, depth, height]` in mm |
-| `gap` | The gap between the parts on a plate, in mm |
+| `gap` | The gap between the parts on the plate, in mm |
 | `only` | The name of one print part, or `null` for all parts |
-| `plate` | The plate that the window and the export show, from 0 |
 | `fixes` | `teardrops`, `bridges`, `hole_above` (`sacrificial` or `stepped`), `sacrificial_layers`, `chamfer`, `chamfer_mm`, `brim`, `brim_w`, `brim_gap`, `ears`, `ear_d`, `ear_min`, `hole_size`, `hole_add` |
 | `parts` | The values of each print part, by name: `include`, `copies`, `orient` (`model`, `auto` or `face`), `down` (with `face`: the direction of the model that goes down), `turns` (quarter turns on the bed) and `split`: `joint` (`flat`, `pins` or `dovetail`), `cuts` (a list of `[axis 0 to 2, position in mm]`), `clearance`, and the sizes in mm `pin_d`, `pin_depth`, `tab_root`, `tab_tip`, `tab_depth`, `tab_pitch` |
 
@@ -104,9 +106,9 @@ For example, this call turns on the bed chamfer, puts the part "Clip" on its bes
 
 ### Files
 
-- `export_model` writes `.stl` and `.3mf` as the window does: a plate of the Optimize tab, with the print parts in print position and the fixes that are on. `plate` selects the plate (from 1) or `all`. The default is the plate that the window shows. With `all`, each plate goes to its own file, with `-plateN` before the extension. A plate 3MF has one object for each print part and one build item for each copy. When print parts are too large for the print area, the reply lists them in `left_out`: they are not in the file.
+- `export_model` writes `.stl` and `.3mf` as the window does: the plate of the Optimize tab, with all print parts in print position and the fixes that are on. A plate 3MF has one object for each print part and one build item for each copy. When print parts are too large for the print area, the reply lists them in `too_large`. They are in the file, but the printer cannot print them. The `plate` argument of CoCAD 0.7 now gives an error.
 - `export_model` writes `.step` as the model as built. When `only` of the Optimize state names a part, the STEP file has only that part.
-- `export_model` prepares the plates when they are not ready.
+- `export_model` prepares the plate when it is not ready.
 - `export_model` and `save_photo` do not replace a file without `overwrite`.
 - `export_model`, `save_photo` and `view_model` fail when the last build failed, so that they do not use an old mesh.
 - `open_model` opens only `.scad` files. `new_model` writes only `.scad` files, and only when the file does not exist. `save_photo` writes only `.png` files.
@@ -121,7 +123,7 @@ For example, this call turns on the bed chamfer, puts the part "Clip" on its bes
 
 ### `slice`
 
-`slice` slices the current plate of the Optimize tab, with the fixes. Given values (`layer_height`, `first_layer`, `line_width`, `walls`, `infill`, `solid_layers`, `speed`) also change the print settings of the window. The result has the plate, the number of plates, the layers, the path and filament length, the weight and a rough print time in minutes.
+`slice` slices the plate of the Optimize tab, with the fixes. Given values (`layer_height`, `first_layer`, `line_width`, `walls`, `infill`, `solid_layers`, `speed`) also change the print settings of the window. The result has the layers, the path and filament length, the weight and a rough print time in minutes.
 
 ### `set_view`: tab and layer
 

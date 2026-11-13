@@ -1,5 +1,5 @@
 //! The Optimize pipeline: from the printable parts of the built model to
-//! the plates. The app runs `run` in a background thread when the model or
+//! the plate. The app runs `run` in a background thread when the model or
 //! an Optimize value changes. The slow steps (joins, splits, fixes) keep
 //! their results in a `Cache`, so a change runs only what it needs.
 
@@ -16,9 +16,9 @@ use std::sync::{Arc, Mutex};
 /// The Optimize values of one print part, stored per model and part name.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PartState {
-    /// False: the part is not on the plates.
+    /// False: the part is not on the plate.
     pub include: bool,
-    /// Copies on the plates. `None`: the count in the model.
+    /// Copies on the plate. `None`: the count in the model.
     pub copies: Option<u32>,
     pub orientation: orient::Orientation,
     /// The split that the user accepted.
@@ -41,12 +41,10 @@ impl Default for PartState {
 pub struct State {
     pub area: Area,
     pub fixes: fixes::Settings,
-    /// Gap between the parts on a plate, in mm.
+    /// Gap between the parts on the plate, in mm.
     pub gap: f32,
-    /// `Some(name)`: only this print part is on the plates.
+    /// `Some(name)`: only this print part is on the plate.
     pub only: Option<String>,
-    /// The plate that the view and the export show.
-    pub plate: usize,
     pub parts: BTreeMap<String, PartState>,
 }
 
@@ -57,7 +55,6 @@ impl State {
             fixes: fixes::Settings::default(),
             gap: 10.0,
             only: None,
-            plate: 0,
             parts: BTreeMap::new(),
         }
     }
@@ -98,7 +95,7 @@ pub struct PrintPart {
     pub sources: Vec<usize>,
     /// The number of this part in the model.
     pub count: u32,
-    /// Copies on the plates (0 when it is not included).
+    /// Copies on the plate (0 when it is not included).
     pub copies: u32,
     pub state: PartState,
     /// The part in the model frame, for the face pick.
@@ -117,12 +114,12 @@ pub struct PrintPart {
     pub piece: Option<(String, String)>,
 }
 
-/// One copy of a print part on a plate.
+/// One copy of a print part on the plate.
 #[derive(Clone, Copy, Debug)]
 pub struct Instance {
     pub part: usize,
-    pub plate: usize,
     /// Print frame to bed. The bed goes from (0, 0) to (area.w, area.d).
+    /// When the parts do not fit the bed, some copies are outside it.
     pub at: Mat4,
 }
 
@@ -130,49 +127,47 @@ pub struct Instance {
 #[derive(Clone, Default)]
 pub struct Outcome {
     pub parts: Vec<PrintPart>,
+    /// The copies on the plate. All copies of the print parts are on it.
     pub instances: Vec<Instance>,
-    pub plates: usize,
-    /// Problems of single parts. The other parts are still on the plates.
+    /// The copies need more room than the bed: some are outside it. The
+    /// slicer arranges them on its plates.
+    pub overflow: bool,
+    /// Problems of single parts. The other parts are still on the plate.
     pub errors: Vec<String>,
 }
 
 impl Outcome {
-    /// All copies on `plate` as one mesh, in bed coordinates.
-    pub fn plate_mesh(&self, plate: usize) -> Mesh {
+    /// All copies on the plate as one mesh, in bed coordinates.
+    pub fn plate_mesh(&self) -> Mesh {
         let mut out = Mesh::default();
-        for i in self.instances.iter().filter(|i| i.plate == plate) {
+        for i in &self.instances {
             append(&mut out, &self.parts[i.part].mesh, i.at);
         }
         out
     }
 
-    /// The print parts that should be on the plates but are not, because
-    /// they are too large for the print area.
-    pub fn left_out(&self) -> Vec<&str> {
+    /// The print parts on the plate that are too large for the print area.
+    pub fn too_large(&self) -> Vec<&str> {
         (self.parts.iter())
             .filter(|p| p.copies > 0 && !p.fits)
             .map(|p| p.name.as_str())
             .collect()
     }
 
-    /// A note for an export that leaves parts out, or `None`.
-    pub fn left_out_note(&self) -> Option<String> {
-        let names = self.left_out();
+    /// A note for an export with parts that are too large, or `None`.
+    pub fn too_large_note(&self) -> Option<String> {
+        let names = self.too_large();
         (!names.is_empty()).then(|| {
             format!(
-                "Not on a plate, too large for the print area: {}. Split or turn it in the Optimize tab.",
+                "Too large for the print area: {}. Split or turn it in the Optimize tab.",
                 names.join(", ")
             )
         })
     }
 
-    /// The copies on `plate`: (print part, bed matrix).
-    pub fn on_plate(&self, plate: usize) -> Vec<(usize, Mat4)> {
-        self.instances
-            .iter()
-            .filter(|i| i.plate == plate)
-            .map(|i| (i.part, i.at))
-            .collect()
+    /// The copies on the plate: (print part, bed matrix).
+    pub fn on_plate(&self) -> Vec<(usize, Mat4)> {
+        self.instances.iter().map(|i| (i.part, i.at)).collect()
     }
 }
 
@@ -484,7 +479,8 @@ pub fn run(
     }
     let mut parts: Vec<PrintPart> = parts.into_iter().flatten().collect();
 
-    // 6. Plates.
+    // 6. The plate. All copies go on it, also the parts that are too large:
+    // the slicer arranges them again.
     let mut items = Vec::new();
     let mut sizes = Vec::new();
     for (k, p) in parts.iter_mut().enumerate() {
@@ -497,9 +493,6 @@ pub fn run(
         } else {
             0
         };
-        if !p.fits {
-            continue;
-        }
         let b = super::bounds_or_zero(&p.mesh);
         let size = Vec2::new(b.max.x - b.min.x, b.max.y - b.min.y);
         for _ in 0..p.copies {
@@ -509,9 +502,17 @@ pub fn run(
     }
     let placed = plate::layout(&sizes, &st.area, st.gap);
     let mut instances = Vec::new();
-    let mut plates = 0;
-    for (k, pl) in items.iter().zip(placed) {
-        let Some(n) = pl.plate else { continue };
+    let mut overflow = false;
+    for ((k, pl), size) in items.iter().zip(placed).zip(&sizes) {
+        let foot = if pl.turned {
+            Vec2::new(size.y, size.x)
+        } else {
+            *size
+        };
+        let (lo, hi) = (pl.center - foot * 0.5, pl.center + foot * 0.5);
+        overflow |= lo.min_element() < -1e-3
+            || hi.x > st.area.w + 1e-3
+            || hi.y > st.area.d + 1e-3;
         let b = super::bounds_or_zero(&parts[*k].mesh);
         let c = b.center();
         let turn = if pl.turned {
@@ -522,18 +523,13 @@ pub fn run(
         let at = Mat4::from_translation(Vec3::new(pl.center.x, pl.center.y, 0.0))
             * turn
             * Mat4::from_translation(Vec3::new(-c.x, -c.y, 0.0));
-        instances.push(Instance {
-            part: *k,
-            plate: n,
-            at,
-        });
-        plates = plates.max(n + 1);
+        instances.push(Instance { part: *k, at });
     }
     cache.lock().unwrap().trim();
     Ok(Outcome {
         parts,
         instances,
-        plates,
+        overflow,
         errors,
     })
 }
@@ -683,9 +679,9 @@ mod tests {
         assert_eq!(o.parts[0].count, 2);
         assert_eq!(o.parts[0].sources, vec![0, 1]);
         assert_eq!(o.instances.len(), 3);
-        assert_eq!(o.plates, 1);
         // All copies are on the bed and do not overlap.
-        let m = o.plate_mesh(0);
+        assert!(!o.overflow);
+        let m = o.plate_mesh();
         let b = m.bounds().unwrap();
         assert!(b.min.x >= -1e-3 && b.min.y >= -1e-3 && b.min.z.abs() < 1e-3);
         assert!(b.max.x <= 100.001 && b.max.y <= 100.001);
@@ -721,7 +717,7 @@ mod tests {
     }
 
     #[test]
-    fn parts_go_to_more_plates_and_a_large_part_to_none() {
+    fn all_parts_go_on_the_one_plate() {
         let mut parts: Vec<Input> = (0..6)
             .map(|i| {
                 input(
@@ -735,13 +731,17 @@ mod tests {
             boxed(150.0, 20.0, 5.0, Vec3::new(0.0, 80.0, 0.0)),
         ));
         let o = go(&job(parts));
-        assert_eq!(o.plates, 2);
+        // Six parts and the part that is too large: all on the plate.
+        assert_eq!(o.instances.len(), 7);
+        assert!(o.overflow);
         let big = o.parts.iter().position(|p| p.name == "Big").unwrap();
         assert!(!o.parts[big].fits);
         assert!(o.parts[big].proposal.is_some());
-        assert!(o.instances.iter().all(|i| i.part != big));
-        assert_eq!(o.left_out(), vec!["Big"]);
-        assert!(o.left_out_note().unwrap().contains("Big"));
+        assert_eq!(o.instances.iter().filter(|i| i.part == big).count(), 1);
+        assert_eq!(o.too_large(), vec!["Big"]);
+        assert!(o.too_large_note().unwrap().contains("Big"));
+        let m = o.plate_mesh();
+        assert!((m.volume() - 6.0 * 45.0 * 45.0 * 5.0 - 150.0 * 20.0 * 5.0).abs() < 1.0);
     }
 
     #[test]
@@ -966,7 +966,6 @@ impl State {
         if let Some(o) = &self.only {
             m.insert("only".into(), json!(o));
         }
-        m.insert("plate".into(), json!(self.plate));
         m.insert("fixes".into(), fixes_json(&self.fixes));
         let parts: Map<String, Json> = self
             .parts
@@ -997,7 +996,6 @@ impl State {
             s.gap = g.clamp(0.0, 100.0);
         }
         s.only = v.get("only").and_then(Json::as_str).map(str::to_string);
-        s.plate = v.get("plate").and_then(Json::as_u64).unwrap_or(0) as usize;
         if let Some(f) = v.get("fixes") {
             s.fixes = fixes_of(f);
         }
@@ -1024,7 +1022,6 @@ mod storage_tests {
         s.fixes.chamfer = true;
         s.fixes.hole_above = fixes::HoleAbove::Stepped;
         s.only = Some("Part 2".into());
-        s.plate = 1;
         s.parts.insert(
             "Part 1".into(),
             PartState {

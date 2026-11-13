@@ -12,9 +12,9 @@ The connection uses MCP (Model Context Protocol). MCP is a standard that lets an
 - Change the values of parameters and build the model.
 - Look at the model. CoCAD sends it a picture.
 - Change the view: the tab, the camera direction, part colors, explode and section.
-- Prepare the print plates in the [Optimize](Optimize) tab: the print area, the print fixes, the orientation of the parts and the splits.
+- Prepare the print plate in the [Optimize](Optimize) tab: the print area, the print fixes, the orientation of the parts and the splits.
 - Slice the plate and read the estimate.
-- Export the plates as STL and 3MF files, export STEP files, and save photos.
+- Export the plate as STL and 3MF files, export STEP files, and save photos.
 - Load and save parameter sets.
 - Open a different `.scad` file.
 

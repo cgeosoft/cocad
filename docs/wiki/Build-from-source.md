@@ -49,9 +49,9 @@ A tag `v*` (for example `v0.2.0`) also makes a GitHub release with all files att
 
 ## Tests
 
-- `cargo test`: parser, mesh, STL round trip, STEP faces, 3MF zip, parameter sets, slicer skin, path tracer BVH, GPU tracer data and CPU fallback, parts of the 3D view, and the print preparation: plates, same parts, orientation, fixes, check and split.
+- `cargo test`: parser, mesh, STL round trip, STEP faces, 3MF zip, parameter sets, slicer skin, path tracer BVH, GPU tracer data and CPU fallback, parts of the 3D view, and the print preparation: plate layout, same parts, orientation, fixes, check and split.
 - `cargo test showcase -- --ignored --nocapture`: the Optimize features on `examples/desk-dock.scad`. These tests need OpenSCAD. With `COCAD_SHOWCASE_OUT=<dir>`, they also write the part meshes before and after each change as STL files.
-- `scripts/test-models.sh`: builds every model in `examples/`, exports STL, 3MF and STEP, and slices it. STL and 3MF get the print plate, STEP gets the model as built. Then two print preparation runs: all fixes on `bracket.scad`, and two plates of `lid-box.scad` with `--plate all`. Use `--release` for speed, or give model files to test only those.
+- `scripts/test-models.sh`: builds every model in `examples/`, exports STL, 3MF and STEP, and slices it. STL and 3MF get the print plate, STEP gets the model as built. Then two print preparation runs: all fixes on `bracket.scad`, and `lid-box.scad` on a small print area, with all parts on one plate. Use `--release` for speed, or give model files to test only those.
 - The STEP export of `examples/demo-box.scad` loads in OpenCASCADE as one valid solid. Its volume is the same as the STL volume.
 
 | Model | Tests |
@@ -109,7 +109,7 @@ Models with `// expect: error` on the first line must fail.
 | `src/parts.rs` | Multicolor part lists: renders each part with its color |
 | `src/export.rs` | STL, 3MF, multicolor 3MF and STEP writers |
 | `src/slicer.rs` | Preview slicer |
-| `src/optimize/` | Print preparation: `pipeline.rs` (print parts, plates, cache), `plate.rs` (same parts, overlap, layout), `orient.rs`, `split.rs`, `fixes.rs` with `teardrop.rs`, `holes.rs`, `bridges.rs`, `brim.rs` and `ears.rs`, `check.rs`, `scad.rs` (OpenSCAD runs on part meshes), `headless.rs` (CLI print options and report) |
+| `src/optimize/` | Print preparation: `pipeline.rs` (print parts, plate, cache), `plate.rs` (same parts, overlap, layout), `orient.rs`, `split.rs`, `fixes.rs` with `teardrop.rs`, `holes.rs`, `bridges.rs`, `brim.rs` and `ears.rs`, `check.rs`, `scad.rs` (OpenSCAD runs on part meshes), `headless.rs` (CLI print options and report) |
 | `src/printer.rs` | Printer presets and the print area editor |
 | `src/pathtrace.rs` | Path tracer for photo renders (BVH, plastic material, studio light, section cut). A job runs on the GPU or on all CPU cores |
 | `src/pathtrace/gpu.rs` | GPU path tracer: scene textures, tiles for each frame, CPU fallback when the GPU stops |

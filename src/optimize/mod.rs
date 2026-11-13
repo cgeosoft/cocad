@@ -9,7 +9,7 @@
 //! 3. `fixes`: change the geometry for the printer (teardrop holes, bridges,
 //!    bed chamfer, brim). Each fix finds its places in Rust and writes
 //!    OpenSCAD code. `scad` runs OpenSCAD on the part mesh with this code.
-//! 4. `plate`: put the parts on one or more plates.
+//! 4. `plate`: put the parts on the plate.
 //! 5. `check`: list the problems that stay.
 //!
 //! All geometry here is in mm. "Print frame" means: the part in print

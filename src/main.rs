@@ -53,7 +53,7 @@ Usage:
   cocad slice FILE.scad [-P SET] [-D name=value]... [PRINT OPTIONS]
                     [--layer-height MM] [--first-layer MM] [--infill PCT] [--walls N]
                     [--line-width MM] [--solid-layers N] [--speed MM/S]
-                                               Slice the plates and print estimates
+                                               Slice the plate and print estimates
   cocad photo FILE.scad -o OUT.png [-P SET] [-D name=value]... [--size WxH] [--samples N]
                     [--color RRGGBB] [--finish matte|satin|gloss] [--studio dark|light] [--layer-lines]
                                                Photo render (path traced) from the iso view
@@ -65,8 +65,6 @@ Parameter sets:
 Print options (export and slice):
   CoCAD starts from the Optimize values that the app stored for the model, else
   from the defaults (all parts, Auto orientation, all fixes off). The options change them.
-  --plate N|all        The plate to export or slice (default: export plate 1, slice
-                       all plates). all: export one file per plate, OUT-plateN.ext
   --part NAME|all      Only this print part, or all print parts
   --bed WxDxH          Print area in mm (default: the stored value, else Settings > Printer)
   --orient model|auto  Orientation of all parts: the model rotation, or the best face
@@ -366,25 +364,12 @@ fn prepare(b: &Batch) -> Result<(optimize::headless::Built, optimize::headless::
     Ok((built, p))
 }
 
-/// The plates to write or slice: `--plate`, else `default`. Fails when
-/// the parts are on no plate, or the plate does not exist.
-fn plates(b: &Batch, o: &optimize::pipeline::Outcome, all_by_default: bool) -> Result<Vec<usize>> {
-    use optimize::headless::Plates;
-    if o.plates == 0 {
-        bail!("Nothing to print: no print part is on a plate. See the report above.");
+/// Fails when no print part is on the plate.
+fn need_plate(o: &optimize::pipeline::Outcome) -> Result<()> {
+    if o.instances.is_empty() {
+        bail!("Nothing to print: no print part is on the plate. See the report above.");
     }
-    Ok(match b.print.plate {
-        Some(Plates::One(n)) if n >= o.plates => bail!(
-            "--plate {}: the parts are on {} plate{}",
-            n + 1,
-            o.plates,
-            if o.plates == 1 { "" } else { "s" }
-        ),
-        Some(Plates::One(n)) => vec![n],
-        Some(Plates::All) => (0..o.plates).collect(),
-        None if all_by_default => (0..o.plates).collect(),
-        None => vec![0],
-    })
+    Ok(())
 }
 
 /// `cocad sets FILE.scad [--json]`: the sets of the definition. `--json`
@@ -511,35 +496,18 @@ fn cmd_export(args: &[String]) -> Result<()> {
     }
     let (_, p) = prepare(&b)?;
     let o = &p.outcome;
-    let list = plates(&b, o, false)?;
-    let all = opts.plate == Some(optimize::headless::Plates::All);
-    for &plate in &list {
-        let path = if all {
-            let name = out.file_name().unwrap_or_default().to_string_lossy();
-            out.with_file_name(export::plate_name(&name, plate))
-        } else {
-            out.clone()
-        };
-        match fmt {
-            export::Format::ThreeMf => {
-                let bytes = optimize::headless::plate_3mf(o, plate, &meta)?;
-                std::fs::write(&path, bytes)
-                    .with_context(|| format!("cannot write {}", path.display()))?;
-            }
-            _ => export::write(&path, &o.plate_mesh(plate), &meta)?,
+    need_plate(o)?;
+    match fmt {
+        export::Format::ThreeMf => {
+            let bytes = optimize::headless::plate_3mf(o, &meta)?;
+            std::fs::write(&out, bytes)
+                .with_context(|| format!("cannot write {}", out.display()))?;
         }
-        eprintln!(
-            "wrote {} (plate {} of {})",
-            path.display(),
-            plate + 1,
-            o.plates
-        );
+        _ => export::write(&out, &o.plate_mesh(), &meta)?,
     }
-    if o.plates > 1 && !all && opts.plate.is_none() {
-        eprintln!(
-            "note: the parts are on {} plates. Use --plate N or --plate all for the others.",
-            o.plates
-        );
+    eprintln!("wrote {}", out.display());
+    if let Some(note) = o.too_large_note() {
+        eprintln!("warning: {note}");
     }
     Ok(())
 }
@@ -560,13 +528,8 @@ fn model_part(b: &Batch, name: &str) -> Result<mesh::Mesh> {
 
 /// Prints the slice estimate: the layers, the path, the filament and the
 /// print time.
-fn print_stats(st: &slicer::Stats, plates: usize) {
-    let all = if plates > 1 {
-        format!("  (all {plates} plates)")
-    } else {
-        String::new()
-    };
-    println!("layers      {}{all}", st.layers);
+fn print_stats(st: &slicer::Stats) {
+    println!("layers      {}", st.layers);
     println!("path        {:.1} m", st.path_mm / 1000.0);
     println!("filament    {:.2} m, {:.1} g", st.filament_m, st.grams);
     println!("print time  {:.0} min (rough)", st.seconds / 60.0);
@@ -583,34 +546,16 @@ fn cmd_slice(args: &[String]) -> Result<()> {
         let mesh = build(&b)?;
         let t = std::time::Instant::now();
         let r = slicer::slice(&mesh, &b.settings);
-        print_stats(&r.stats, 1);
+        print_stats(&r.stats);
         println!("sliced in   {} ms", t.elapsed().as_millis());
         return Ok(());
     }
     let (_, p) = prepare(&b)?;
     let o = &p.outcome;
-    let list = plates(&b, o, true)?;
+    need_plate(o)?;
     let t = std::time::Instant::now();
-    let mut total = slicer::Stats::default();
-    for &plate in &list {
-        let st = slicer::slice(&o.plate_mesh(plate), &b.settings).stats;
-        if list.len() > 1 {
-            println!(
-                "{:<12}{} layers, {:.2} m, {:.1} g, {:.0} min",
-                format!("plate {}", plate + 1),
-                st.layers,
-                st.filament_m,
-                st.grams,
-                st.seconds / 60.0
-            );
-        }
-        total.layers += st.layers;
-        total.path_mm += st.path_mm;
-        total.filament_m += st.filament_m;
-        total.grams += st.grams;
-        total.seconds += st.seconds;
-    }
-    print_stats(&total, list.len());
+    let st = slicer::slice(&o.plate_mesh(), &b.settings).stats;
+    print_stats(&st);
     println!("sliced in   {} ms", t.elapsed().as_millis());
     Ok(())
 }

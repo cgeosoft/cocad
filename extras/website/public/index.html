@@ -180,7 +180,7 @@
           <p class="rule-tag mono">Agent</p>
           <p class="rule-value mono">18 tools</p>
           <h3>It sees what you see</h3>
-          <p>The agent reads the build state, the OpenSCAD log, open edges, the plates and the layers. Then it fixes what it finds.</p>
+          <p>The agent reads the build state, the OpenSCAD log, open edges, the plate and the layers. Then it fixes what it finds.</p>
         </article>
         <article class="card rule reveal">
           <p class="rule-tag mono">Finish</p>
@@ -216,7 +216,7 @@
           <table>
             <caption class="sr-only">What the Optimize tab does</caption>
             <tbody>
-              <tr><th>Plates</th><td>All parts or one part. Parts with the same shape are one row with a count. When the parts do not fit on one bed, CoCAD fills more plates.</td></tr>
+              <tr><th>Plate</th><td>All parts or one part. Parts with the same shape are one row with a count. All parts go on one plate. Your slicer arranges them on its plates.</td></tr>
               <tr><th>Orientation</th><td>Off by default. With custom orientation on, Auto puts a part on its best face, or you select the face for the bed.</td></tr>
               <tr><th>Teardrop holes</th><td>Round holes with a horizontal axis get a 45 degree point at the top.</td></tr>
               <tr><th>Hole size</th><td>Round holes with a vertical axis get the diameter of the model, plus a set value.</td></tr>
@@ -234,7 +234,7 @@
       <ul class="guard-list reveal">
         <li><b>In the file.</b> The fixes change the mesh, so the exported STL or 3MF has them.</li>
         <li><b>Reference parts.</b> Parts with the <code class="inline">%</code> mark show in gray. They are not printed or exported.</li>
-        <li><b>Export 3MF.</b> The button at the bottom of the tab writes the print plate, with one object for each part. Its menu has STL, all plates and STEP of the model.</li>
+        <li><b>Export 3MF.</b> The button at the bottom of the tab writes the print plate, with one object for each part. Its menu has STL and STEP of the model.</li>
         <li><b>Printer presets.</b> File &gt; Settings &gt; Printer sets the default print area. Each model can have its own.</li>
       </ul>
     </section>
@@ -274,7 +274,7 @@
             <table>
               <caption class="sr-only">MCP tools</caption>
               <tbody>
-                <tr><th class="mono">get_state</th><td>File, build status, last error, mesh data, plates, OpenSCAD log</td></tr>
+                <tr><th class="mono">get_state</th><td>File, build status, last error, mesh data, plate, OpenSCAD log</td></tr>
                 <tr><th class="mono">get_params</th><td>All Customizer parameters with limits and options</td></tr>
                 <tr><th class="mono">get_source</th><td>Source of the <code class="inline">.scad</code> file</td></tr>
                 <tr><th class="mono">view_model</th><td>Render an image and return it to the client</td></tr>
@@ -317,7 +317,7 @@
         <button type="button" role="tab" class="tour-tab" data-shot="assets/img/screen-model.webp" data-text="Model tab. The Customizer panel reads the comments in your .scad file. Parts with the % mark show in gray and are not printed.">Model</button>
         <button type="button" role="tab" class="tour-tab" data-shot="assets/img/screen-render.webp" data-text="Render tab. Click Render, and a path tracer renders the current camera in a plastic color and finish you choose, on the GPU or on all CPU cores.">Render</button>
         <button type="button" role="tab" class="tour-tab" data-shot="assets/img/screen-sets.webp" data-text="Parameter sets. Named sets in a .json file that OpenSCAD reads too.">Sets</button>
-        <button type="button" role="tab" class="tour-tab" data-shot="assets/img/screen-export.webp" data-text="Export 3MF at the bottom of the Optimize tab writes the plate, with one object for each part. The arrow opens the other exports: STL of the plate and STEP of the model. With two or more plates, also all plates, one file each.">Export</button>
+        <button type="button" role="tab" class="tour-tab" data-shot="assets/img/screen-export.webp" data-text="Export 3MF at the bottom of the Optimize tab writes the plate, with one object for each part. The arrow opens the other exports: STL of the plate and STEP of the model.">Export</button>
       </div>
       <div class="tour-frame reveal">
         <img data-tour-img src="assets/img/screen-optimize.webp" width="1600" height="1040" alt="CoCAD screenshot." loading="lazy" decoding="async">
