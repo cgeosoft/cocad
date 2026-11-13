@@ -1,6 +1,25 @@
-# Optimize tab (design draft)
+# Optimize tab (design)
 
-Status: draft, 2026-11-13. The owner answered the first open questions (see Decisions). Nothing on this page is implemented.
+Status: Implemented in 0.7.0. The rest of this page is the design record of 2026-11-13. The user documentation is in `docs/wiki/Optimize.md` and `docs/wiki/Prepare-a-model-for-printing.md`.
+
+## Differences from this design
+
+What 0.7.0 does not do, or does in a different way:
+
+- The estimate of the **Layers** card shows the current plate only, not the total of all plates. `cocad slice` shows each plate and the sum.
+- The user moves a cut with its number field in the Split section. The 3D view shows no cut plane for the split.
+- The Optimize tab has no part menu (right click), so there is no **Print only this part**. The dropdown of the Plate card does this.
+- A split has parallel cuts across one axis only. There are no cuts at an angle and no cuts across two axes.
+- The window shows the Split section only for a part that does not fit, and it shows the proposal at once. A part that fits can be split only with `set_optimize`.
+- In the window, the joint and the clearance apply to all cuts of a part. The pin and tab sizes have fixed values (pins 4 mm, 5 mm deep; tabs 8 mm, 12 mm, 5 mm long, 30 mm apart). `set_optimize` can change them.
+- The joints are flat, pins and dovetail. Plug, lap and snap are not done.
+- The Auto cost has no term for the overhang that a fix makes printable. A flat ceiling counts with a lower weight (0.3) than an overhang. A part that does not fit gets no try on the diagonal of the bed. When a part fits on a different side, the Plate card tells the user to turn on Custom orientation. It does not offer that orientation.
+- Teardrop holes have no flat top option.
+- The bed chamfer has no option to leave out the cut faces of a split.
+- While the Check card is open, the 3D view shows the faces of the problems in one color. The faces that a fix changed have no color.
+- `export_model` has `plate` as its only print option. The other print values go through `set_optimize`.
+- The closed state of the cards is stored for all models in `config` (`closed_cards`). The closed parameter groups are stored per model in `models.json`.
+- The examples have one showcase model for the fixes, the orientation and the split (`examples/desk-dock.scad`), and `examples/reference-part.scad` for the `%` mark. There is no separate test model for each fix.
 
 ## Goal
 

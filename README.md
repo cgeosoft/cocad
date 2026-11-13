@@ -4,11 +4,13 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-orange.svg)](LICENSE)
 ![Platforms](https://img.shields.io/badge/platform-Linux%20%7C%20Windows%20%7C%20macOS-555.svg)
 
-A fast desktop viewer for OpenSCAD models. Open a `.scad` file, change its Customizer parameters with sliders, and see the model update. Export STL, 3MF or STEP, check the print layers, and render a photo of the part.
+A fast desktop viewer for OpenSCAD models. Open a `.scad` file, change its Customizer parameters with sliders, and see the model update. Prepare the parts for your 3D printer, check the print layers, export STL, 3MF or STEP, and render a photo of the part.
 
 ![CoCAD](assets/preview.png)
 
-OpenSCAD does the geometry. CoCAD runs the `openscad` CLI in the background, reads the mesh and does the rest.
+OpenSCAD does the geometry. CoCAD runs the `openscad` CLI in the background (the build), reads the mesh and does the rest. CoCAD needs an OpenSCAD development snapshot with the Manifold backend.
+
+The model file needs only the assembled model. The **Optimize** tab does the print preparation: it puts the parts on the bed, turns them, adds teardrop holes, bridge fixes, a bed chamfer and brims, and splits parts that are too large. Open **File > Examples > Desk dock** and follow the guide [Prepare a model for printing](https://github.com/cgeosoft/cocad/wiki/Prepare-a-model-for-printing).
 
 **The full documentation is in the [wiki](https://github.com/cgeosoft/cocad/wiki).**
 
@@ -18,19 +20,20 @@ OpenSCAD does the geometry. CoCAD runs the `openscad` CLI in the background, rea
 |---|---|
 | Sliders, lists and switches for the Customizer parameters | [Change the parameters](https://github.com/cgeosoft/cocad/wiki/Parameters) |
 | Named sets of values in a `.json` file that OpenSCAD also reads | [Parameter sets](https://github.com/cgeosoft/cocad/wiki/Parameter-sets) |
-| Part colors, select, focus, explode and section cut | [Parts](https://github.com/cgeosoft/cocad/wiki/Parts) |
-| STL, 3MF and STEP export, with a mesh check | [Export](https://github.com/cgeosoft/cocad/wiki/Export) |
+| Part colors, select, focus, explode, section cut, and `%` reference parts that are not printed | [Parts](https://github.com/cgeosoft/cocad/wiki/Parts) |
+| Print plates for your printer: same parts with copies, more plates, custom orientation, print fixes, a print check and a split with flat, pin or dovetail joints | [Optimize](https://github.com/cgeosoft/cocad/wiki/Optimize) |
+| Print layers of the plate with a time, length and weight estimate | [Optimize](https://github.com/cgeosoft/cocad/wiki/Optimize#layers) |
+| STL and 3MF of the print plate, STEP of the model, with a mesh check | [Export](https://github.com/cgeosoft/cocad/wiki/Export) |
 | Multicolor 3MF for PrusaSlicer 2.9 and OrcaSlicer | [Multicolor prints](https://github.com/cgeosoft/cocad/wiki/Multicolor-prints) |
-| Print layers with a time, length and weight estimate | [Slice preview](https://github.com/cgeosoft/cocad/wiki/Slice-preview) |
-| Path traced studio photo of the part | [Photo render](https://github.com/cgeosoft/cocad/wiki/Photo-render) |
+| Path traced studio photo of the part | [Render](https://github.com/cgeosoft/cocad/wiki/Render) |
 | MCP server for Claude Desktop and other AI clients | [AI assistant](https://github.com/cgeosoft/cocad/wiki/AI-assistant), [MCP reference](https://github.com/cgeosoft/cocad/wiki/MCP-reference) |
-| Batch export, slice and photo without the window | [Command line](https://github.com/cgeosoft/cocad/wiki/Command-line) |
+| Batch export, slice and photo without the window, with the print options | [Command line](https://github.com/cgeosoft/cocad/wiki/Command-line) |
 
 Linux, Windows and macOS. Dark and light themes.
 
 ## Install
 
-1. Install OpenSCAD. A development snapshot is much faster than the 2021 release: <https://openscad.org/downloads.html#snapshots>.
+1. Install an OpenSCAD development snapshot (nightly build): <https://openscad.org/downloads.html#snapshots>. CoCAD needs its Manifold backend. The release 2021.01 does not work. At the start, CoCAD shows the install steps when it finds no snapshot.
 2. Download CoCAD for your system from the [releases page](https://github.com/cgeosoft/cocad/releases).
 
 The steps for each system are on the [Install](https://github.com/cgeosoft/cocad/wiki/Install) page.
@@ -49,7 +52,7 @@ Usage analytics and error reports are optional. Each stays off until you accept 
 
 ## Build
 
-Requirements: Rust (stable, 1.85 or later) and OpenSCAD.
+Requirements: Rust (stable, 1.85 or later) and an OpenSCAD development snapshot.
 
 ```bash
 cargo run --release -- examples/demo-box.scad
