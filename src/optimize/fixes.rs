@@ -169,7 +169,14 @@ pub fn bed_cut_module(c: f32, layers: Layers) -> Option<String> {
         let lo = if i == 0 { 0.0 } else { layers.top(i - 1) };
         let hi = layers.top(i);
         let shrink = top - lo;
-        let (z0, h) = if i == 0 { (-1.0, hi + 1.0) } else { (lo, hi - lo) };
+        // The steps overlap by 0.001 mm. Without it, the sums in OpenSCAD
+        // (-1 + 1.2 is not 0.2) leave a sheet with no thickness between two
+        // steps.
+        let (z0, h) = if i == 0 {
+            (-1.0, hi + 1.0)
+        } else {
+            (lo - 0.001, hi - lo + 0.001)
+        };
         let _ = writeln!(
             s,
             "        difference() {{\n            translate([-10000, -10000, {}]) cube([20000, 20000, {}]);\n            translate([0, 0, {}]) linear_extrude({}) union() {{\n                bed_keep({}) children();\n                bed_low({}, {}) children();\n            }}\n        }}",
@@ -329,6 +336,15 @@ mod tests {
         // The block is 19.2 x 19.2 at z 0.1, the wall stays 0.8 x 20.
         let want = 19.2 * 19.2 + 0.8 * 20.0;
         assert!((a - want).abs() < 0.5, "area {a}, want {want}");
+        // No sheet stays between two steps: no face points up at z 0.2.
+        let up: f32 = (0..out.triangles.len())
+            .filter(|&i| {
+                let [p, q, r] = out.tri(i);
+                [p, q, r].iter().all(|v| (v.z - 0.2).abs() < 1e-3) && out.normal(i).z > 0.9
+            })
+            .map(|i| super::super::tri_area(&out, i))
+            .sum();
+        assert!(up < 1e-3, "sheet of {up} mm² at z 0.2");
     }
 
     #[test]
