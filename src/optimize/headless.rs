@@ -13,7 +13,7 @@
 use super::check::Kind;
 use super::orient::{Choice, Orientation};
 use super::pipeline::{self, Cache, Input, Job, Outcome, State};
-use super::{Area, Layers, Limits, fixes};
+use super::{Area, Layers, Limits, fixes, split};
 use crate::assembly::Assembly;
 use crate::csg_split;
 use crate::export;
@@ -225,8 +225,12 @@ fn state_in(all: &Json, key: &str, area: Area) -> Option<State> {
 /// `<config>/models.json`, with `area` for a missing print area. `None`
 /// when the model has no stored state. The file is not changed.
 pub fn stored_state(file: &Path, area: Area) -> Option<State> {
-    let path = openscad::config_dir()?.join("models.json");
-    let text = std::fs::read_to_string(path).ok()?;
+    stored_state_in(&openscad::config_dir()?, file, area)
+}
+
+/// `stored_state` with the config folder `dir`.
+fn stored_state_in(dir: &Path, file: &Path, area: Area) -> Option<State> {
+    let text = std::fs::read_to_string(dir.join("models.json")).ok()?;
     let all: Json = serde_json::from_str(&text).ok()?;
     state_in(&all, &model_key(file), area)
 }
@@ -568,6 +572,11 @@ fn placed(o: &Outcome) -> Vec<usize> {
     n
 }
 
+/// `n` and the word for one or more.
+fn count(n: usize, one: &str, more: &str) -> String {
+    format!("{n} {}", if n == 1 { one } else { more })
+}
+
 fn kind_label(k: Kind, n: usize) -> String {
     let (one, more) = match k {
         Kind::Overhang => ("overhang", "overhangs"),
@@ -576,7 +585,7 @@ fn kind_label(k: Kind, n: usize) -> String {
         Kind::SmallIsland => ("small bed island", "small bed islands"),
         Kind::TooLarge => ("part too large", "parts too large"),
     };
-    format!("{n} {}", if n == 1 { one } else { more })
+    count(n, one, more)
 }
 
 fn size_text(m: &Mesh) -> String {
@@ -614,9 +623,9 @@ pub fn report(built: &Built, p: &Prepared) -> String {
         s,
         "state       {}",
         if p.stored {
-            "stored Optimize values of the app, changed by the options"
+            "the Optimize values that the app stored for the model"
         } else {
-            "defaults (no stored Optimize values), changed by the options"
+            "the defaults (the app stored no Optimize values for the model)"
         }
     );
     let on = placed(o);
@@ -628,11 +637,20 @@ pub fn report(built: &Built, p: &Prepared) -> String {
     let _ = writeln!(s, "print parts {}", o.parts.len());
     for (k, q) in o.parts.iter().enumerate() {
         let what = if !q.fits {
-            let split = q.proposal.as_ref().map_or(String::new(), |sp| {
-                format!(", a split in {} pieces fits (Optimize tab)", sp.pieces())
-            });
+            let why = match &q.proposal {
+                Some(sp) => format!(
+                    " A split in {} pieces fits: split it in the Optimize tab.",
+                    sp.pieces()
+                ),
+                None if split::fits(&q.model, &st.area) => {
+                    " It fits in another orientation: select the bed face in the Optimize tab."
+                        .to_string()
+                }
+                None if q.piece.is_none() => " No split across one axis makes it fit.".to_string(),
+                None => String::new(),
+            };
             format!(
-                "{}: too large for the print area{split}",
+                "{}: too large for the print area, not on a plate.{why}",
                 size_text(&q.mesh)
             )
         } else if q.copies == 0 {
@@ -669,21 +687,33 @@ pub fn report(built: &Built, p: &Prepared) -> String {
         let _ = writeln!(s, "  plate {}  {}", plate + 1, list.join(", "));
     }
     s.push_str(&fixes_line(st, o));
-    let skipped: Vec<String> = (o.parts.iter())
-        .flat_map(|q| {
-            q.report
-                .skipped
-                .iter()
-                .map(move |t| format!("{}: {t}", q.name))
-        })
-        .collect();
+    // The same text of one part is one line with a count.
+    let mut skipped: Vec<(String, usize)> = Vec::new();
+    for q in &o.parts {
+        for t in &q.report.skipped {
+            let line = format!("{}: {t}", q.name);
+            match skipped.iter_mut().find(|(l, _)| *l == line) {
+                Some((_, n)) => *n += 1,
+                None => skipped.push((line, 1)),
+            }
+        }
+    }
     if !skipped.is_empty() {
-        let _ = writeln!(s, "skipped     {} places", skipped.len());
-        for t in skipped.iter().take(MAX_SKIPPED) {
-            let _ = writeln!(s, "  {t}");
+        let total = skipped.iter().map(|(_, n)| n).sum();
+        let _ = writeln!(s, "skipped     {}", count(total, "place", "places"));
+        for (t, n) in skipped.iter().take(MAX_SKIPPED) {
+            match n {
+                1 => {
+                    let _ = writeln!(s, "  {t}");
+                }
+                n => {
+                    let _ = writeln!(s, "  {t} ({n} places)");
+                }
+            }
         }
         if skipped.len() > MAX_SKIPPED {
-            let _ = writeln!(s, "  and {} more", skipped.len() - MAX_SKIPPED);
+            let rest: usize = skipped[MAX_SKIPPED..].iter().map(|(_, n)| n).sum();
+            let _ = writeln!(s, "  and {} more", count(rest, "place", "places"));
         }
     }
     let mut kinds: Vec<(Kind, usize)> = Vec::new();
@@ -724,17 +754,21 @@ fn fixes_line(st: &State, o: &Outcome) -> String {
         ));
     }
     if f.teardrops {
-        list.push(format!("{} teardrop holes", sum(|r| r.teardrops)));
+        list.push(count(
+            sum(|r| r.teardrops),
+            "teardrop hole",
+            "teardrop holes",
+        ));
     }
     if f.bridges {
         list.push(format!(
-            "{} bridges ({} hole above)",
-            sum(|r| r.bridges),
+            "{} (hole above: {})",
+            count(sum(|r| r.bridges), "bridge", "bridges"),
             f.hole_above.name()
         ));
     }
     if f.brim {
-        list.push(format!("{} brims", sum(|r| r.brims)));
+        list.push(count(sum(|r| r.brims), "brim", "brims"));
     }
     format!("fixes       {}\n", list.join(", "))
 }
@@ -758,7 +792,6 @@ pub fn plate_3mf(o: &Outcome, plate: usize, meta: &export::Meta) -> Result<Vec<u
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::optimize::split;
     use serde_json::json;
 
     fn parse(args: &[&str]) -> Result<Options> {
@@ -943,6 +976,25 @@ mod tests {
         assert!(st.fixes.teardrops && !st.fixes.chamfer);
         assert!(state_in(&all, "/m/other.scad", area).is_none());
         assert!(state_in(&all, "/m/none.scad", area).is_none());
+    }
+
+    #[test]
+    fn stored_state_reads_models_json_by_the_canonical_path() {
+        let dir = std::env::temp_dir().join(format!("cocad-headless-state-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("sub")).unwrap();
+        let scad = dir.join("box.scad");
+        std::fs::write(&scad, "cube(1);").unwrap();
+        let key = scad.canonicalize().unwrap().display().to_string();
+        let all = json!({ key: { "optimize": { "only": "Lid", "fixes": { "brim": true } } } });
+        std::fs::write(dir.join("models.json"), all.to_string()).unwrap();
+        // Another spelling of the same path finds the same entry.
+        let other = dir.join("sub").join("..").join("box.scad");
+        let st = stored_state_in(&dir, &other, Area::default()).unwrap();
+        assert_eq!(st.only.as_deref(), Some("Lid"));
+        assert!(st.fixes.brim);
+        assert_eq!(st.area, Area::default());
+        assert!(stored_state_in(&dir, &dir.join("none.scad"), Area::default()).is_none());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

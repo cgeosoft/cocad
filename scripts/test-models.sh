@@ -85,7 +85,7 @@ print(zipfile.ZipFile(sys.argv[1]).read("3D/3dmodel.model").decode().count("<ite
 m=examples/bracket.scad
 if [ -f "$m" ] && [[ " ${models[*]} " == *" $m "* ]]; then
     if log=$("$bin" export "$m" -o "$out/fixes.stl" --chamfer --teardrops --bridges --brim 2>&1); then
-        tears=$(echo "$log" | sed -n 's/^fixes .* \([0-9]*\) teardrop holes.*/\1/p')
+        tears=$(echo "$log" | sed -n 's/^fixes .* \([0-9]*\) teardrop hole.*/\1/p')
         if [ ! -s "$out/fixes.stl" ]; then row fixes FAIL "empty stl"
         elif ! echo "$log" | grep -q '^fixes .*bed chamfer 0.4 mm on 1 of 1 parts'; then row fixes FAIL "no bed chamfer"
         elif [ "${tears:-0}" -lt 1 ]; then row fixes FAIL "no teardrop holes"
