@@ -25,6 +25,13 @@ const NUT_FACES: usize = 6;
 const MIN_LEN: f32 = 0.1;
 /// The end of a hole is closed when a face is this near (mm) behind it.
 const END_TOL: f32 = 0.02;
+/// A cut stops this far (mm) before a closed end. A cut that stops at the
+/// end face is not exactly in its plane: the axis is a fit to the faces,
+/// and the numbers in the `.scad` file have 5 decimals. OpenSCAD then
+/// keeps a step of no height there, a band of triangles with no width.
+/// The last 0.01 mm of the hole keeps its old size, much less than a
+/// layer.
+const END_GAP: f32 = 0.01;
 /// The positions along the hole for the wall check, as parts of its length.
 const RAY_AT: [f32; 3] = [0.21, 0.52, 0.79];
 /// The largest number of directions for the wall check.
@@ -125,19 +132,18 @@ fn closed(mesh: &Mesh, h: &Round, t: f32, sign: f32) -> bool {
 }
 
 /// The OpenSCAD statement that cuts hole `h` to the outline `poly`. The
-/// cut goes `OVERLAP` past an open end. It stops at a closed end, so that
-/// a blind hole does not get deeper.
+/// cut goes `OVERLAP` past an open end. It stops `END_GAP` before a closed
+/// end, so that a blind hole does not get deeper.
 fn cut(mesh: &Mesh, h: &Round, poly: &[Vec2]) -> String {
-    let t0 = if closed(mesh, h, h.t0, -1.0) {
-        h.t0
-    } else {
-        h.t0 - OVERLAP
+    let past = |t: f32, sign: f32| {
+        if closed(mesh, h, t, sign) {
+            -END_GAP
+        } else {
+            OVERLAP
+        }
     };
-    let t1 = if closed(mesh, h, h.t1, 1.0) {
-        h.t1
-    } else {
-        h.t1 + OVERLAP
-    };
+    let t0 = h.t0 - past(h.t0, -1.0);
+    let t1 = h.t1 + past(h.t1, 1.0);
     format!(
         "{} linear_extrude(height = {}) {}",
         scad::multmatrix(h.frame(t0)),

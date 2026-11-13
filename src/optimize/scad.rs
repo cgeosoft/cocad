@@ -95,6 +95,20 @@ pub fn num(x: f32) -> String {
     if s == "-0" { "0".into() } else { s.to_string() }
 }
 
+/// `x` with all its digits: OpenSCAD reads the same value as the f32 in
+/// the imported STL. Use it for a face that must be in the plane of a face
+/// of the part. With `num`, 2.8 is not the f32 2.8 (2.79999995...), and
+/// OpenSCAD keeps a step of 5e-8 mm between the two faces: a band of
+/// triangles with no width.
+pub fn exact(x: f32) -> String {
+    if !x.is_finite() || x == 0.0 {
+        return "0".into();
+    }
+    // An f64 holds each f32 value exactly. Its text is the shortest that
+    // gives the same f64 back.
+    format!("{}", x as f64)
+}
+
 /// `[x, y]`
 pub fn v2(p: Vec2) -> String {
     format!("[{}, {}]", num(p.x), num(p.y))
@@ -158,6 +172,17 @@ mod tests {
         assert_eq!(num(0.25), "0.25");
         assert_eq!(num(-0.0), "0");
         assert_eq!(num(-1.5), "-1.5");
+    }
+
+    #[test]
+    fn exact_numbers_give_the_f32_back() {
+        assert_eq!(exact(2.8), "2.799999952316284");
+        assert_eq!(exact(0.5), "0.5");
+        assert_eq!(exact(-0.0), "0");
+        for x in [2.8f32, 0.1, -36.0, 153.2, 329.99, 1.0e-3] {
+            let back: f64 = exact(x).parse().unwrap();
+            assert_eq!(back, x as f64);
+        }
     }
 
     #[test]

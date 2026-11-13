@@ -33,6 +33,10 @@ const CEILING_NZ: f32 = check::LEVEL_NZ;
 /// The overlap of a cut or an add into the faces next to it (mm), so that
 /// OpenSCAD leaves no thin skin.
 const EPS: f32 = 0.01;
+/// The distance (mm) of the side of a cut rectangle from a line or a face
+/// that it must not touch (see `cut_corners`). It is much more than the
+/// error of the numbers in the `.scad` file and of an f32 at 1 m.
+const CLEAR: f32 = 0.001;
 /// A round loop is a circle when it has this many arc points or more and
 /// all points are this near to the largest radius.
 const CIRCLE_ARCS: usize = 8;
@@ -130,13 +134,20 @@ pub fn ceilings(mesh: &Mesh, z_min: f32) -> Vec<Ceiling> {
         }
         let outer = loops.swap_remove(k);
         let holes = loops.into_iter().filter(|l| loop_area(l) < 0.0).collect();
-        let n = (g.len() * 3) as f32;
-        let z = g
+        // The height of the vertex nearest to the mean, not the mean: a
+        // fix that starts at the ceiling is then in its plane (see
+        // `scad::exact`).
+        let zs: Vec<f32> = g
             .iter()
             .flat_map(|&t| mesh.tri(t as usize))
             .map(|v| v.z)
-            .sum::<f32>()
-            / n;
+            .collect();
+        let mean = zs.iter().map(|&z| z as f64).sum::<f64>() / zs.len() as f64;
+        let z = zs
+            .iter()
+            .copied()
+            .min_by(|a, b| (*a as f64 - mean).abs().total_cmp(&(*b as f64 - mean).abs()))
+            .unwrap_or(0.0);
         let area = g.iter().map(|&t| tri_area(mesh, t as usize)).sum();
         out.push(Ceiling {
             z,
@@ -317,6 +328,20 @@ fn ray_2d(p: Vec2, dir: Vec2, l: &[Vec2]) -> Option<f32> {
     best
 }
 
+/// The corners of the cut for the rectangle `r`, with `d` added to its
+/// half sizes. A rectangle that holds a round loop touches its corner
+/// lines, and a slot ends on the outline of the space under the ceiling. A
+/// face of a cut through these lines is not exactly on them: OpenSCAD then
+/// leaves triangles with no width, and a move of the part on the plate can
+/// open their edges. The cut keeps `CLEAR` from them.
+fn cut_corners(r: &Rect, d: Vec2) -> Vec<Vec2> {
+    Rect {
+        half: r.half + d,
+        ..*r
+    }
+    .corners()
+}
+
 /// The statement that cuts the prism of `poly` from `z0`, `h` high.
 fn prism(poly: Vec<Vec2>, z0: f32, h: f32) -> String {
     format!(
@@ -335,23 +360,28 @@ fn prism(poly: Vec<Vec2>, z0: f32, h: f32) -> String {
 fn prism_down(poly: Vec<Vec2>, top: f32, h: f32) -> String {
     format!(
         "translate([0, 0, {}]) mirror([0, 0, 1]) linear_extrude(height = {}) {}",
-        scad::num(top),
+        scad::exact(top),
         scad::num(h),
         scad::polygon(&[poly])
     )
 }
 
 /// The cone cut at the end of a blind hole: the hole outline `l` (center
-/// `c`, radius `r`) at the ceiling `z`, to a point `r` above it. The cut
-/// starts `EPS` below the ceiling, a little wider, so that it is exactly
-/// the hole outline at `z`.
+/// `c`, radius `r`) at the ceiling `z`, to a point above it at 45 degrees.
+/// The cut starts `EPS` below the ceiling and `EPS` smaller than the hole.
+/// It does not touch the wall of the hole: it only goes through the
+/// ceiling face, which keeps a ring of `2 EPS` (a step, not a bridge).
+/// A cone that is exactly the hole outline at `z` goes through the edges
+/// where the wall meets the ceiling. OpenSCAD then leaves triangles with
+/// no width and edges with four faces.
 fn cone(l: &[Vec2], c: Vec2, r: f32, z: f32) -> String {
-    let k = (r + EPS) / r;
+    let base = r - EPS;
+    let k = base / r;
     let pts: Vec<Vec2> = l.iter().map(|p| (*p - c) * k).collect();
     format!(
         "translate({}) linear_extrude(height = {}, scale = 0) {}",
         scad::v3(c.extend(z - EPS)),
-        scad::num(r + EPS),
+        scad::num(base),
         scad::polygon(&[pts])
     )
 }
@@ -457,9 +487,9 @@ fn fix(
         let below = section(mesh, c.z - 0.5 * h);
         match fits(&r, &below, c.inner_point(mesh), limits.min_wall) {
             Ok(()) => {
-                plan.cuts.push(prism_down(r.corners(), c.z + EPS, h + EPS));
+                bound = cut_corners(&r, Vec2::splat(CLEAR));
+                plan.cuts.push(prism_down(bound.clone(), c.z + EPS, h + EPS));
                 ceiling = c.z + EPS;
-                bound = r.corners();
                 changed = true;
             }
             // An overhang of the outer shape: the Check lists it.
@@ -488,9 +518,11 @@ fn fix(
                     ));
                     continue;
                 }
+                // The layers start exactly in the plane of the ceiling,
+                // or of the cut of case a.
                 plan.adds.push(format!(
                     "translate([0, 0, {}]) linear_extrude(height = {}) offset(delta = {}) {}",
-                    scad::num(ceiling),
+                    scad::exact(ceiling),
                     scad::num(thick),
                     scad::num(EPS),
                     scad::polygon(&[hole.outline.to_vec()])
@@ -506,9 +538,13 @@ fn fix(
                 }
                 match stepped(mesh, c.z, h, hole, &bound, limits.min_wall) {
                     Ok((slot, square)) => {
-                        plan.cuts.push(prism(slot.corners(), c.z - EPS, h + EPS));
-                        plan.cuts
-                            .push(prism(square.corners(), c.z + h - EPS, h + EPS));
+                        // The slot ends just inside the space under the
+                        // ceiling. Its sides are `CLEAR` out from the sides
+                        // of the square.
+                        let slot = cut_corners(&slot, Vec2::new(-CLEAR, 2.0 * CLEAR));
+                        plan.cuts.push(prism(slot, c.z - EPS, h + EPS));
+                        let square = cut_corners(&square, Vec2::splat(CLEAR));
+                        plan.cuts.push(prism(square, c.z + h - EPS, h + EPS));
                         changed = true;
                     }
                     Err(why) => plan
@@ -797,5 +833,62 @@ mod tests {
         assert_eq!((p.fixed, p.cuts.len(), p.adds.len()), (1, 0, 1), "{p:?}");
         assert_eq!(p.skipped.len(), 1, "{p:?}");
         assert!(p.skipped[0].contains("0.71 mm"), "{p:?}");
+    }
+
+    /// The faces of a step with no height: triangles that are not level,
+    /// with a height under 0.1 µm on their longest side.
+    fn steps_with_no_height(m: &Mesh) -> usize {
+        (0..m.triangles.len())
+            .filter(|&i| {
+                let [a, b, c] = m.tri(i);
+                let long = (b - a).length().max((c - b).length()).max((a - c).length());
+                let h = (b - a).cross(c - a).length() / long.max(1e-30);
+                h > 0.0 && h < 1e-4 && m.normal(i).z.abs() < 0.5
+            })
+            .count()
+    }
+
+    /// `m` moved far from the origin in f32, as on a plate in an STL file.
+    fn moved(m: &Mesh) -> Mesh {
+        let off = Vec3::new(311.1, 329.9, 0.0);
+        let soup: Vec<[Vec3; 3]> = (0..m.triangles.len())
+            .map(|i| m.tri(i).map(|v| v + off))
+            .collect();
+        Mesh::from_soup(&soup)
+    }
+
+    #[test]
+    #[ignore = "needs openscad-nightly"]
+    fn the_fixed_part_is_closed() {
+        // As in the spine of open-case-frame.scad: a block 8 mm thick, away
+        // from the origin, with a blind hole of 5.3 mm (4 mm deep, for an
+        // insert: the cone) and a counterbore 2.8 mm deep with a hole
+        // above it (the square last layer and the sacrificial layers). 2.8
+        // is not an f32 value. 40 faces put corners on the square.
+        let m = render(
+            "$fn = 40; difference() { translate([-60, 40, 0]) cube([45, 35, 8]); \
+             translate([-43.18, 62.77, -1]) cylinder(d = 5.3, h = 5); \
+             translate([-30.5, 52.3, -1]) cylinder(d = 6.5, h = 3.8); \
+             translate([-30.5, 52.3, -1]) cylinder(d = 3.4, h = 10); }",
+        );
+        assert_eq!(m.open_edges(), 0);
+        let bridges = on(HoleAbove::Sacrificial);
+        for s in [
+            bridges,
+            Settings {
+                hole_above: HoleAbove::Stepped,
+                ..bridges
+            },
+            Settings {
+                hole_size: true,
+                ..bridges
+            },
+        ] {
+            let (out, rep) = apply(&m, &s);
+            assert_eq!(rep.bridges, 2, "{s:?} {rep:?}");
+            assert_eq!(out.open_edges(), 0, "{s:?}");
+            assert_eq!(moved(&out).open_edges(), 0, "{s:?}");
+            assert_eq!(steps_with_no_height(&out), 0, "{s:?}");
+        }
     }
 }
