@@ -142,6 +142,9 @@ pub fn bed_cut_module(c: f32, layers: Layers) -> Option<String> {
     // wall thinner than 2 s would go away, so the parts of the section that
     // an opening (smaller by s, then larger by s) loses stay at full size:
     // a thin wall keeps its first layers and gets no chamfer.
+    // bed_low(z, d) keeps the material of the layer at z that is outside the
+    // section above the chamfer (a flap, a sheet or a foot), and the edge
+    // near it: these edges get no chamfer.
     let mut s = format!(
         "module bed_ref() projection(cut = true) translate([0, 0, -{zref}]) children();\n\
          module bed_keep(d) {{\n    \
@@ -149,6 +152,14 @@ pub fn bed_cut_module(c: f32, layers: Layers) -> Option<String> {
              offset(delta = 0.01) offset(delta = -0.01) difference() {{\n        \
                  bed_ref() children();\n        \
                  offset(delta = d) offset(delta = -d) bed_ref() children();\n    \
+             }}\n\
+         }}\n\
+         module bed_layer(z) projection(cut = true) translate([0, 0, -z]) children();\n\
+         module bed_low(z, d) intersection() {{\n    \
+             bed_layer(z) children();\n    \
+             offset(delta = d) difference() {{\n        \
+                 bed_layer(z) children();\n        \
+                 offset(delta = 0.01) bed_ref() children();\n    \
              }}\n\
          }}\n\
          module bed_cut() {{\n    difference() {{\n        children();\n",
@@ -161,12 +172,14 @@ pub fn bed_cut_module(c: f32, layers: Layers) -> Option<String> {
         let (z0, h) = if i == 0 { (-1.0, hi + 1.0) } else { (lo, hi - lo) };
         let _ = writeln!(
             s,
-            "        difference() {{\n            translate([-10000, -10000, {}]) cube([20000, 20000, {}]);\n            translate([0, 0, {}]) linear_extrude({}) bed_keep({}) children();\n        }}",
+            "        difference() {{\n            translate([-10000, -10000, {}]) cube([20000, 20000, {}]);\n            translate([0, 0, {}]) linear_extrude({}) union() {{\n                bed_keep({}) children();\n                bed_low({}, {}) children();\n            }}\n        }}",
             scad::num(z0),
             scad::num(h),
             scad::num(lo - 1.0),
             scad::num(hi - lo + 2.0),
             scad::num(shrink),
+            scad::num((lo + hi) * 0.5),
+            scad::num(shrink + 0.01),
         );
     }
     s.push_str("    }\n}\n");
@@ -316,6 +329,35 @@ mod tests {
         // The block is 19.2 x 19.2 at z 0.1, the wall stays 0.8 x 20.
         let want = 19.2 * 19.2 + 0.8 * 20.0;
         assert!((a - want).abs() < 0.5, "area {a}, want {want}");
+    }
+
+    #[test]
+    #[ignore = "needs openscad-nightly"]
+    fn flap_on_the_bed_stays() {
+        use std::sync::atomic::AtomicBool;
+        // A board of 2.4 mm with a flap of 0.4 mm (two layers) on one side.
+        let path = std::env::temp_dir().join(format!("cocad-fix-flap-{}.scad", std::process::id()));
+        std::fs::write(&path, "cube([20, 20, 2.4]); cube([30, 20, 0.4]);").unwrap();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let cfg = Config::default();
+        let mesh = crate::openscad::render(&cfg, &path, &[], &cancel).unwrap().mesh;
+        let _ = std::fs::remove_file(&path);
+        let s = Settings {
+            chamfer: true,
+            ..Settings::default()
+        };
+        let l = Layers::default();
+        let (out, _) = apply(&cfg, &mesh, &s, l, &Limits::default(), &Area::default(), &cancel).unwrap();
+        let a: f32 = super::super::section(&out, 0.1)
+            .iter()
+            .map(|lp| super::super::loop_area(lp))
+            .sum();
+        // The board edges away from the flap get the chamfer, the flap and
+        // the edge at the flap stay.
+        let want = 19.2 * 19.2 + 10.4 * 20.0;
+        assert!((a - want).abs() < 1.0, "area {a}, want {want}");
+        let b = out.bounds().unwrap();
+        assert!((b.max.x - 30.0).abs() < 1e-3);
     }
 
     #[test]

@@ -1,0 +1,670 @@
+//! The Optimize pipeline: from the printable parts of the built model to
+//! the plates. The app runs `run` in a background thread when the model or
+//! an Optimize value changes. The slow steps (joins, splits, fixes) keep
+//! their results in a `Cache`, so a change runs only what it needs.
+
+use super::{Area, Layers, Limits, check, fixes, orient, plate, scad, split};
+use crate::mesh::Mesh;
+use crate::openscad::Config;
+use anyhow::Result;
+use glam::{Mat4, Vec2, Vec3};
+use std::collections::{BTreeMap, HashMap};
+use std::hash::{Hash, Hasher};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
+
+/// The Optimize values of one print part, stored per model and part name.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PartState {
+    /// False: the part is not on the plates.
+    pub include: bool,
+    /// Copies on the plates. `None`: the count in the model.
+    pub copies: Option<u32>,
+    pub orientation: orient::Orientation,
+    /// The split that the user accepted.
+    pub split: Option<split::Split>,
+}
+
+impl Default for PartState {
+    fn default() -> Self {
+        PartState {
+            include: true,
+            copies: None,
+            orientation: orient::Orientation::default(),
+            split: None,
+        }
+    }
+}
+
+/// The Optimize values of one model.
+#[derive(Clone, Debug, PartialEq)]
+pub struct State {
+    pub area: Area,
+    pub fixes: fixes::Settings,
+    /// Gap between the parts on a plate, in mm.
+    pub gap: f32,
+    /// `Some(name)`: only this print part is on the plates.
+    pub only: Option<String>,
+    /// The plate that the view and the export show.
+    pub plate: usize,
+    pub parts: BTreeMap<String, PartState>,
+}
+
+impl State {
+    pub fn new(area: Area) -> State {
+        State {
+            area,
+            fixes: fixes::Settings::default(),
+            gap: 10.0,
+            only: None,
+            plate: 0,
+            parts: BTreeMap::new(),
+        }
+    }
+
+    pub fn part(&self, name: &str) -> PartState {
+        self.parts.get(name).cloned().unwrap_or_default()
+    }
+}
+
+/// One printable part of the built model, in the model frame.
+#[derive(Clone)]
+pub struct Input {
+    pub name: String,
+    pub mesh: Arc<Mesh>,
+}
+
+/// Everything that `run` needs.
+#[derive(Clone)]
+pub struct Job {
+    /// The printable parts. Reference (`%`) parts are not in it.
+    pub parts: Vec<Input>,
+    /// Volume of the built mesh, for the overlap test.
+    pub whole_volume: f32,
+    /// The parts are the colors of one object (a `cocad_part` list).
+    pub multicolor: bool,
+    /// The model name, for a multicolor object.
+    pub model_name: String,
+    pub state: State,
+    pub layers: Layers,
+    pub limits: Limits,
+}
+
+/// One print part: a part, joined parts or a piece of a split part.
+#[derive(Clone)]
+pub struct PrintPart {
+    pub name: String,
+    /// The `Input` parts in it.
+    pub sources: Vec<usize>,
+    /// The number of this part in the model.
+    pub count: u32,
+    /// Copies on the plates (0 when it is not included).
+    pub copies: u32,
+    pub state: PartState,
+    /// The part in the model frame, for the face pick.
+    pub model: Arc<Mesh>,
+    /// Model frame to print frame.
+    pub matrix: Mat4,
+    /// The part in print frame, with the fixes.
+    pub mesh: Arc<Mesh>,
+    pub report: fixes::Report,
+    pub issues: Vec<check::Issue>,
+    /// The part fits the print area in its print orientation.
+    pub fits: bool,
+    /// A split that makes the part fit, when it does not fit.
+    pub proposal: Option<split::Split>,
+    /// For a piece of a split part: the name of the part and the label.
+    pub piece: Option<(String, String)>,
+}
+
+/// One copy of a print part on a plate.
+#[derive(Clone, Copy, Debug)]
+pub struct Instance {
+    pub part: usize,
+    pub plate: usize,
+    /// Print frame to bed. The bed goes from (0, 0) to (area.w, area.d).
+    pub at: Mat4,
+}
+
+/// The result of `run`.
+#[derive(Clone, Default)]
+pub struct Outcome {
+    pub parts: Vec<PrintPart>,
+    pub instances: Vec<Instance>,
+    pub plates: usize,
+    /// Problems of single parts. The other parts are still on the plates.
+    pub errors: Vec<String>,
+}
+
+impl Outcome {
+    /// All copies on `plate` as one mesh, in bed coordinates.
+    pub fn plate_mesh(&self, plate: usize) -> Mesh {
+        let mut out = Mesh::default();
+        for i in self.instances.iter().filter(|i| i.plate == plate) {
+            append(&mut out, &self.parts[i.part].mesh, i.at);
+        }
+        out
+    }
+
+    /// The copies on `plate`: (print part, bed matrix).
+    pub fn on_plate(&self, plate: usize) -> Vec<(usize, Mat4)> {
+        self.instances
+            .iter()
+            .filter(|i| i.plate == plate)
+            .map(|i| (i.part, i.at))
+            .collect()
+    }
+}
+
+/// Appends `m` moved by `at` to `out`.
+pub fn append(out: &mut Mesh, m: &Mesh, at: Mat4) {
+    let base = out.vertices.len() as u32;
+    out.vertices
+        .extend(m.vertices.iter().map(|v| at.transform_point3(*v)));
+    out.triangles
+        .extend(m.triangles.iter().map(|t| t.map(|v| v + base)));
+}
+
+/// Results of the slow steps, kept between runs.
+#[derive(Default)]
+pub struct Cache {
+    joined: HashMap<u64, Arc<Mesh>>,
+    pieces: HashMap<u64, Arc<Vec<split::Piece>>>,
+    fixed: HashMap<u64, Arc<(Mesh, fixes::Report, Vec<check::Issue>)>>,
+    auto: HashMap<u64, Vec3>,
+}
+
+impl Cache {
+    /// Keeps the cache small: a full map starts again.
+    fn trim(&mut self) {
+        const MAX: usize = 256;
+        if self.fixed.len() > MAX {
+            self.fixed.clear();
+        }
+        if self.pieces.len() > MAX {
+            self.pieces.clear();
+        }
+        if self.joined.len() > MAX {
+            self.joined.clear();
+        }
+        if self.auto.len() > MAX {
+            self.auto.clear();
+        }
+    }
+}
+
+/// A hash of the mesh content.
+pub fn mesh_hash(m: &Mesh) -> u64 {
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    m.vertices.len().hash(&mut h);
+    for v in &m.vertices {
+        v.x.to_bits().hash(&mut h);
+        v.y.to_bits().hash(&mut h);
+        v.z.to_bits().hash(&mut h);
+    }
+    m.triangles.hash(&mut h);
+    h.finish()
+}
+
+fn hash_of(parts: &[&dyn std::fmt::Debug]) -> u64 {
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    for p in parts {
+        format!("{p:?}").hash(&mut h);
+    }
+    h.finish()
+}
+
+/// A part before the orientation: its name, sources, count and mesh.
+struct Pre {
+    name: String,
+    sources: Vec<usize>,
+    count: u32,
+    mesh: Arc<Mesh>,
+    piece: Option<(String, String)>,
+    state: PartState,
+}
+
+/// Runs the pipeline. A failed fix or split of one part goes to
+/// `Outcome::errors`, and the part goes on without it.
+pub fn run(
+    cfg: &Config,
+    job: &Job,
+    cache: &Mutex<Cache>,
+    cancel: &Arc<AtomicBool>,
+) -> Result<Outcome> {
+    let mut errors = Vec::new();
+    let st = &job.state;
+
+    // 1. Print parts: join the colors of one object, and parts that overlap.
+    let meshes: Vec<&Mesh> = job.parts.iter().map(|p| p.mesh.as_ref()).collect();
+    let sum: f32 = meshes.iter().map(|m| m.volume().abs()).sum();
+    let groups: Vec<Vec<usize>> = if job.parts.is_empty() {
+        Vec::new()
+    } else if job.multicolor {
+        vec![(0..job.parts.len()).collect()]
+    } else if job.whole_volume < sum * 0.998 {
+        plate::overlap_groups(&meshes)
+    } else {
+        (0..job.parts.len()).map(|i| vec![i]).collect()
+    };
+    let mut joined = Vec::with_capacity(groups.len());
+    for g in &groups {
+        if g.len() == 1 {
+            joined.push((job.parts[g[0]].name.clone(), job.parts[g[0]].mesh.clone()));
+            continue;
+        }
+        let name = if job.multicolor {
+            job.model_name.clone()
+        } else {
+            g.iter()
+                .map(|&i| job.parts[i].name.as_str())
+                .collect::<Vec<_>>()
+                .join(" + ")
+        };
+        let key = hash_of(&[&g.iter().map(|&i| mesh_hash(meshes[i])).collect::<Vec<_>>()]);
+        let hit = cache.lock().unwrap().joined.get(&key).cloned();
+        let mesh = match hit {
+            Some(m) => m,
+            None => {
+                let parts: Vec<&Mesh> = g.iter().map(|&i| meshes[i]).collect();
+                match scad::run(
+                    cfg,
+                    &parts,
+                    |imports| format!("union() {{\n{}\n}}\n", imports.join("\n")),
+                    cancel,
+                ) {
+                    Ok(m) => {
+                        let m = Arc::new(m);
+                        cache.lock().unwrap().joined.insert(key, m.clone());
+                        m
+                    }
+                    Err(e) => {
+                        errors.push(format!("{name}: cannot join the parts: {e:#}"));
+                        // The slicer joins overlapping meshes itself.
+                        let mut m = Mesh::default();
+                        for p in &parts {
+                            append(&mut m, p, Mat4::IDENTITY);
+                        }
+                        Arc::new(m)
+                    }
+                }
+            }
+        };
+        joined.push((name, mesh));
+    }
+
+    // 2. Parts with the same shape: one row with a count.
+    let sigs: Vec<plate::Signature> = joined.iter().map(|(_, m)| plate::signature(m)).collect();
+    let mut pres: Vec<Pre> = Vec::new();
+    for same in plate::group_same(&sigs) {
+        let (name, mesh) = &joined[same[0]];
+        let sources: Vec<usize> = same.iter().flat_map(|&k| groups[k].clone()).collect();
+        pres.push(Pre {
+            name: name.clone(),
+            sources,
+            count: same.len() as u32,
+            mesh: mesh.clone(),
+            piece: None,
+            state: st.part(name),
+        });
+    }
+
+    // 3. Splits that the user accepted: each piece is a print part.
+    let mut split_pres = Vec::new();
+    for p in pres {
+        let Some(sp) = p.state.split.clone() else {
+            split_pres.push(p);
+            continue;
+        };
+        if cancel.load(Ordering::Relaxed) {
+            anyhow::bail!("cancelled");
+        }
+        let key = hash_of(&[&mesh_hash(&p.mesh), &sp]);
+        let hit = cache.lock().unwrap().pieces.get(&key).cloned();
+        let pieces = match hit {
+            Some(v) => Ok(v),
+            None => split::apply(cfg, &p.mesh, &sp, cancel).map(|v| {
+                let v = Arc::new(v);
+                cache.lock().unwrap().pieces.insert(key, v.clone());
+                v
+            }),
+        };
+        match pieces {
+            Ok(pieces) => {
+                for piece in pieces.iter() {
+                    let name = format!("{} {}", p.name, piece.label);
+                    // A piece keeps its own orientation and copies.
+                    let mut state = st.part(&name);
+                    state.split = None;
+                    split_pres.push(Pre {
+                        name,
+                        sources: p.sources.clone(),
+                        count: p.count,
+                        mesh: Arc::new(piece.mesh.clone()),
+                        piece: Some((p.name.clone(), piece.label.clone())),
+                        state,
+                    });
+                }
+            }
+            Err(e) => {
+                errors.push(format!("{}: cannot split the part: {e:#}", p.name));
+                let mut p = p;
+                p.state.split = None;
+                split_pres.push(p);
+            }
+        }
+    }
+    // Pins of one split are the same part: one row with a count.
+    let mut pres: Vec<Pre> = Vec::new();
+    for p in split_pres {
+        let pin = p.piece.as_ref().is_some_and(|(_, l)| l == "pin");
+        if pin
+            && let Some(q) = pres
+                .iter_mut()
+                .find(|q| q.piece.as_ref() == p.piece.as_ref() && q.name == p.name)
+        {
+            q.count += p.count;
+            continue;
+        }
+        pres.push(p);
+    }
+    // Pins of one part get the same name: number the rows apart.
+    let mut seen: HashMap<String, usize> = HashMap::new();
+    for p in &mut pres {
+        let n = seen.entry(p.name.clone()).or_default();
+        *n += 1;
+        if *n > 1 {
+            p.name = format!("{} {}", p.name, n);
+        }
+    }
+
+    // 4. Orientation, 5. fixes and check, in parallel.
+    let mut parts: Vec<Option<PrintPart>> = (0..pres.len()).map(|_| None).collect();
+    let errs = Mutex::new(Vec::new());
+    let next = AtomicUsize::new(0);
+    let results = Mutex::new(Vec::new());
+    let workers = std::thread::available_parallelism()
+        .map_or(1, |n| n.get())
+        .min(pres.len().max(1));
+    std::thread::scope(|scope| {
+        for _ in 0..workers {
+            scope.spawn(|| {
+                loop {
+                    if cancel.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    let i = next.fetch_add(1, Ordering::Relaxed);
+                    let Some(p) = pres.get(i) else { break };
+                    let r = prepare(cfg, job, p, cache, cancel);
+                    match r {
+                        Ok(pp) => results.lock().unwrap().push((i, pp)),
+                        Err(e) => errs.lock().unwrap().push(format!("{}: {e:#}", p.name)),
+                    }
+                }
+            });
+        }
+    });
+    if cancel.load(Ordering::Relaxed) {
+        anyhow::bail!("cancelled");
+    }
+    errors.extend(errs.into_inner().unwrap());
+    for (i, pp) in results.into_inner().unwrap() {
+        parts[i] = Some(pp);
+    }
+    let mut parts: Vec<PrintPart> = parts.into_iter().flatten().collect();
+
+    // 6. Plates.
+    let mut items = Vec::new();
+    let mut sizes = Vec::new();
+    for (k, p) in parts.iter_mut().enumerate() {
+        let on = p.state.include
+            && st.only.as_ref().is_none_or(|o| {
+                *o == p.name || p.piece.as_ref().is_some_and(|(parent, _)| parent == o)
+            });
+        p.copies = if on {
+            p.state.copies.unwrap_or(p.count)
+        } else {
+            0
+        };
+        if !p.fits {
+            continue;
+        }
+        let b = super::bounds_or_zero(&p.mesh);
+        let size = Vec2::new(b.max.x - b.min.x, b.max.y - b.min.y);
+        for _ in 0..p.copies {
+            items.push(k);
+            sizes.push(size);
+        }
+    }
+    let placed = plate::layout(&sizes, &st.area, st.gap);
+    let mut instances = Vec::new();
+    let mut plates = 0;
+    for (k, pl) in items.iter().zip(placed) {
+        let Some(n) = pl.plate else { continue };
+        let b = super::bounds_or_zero(&parts[*k].mesh);
+        let c = b.center();
+        let turn = if pl.turned {
+            Mat4::from_rotation_z(std::f32::consts::FRAC_PI_2)
+        } else {
+            Mat4::IDENTITY
+        };
+        let at = Mat4::from_translation(Vec3::new(pl.center.x, pl.center.y, 0.0))
+            * turn
+            * Mat4::from_translation(Vec3::new(-c.x, -c.y, 0.0));
+        instances.push(Instance {
+            part: *k,
+            plate: n,
+            at,
+        });
+        plates = plates.max(n + 1);
+    }
+    cache.lock().unwrap().trim();
+    Ok(Outcome {
+        parts,
+        instances,
+        plates,
+        errors,
+    })
+}
+
+/// Orientation, fixes and check of one print part.
+fn prepare(
+    cfg: &Config,
+    job: &Job,
+    p: &Pre,
+    cache: &Mutex<Cache>,
+    cancel: &Arc<AtomicBool>,
+) -> Result<PrintPart> {
+    let st = &job.state;
+    let mut o = p.state.orientation;
+    let hash = mesh_hash(&p.mesh);
+    // Auto: keep the found direction, so the slow search runs one time.
+    if o.choice == orient::Choice::Auto {
+        let key = hash_of(&[&hash, &job.limits]);
+        let hit = cache.lock().unwrap().auto.get(&key).copied();
+        let down = match hit {
+            Some(d) => d,
+            None => {
+                let d = orient::auto_down(&p.mesh, &job.limits);
+                cache.lock().unwrap().auto.insert(key, d);
+                d
+            }
+        };
+        o.choice = orient::Choice::Face(down);
+    }
+    let matrix = orient::matrix(&p.mesh, &o, &st.area, &job.limits);
+    let print = super::transformed(&p.mesh, matrix);
+    let fits = orient::fits(&print, &st.area);
+    let proposal = if fits || p.piece.is_some() {
+        None
+    } else {
+        split::propose(&p.mesh, &st.area, default_joint(&p.mesh))
+    };
+    let key = hash_of(&[&mesh_hash(&print), &st.fixes, &job.layers, &job.limits, &st.area]);
+    let hit = cache.lock().unwrap().fixed.get(&key).cloned();
+    let fixed = match hit {
+        Some(f) => f,
+        None => {
+            let (mesh, report) = if st.fixes.any() {
+                fixes::apply(cfg, &print, &st.fixes, job.layers, &job.limits, &st.area, cancel)?
+            } else {
+                (print, fixes::Report::default())
+            };
+            let issues = check::run(&mesh, job.layers, &job.limits, &st.area);
+            let f = Arc::new((mesh, report, issues));
+            cache.lock().unwrap().fixed.insert(key, f.clone());
+            f
+        }
+    };
+    Ok(PrintPart {
+        name: p.name.clone(),
+        sources: p.sources.clone(),
+        count: p.count,
+        copies: 0,
+        state: p.state.clone(),
+        model: p.mesh.clone(),
+        matrix,
+        mesh: Arc::new(fixed.0.clone()),
+        report: fixed.1.clone(),
+        issues: fixed.2.clone(),
+        fits,
+        proposal,
+        piece: p.piece.clone(),
+    })
+}
+
+/// The joint that CoCAD proposes: a dovetail for a flat part, pins for the
+/// others.
+pub fn default_joint(mesh: &Mesh) -> split::Joint {
+    let b = super::bounds_or_zero(mesh);
+    let s = b.size();
+    if s.min_element() < 10.0 {
+        split::Joint::Dovetail
+    } else {
+        split::Joint::Pins
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::mesh::cube;
+
+    fn boxed(x: f32, y: f32, z: f32, at: Vec3) -> Arc<Mesh> {
+        Arc::new(super::super::transformed(
+            &cube(1.0),
+            Mat4::from_translation(at) * Mat4::from_scale(Vec3::new(x, y, z)),
+        ))
+    }
+
+    fn job(parts: Vec<Input>) -> Job {
+        let whole: f32 = parts.iter().map(|p| p.mesh.volume().abs()).sum();
+        Job {
+            parts,
+            whole_volume: whole,
+            multicolor: false,
+            model_name: "model".into(),
+            state: State::new(Area {
+                w: 100.0,
+                d: 100.0,
+                h: 100.0,
+            }),
+            layers: Layers::default(),
+            limits: Limits::default(),
+        }
+    }
+
+    fn input(name: &str, mesh: Arc<Mesh>) -> Input {
+        Input {
+            name: name.into(),
+            mesh,
+        }
+    }
+
+    fn go(j: &Job) -> Outcome {
+        run(
+            &Config::default(),
+            j,
+            &Mutex::new(Cache::default()),
+            &Arc::new(AtomicBool::new(false)),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn same_parts_make_one_row_with_a_count() {
+        let j = job(vec![
+            input("Part 1", boxed(10.0, 10.0, 10.0, Vec3::ZERO)),
+            input("Part 2", boxed(10.0, 10.0, 10.0, Vec3::new(50.0, 0.0, 0.0))),
+            input("Part 3", boxed(20.0, 10.0, 5.0, Vec3::new(0.0, 50.0, 0.0))),
+        ]);
+        let o = go(&j);
+        assert_eq!(o.parts.len(), 2);
+        assert_eq!(o.parts[0].count, 2);
+        assert_eq!(o.parts[0].sources, vec![0, 1]);
+        assert_eq!(o.instances.len(), 3);
+        assert_eq!(o.plates, 1);
+        // All copies are on the bed and do not overlap.
+        let m = o.plate_mesh(0);
+        let b = m.bounds().unwrap();
+        assert!(b.min.x >= -1e-3 && b.min.y >= -1e-3 && b.min.z.abs() < 1e-3);
+        assert!(b.max.x <= 100.001 && b.max.y <= 100.001);
+        assert!((m.volume() - 2.0 * 1000.0 - 1000.0).abs() < 0.1);
+    }
+
+    #[test]
+    fn only_include_and_copies_change_the_plate() {
+        let mut j = job(vec![
+            input("Part 1", boxed(10.0, 10.0, 10.0, Vec3::ZERO)),
+            input("Part 2", boxed(20.0, 10.0, 5.0, Vec3::new(0.0, 50.0, 0.0))),
+        ]);
+        j.state.only = Some("Part 2".into());
+        assert_eq!(go(&j).instances.len(), 1);
+        j.state.only = None;
+        j.state.parts.insert(
+            "Part 1".into(),
+            PartState {
+                include: false,
+                ..PartState::default()
+            },
+        );
+        j.state.parts.insert(
+            "Part 2".into(),
+            PartState {
+                copies: Some(3),
+                ..PartState::default()
+            },
+        );
+        let o = go(&j);
+        assert_eq!(o.instances.len(), 3);
+        assert!(o.instances.iter().all(|i| o.parts[i.part].name == "Part 2"));
+    }
+
+    #[test]
+    fn parts_go_to_more_plates_and_a_large_part_to_none() {
+        let mut parts: Vec<Input> = (0..6)
+            .map(|i| input(&format!("Part {i}"), boxed(45.0, 45.0, 5.0, Vec3::new(i as f32 * 60.0, 0.0, 0.0))))
+            .collect();
+        parts.push(input("Big", boxed(150.0, 20.0, 5.0, Vec3::new(0.0, 80.0, 0.0))));
+        let o = go(&job(parts));
+        assert_eq!(o.plates, 2);
+        let big = o.parts.iter().position(|p| p.name == "Big").unwrap();
+        assert!(!o.parts[big].fits);
+        assert!(o.parts[big].proposal.is_some());
+        assert!(o.instances.iter().all(|i| i.part != big));
+    }
+
+    #[test]
+    #[ignore = "needs openscad-nightly"]
+    fn overlapping_parts_join_into_one() {
+        let a = boxed(10.0, 10.0, 10.0, Vec3::ZERO);
+        let b = boxed(10.0, 10.0, 10.0, Vec3::new(5.0, 0.0, 0.0));
+        let mut j = job(vec![input("Part 1", a), input("Part 2", b)]);
+        j.whole_volume = 1500.0;
+        let o = go(&j);
+        assert!(o.errors.is_empty(), "{:?}", o.errors);
+        assert_eq!(o.parts.len(), 1);
+        assert_eq!(o.parts[0].name, "Part 1 + Part 2");
+        assert!((o.parts[0].mesh.volume() - 1500.0).abs() < 1.0);
+    }
+}

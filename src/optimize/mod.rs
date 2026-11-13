@@ -23,6 +23,7 @@ pub mod brim;
 pub mod check;
 pub mod fixes;
 pub mod orient;
+pub mod pipeline;
 pub mod plate;
 pub mod scad;
 pub mod split;
