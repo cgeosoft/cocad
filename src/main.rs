@@ -58,7 +58,7 @@ Parameter sets:
 
 Print options (export and slice):
   CoCAD starts from the Optimize values that the app stored for the model, else
-  from the defaults (all parts, model rotation, all fixes off). The options change them.
+  from the defaults (all parts, Auto orientation, all fixes off). The options change them.
   --plate N|all        The plate to export or slice (default: export plate 1, slice
                        all plates). all: export one file per plate, OUT-plateN.ext
   --part NAME|all      Only this print part, or all print parts

@@ -541,7 +541,7 @@ fn prepare(
     // No split is needed when the part fits on another side.
     if !fits && proposal.is_none() && p.piece.is_none() && split::fits(&p.mesh, &st.area) {
         errs.lock().unwrap().push(format!(
-            "{}: too large in this orientation. It fits on another side: turn on Custom orientation.",
+            "{}: too large in this orientation. It fits on another side: select the bed face in the Orientation card.",
             p.name
         ));
     }
@@ -853,7 +853,9 @@ impl PartState {
         }
         let o = &self.orientation;
         match o.choice {
-            orient::Choice::Model => {}
+            orient::Choice::Model => {
+                m.insert("orient".into(), json!("model"));
+            }
             orient::Choice::Auto => {
                 m.insert("orient".into(), json!("auto"));
             }
@@ -881,12 +883,14 @@ impl PartState {
             .and_then(Json::as_u64)
             .map(|c| c.min(999) as u32);
         p.orientation.choice = match v.get("orient").and_then(Json::as_str) {
-            Some("auto") => orient::Choice::Auto,
+            Some("model") => orient::Choice::Model,
             Some("face") => match vec3_of(v.get("down")) {
                 Some(d) if d.length() > 0.5 => orient::Choice::Face(d.normalize()),
-                _ => orient::Choice::Model,
+                _ => orient::Choice::Auto,
             },
-            _ => orient::Choice::Model,
+            // Auto is the default. CoCAD 0.7 stored no key for the model
+            // rotation: these parts also get Auto.
+            _ => orient::Choice::Auto,
         };
         p.orientation.quarter_turns = v.get("turns").and_then(Json::as_u64).unwrap_or(0) as u8 % 4;
         p.split = v.get("split").and_then(split_of);
@@ -984,7 +988,7 @@ mod storage_tests {
             "Part 2".into(),
             PartState {
                 orientation: orient::Orientation {
-                    choice: orient::Choice::Auto,
+                    choice: orient::Choice::Model,
                     quarter_turns: 0,
                 },
                 ..PartState::default()
@@ -992,6 +996,15 @@ mod storage_tests {
         );
         let back = State::from_json(&s.to_json(), Area::default());
         assert_eq!(back, s);
+    }
+
+    #[test]
+    fn a_part_with_no_orient_key_gets_auto() {
+        // CoCAD 0.7 stored the model rotation with no "orient" key.
+        let p = PartState::from_json(&json!({ "include": true }));
+        assert_eq!(p.orientation.choice, orient::Choice::Auto);
+        let p = PartState::from_json(&json!({ "orient": "model" }));
+        assert_eq!(p.orientation.choice, orient::Choice::Model);
     }
 
     #[test]

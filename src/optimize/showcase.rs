@@ -246,17 +246,29 @@ fn showcase_plate_bridges_and_chamfer() {
 
 #[test]
 #[ignore = "needs openscad-nightly"]
-fn showcase_stand_teardrops_bridges_brim() {
-    let m = print_frame(&part("stand()"), Choice::Model);
+fn showcase_stand_teardrops() {
+    // Auto lays the stand on its side: the profile is on the bed.
+    let m = print_frame(&part("stand()"), Choice::Auto);
+    let size = m.bounds().unwrap().size();
+    assert!(size.z < size.x, "the stand lies on its side: {size}");
     let r = run_combos("stand", &m);
-    // The cable arch and the cable hole.
-    assert!(get(&r, "teardrops").1.teardrops >= 2, "teardrops");
-    // The two blind pilot holes from below.
-    assert!(get(&r, "bridges-sacrificial").1.bridges >= 2, "bridges");
-    // The front foot.
-    assert_eq!(get(&r, "brim").1.brims, 1, "brim");
+    // The cable hole and the two pilot holes are horizontal.
+    assert!(get(&r, "teardrops").1.teardrops >= 3, "teardrops");
+    assert!(get(&r, "chamfer").1.chamfer);
     let all = get(&r, "all-sacrificial");
-    assert!(all.1.teardrops >= 2 && all.1.bridges >= 2 && all.1.brims == 1 && all.1.chamfer);
+    assert!(all.1.teardrops >= 3 && all.1.chamfer);
+    assert_eq!(all.3, "none", "no problems with all fixes");
+}
+
+#[test]
+#[ignore = "needs openscad-nightly"]
+fn showcase_stand_upright_brim() {
+    // With custom orientation off, the stand stands on its 2.4 mm front
+    // foot. The foot gets a brim.
+    let m = print_frame(&part("stand()"), Choice::Model);
+    let r = run_combos("stand-upright", &m);
+    assert_eq!(get(&r, "brim").1.brims, 1, "brim");
+    assert!(get(&r, "bridges-sacrificial").1.bridges >= 2, "pilot hole cones");
 }
 
 #[test]
@@ -373,3 +385,4 @@ fn showcase_pins_without_room_are_reported() {
     println!("{:?}", o.errors);
     assert!(o.errors.iter().any(|e| e.contains("no room for pins")), "{:?}", o.errors);
 }
+

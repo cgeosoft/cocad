@@ -642,26 +642,72 @@ pub struct Placed {
     pub turned: bool,
 }
 
+/// Two sizes are the same within this tolerance (mm).
+const EPS: f32 = 1e-3;
+
+/// A part to place: its index in `sizes`, its footprint and the first
+/// rotation to try.
+struct Item {
+    index: usize,
+    size: Vec2,
+    turned: bool,
+}
+
+/// The place of an item on a plate before the centering: plate, lower left
+/// corner, footprint and rotation.
+type Spot = (usize, Vec2, Vec2, bool);
+
 /// Puts footprints of the sizes `sizes` (x, y in print frame) on plates of
 /// `area.w` x `area.d`, with `gap` between the parts. Returns one place for
 /// each size, in the order of `sizes`.
 ///
-/// The method is shelf packing: the parts go in rows, the tallest (in y)
-/// first. A part turns so that its short side is along y, when it fits the
-/// bed so. In a row that has room, a part also turns when only the turned
-/// part fits the row. A part goes in the first row (of all plates) where it
-/// fits, else in a new row, else on a new plate. The block of rows is
-/// centered on each plate. There is no gap at the edge of the bed.
+/// Two methods make a layout: shelf packing (`shelf`) and free rectangles
+/// (`free_rects`). The layout with fewer plates wins. With the same number
+/// of plates, the shelf layout wins: it puts the parts in tidy rows. The
+/// block of parts is centered on each plate. There is no gap at the edge
+/// of the bed. A part that does not fit the bed in either rotation gets no
+/// plate.
 pub fn layout(sizes: &[Vec2], area: &Area, gap: f32) -> Vec<Placed> {
-    const EPS: f32 = 1e-3;
     let gap = gap.max(0.0);
-    let on_bed = |s: Vec2| s.x <= area.w + EPS && s.y <= area.d + EPS;
-
-    struct Item {
-        index: usize,
-        size: Vec2,
-        turned: bool,
+    let mut items = items_of(sizes, area);
+    let (mut spots, mut plates) = shelf(&mut items, area, gap, sizes.len());
+    if plates > 1 {
+        let (s2, p2) = free_rects(&mut items, area, gap, sizes.len());
+        if p2 < plates {
+            (spots, plates) = (s2, p2);
+        }
     }
+
+    // Center the block of each plate on the bed.
+    let mut extent = vec![Vec2::ZERO; plates];
+    for &(p, at, size, _) in spots.iter().flatten() {
+        extent[p] = extent[p].max(at + size);
+    }
+    let bed = Vec2::new(area.w, area.d);
+    spots
+        .iter()
+        .map(|spot| match *spot {
+            None => Placed {
+                plate: None,
+                center: Vec2::ZERO,
+                turned: false,
+            },
+            Some((p, at, size, turned)) => {
+                let offset = ((bed - extent[p]) * 0.5).max(Vec2::ZERO);
+                Placed {
+                    plate: Some(p),
+                    center: at + size * 0.5 + offset,
+                    turned,
+                }
+            }
+        })
+        .collect()
+}
+
+/// The parts that fit the bed, each with the short side along y when it
+/// fits so.
+fn items_of(sizes: &[Vec2], area: &Area) -> Vec<Item> {
+    let on_bed = |s: Vec2| s.x <= area.w + EPS && s.y <= area.d + EPS;
     let mut items = Vec::new();
     for (index, s) in sizes.iter().enumerate() {
         let s = s.max(Vec2::ZERO);
@@ -679,6 +725,16 @@ pub fn layout(sizes: &[Vec2], area: &Area, gap: f32) -> Vec<Placed> {
             });
         }
     }
+    items
+}
+
+/// Shelf packing: the parts go in rows, the tallest (in y) first. In a row
+/// that has room, a part also turns when only the turned part fits the
+/// row. A part goes in the first row (of all plates) where it fits, else in
+/// a new row, else on a new plate. Returns the spots by index in `sizes`
+/// (`n` of them) and the number of plates.
+fn shelf(items: &mut [Item], area: &Area, gap: f32, n: usize) -> (Vec<Option<Spot>>, usize) {
+    let on_bed = |s: Vec2| s.x <= area.w + EPS && s.y <= area.d + EPS;
     items.sort_by(|a, b| {
         (b.size.y.total_cmp(&a.size.y))
             .then(b.size.x.total_cmp(&a.size.x))
@@ -697,10 +753,8 @@ pub fn layout(sizes: &[Vec2], area: &Area, gap: f32) -> Vec<Placed> {
         top: f32,
     }
     let mut plates: Vec<Plate> = Vec::new();
-    // Plate, lower left corner, size, turned.
-    let mut spots: Vec<(usize, Vec2, Vec2, bool)> = vec![(0, Vec2::ZERO, Vec2::ZERO, false); sizes.len()];
-    let mut placed = vec![false; sizes.len()];
-    for it in &items {
+    let mut spots: Vec<Option<Spot>> = vec![None; n];
+    for it in items.iter() {
         let turned_size = Vec2::new(it.size.y, it.size.x);
         let mut options = vec![(it.size, it.turned)];
         if on_bed(turned_size) {
@@ -745,36 +799,109 @@ pub fn layout(sizes: &[Vec2], area: &Area, gap: f32) -> Vec<Placed> {
             });
             (plates.len() - 1, Vec2::ZERO, it.size, it.turned)
         });
-        spots[it.index] = spot;
-        placed[it.index] = true;
+        spots[it.index] = Some(spot);
     }
+    (spots, plates.len())
+}
 
-    // Center the block of each plate on the bed.
-    let mut extent = vec![Vec2::ZERO; plates.len()];
-    for (i, &(p, at, size, _)) in spots.iter().enumerate() {
-        if placed[i] {
-            extent[p] = extent[p].max(at + size);
+/// Packing with free rectangles (MaxRects): each plate keeps the largest
+/// empty rectangles. The largest part (by area) goes first. A part goes on
+/// the first plate where it fits, in the free rectangle and rotation that
+/// leave the smallest rest on the short side. The gap is added to each
+/// part and to the bed on the right and at the top, so the parts keep the
+/// gap and touch the edge of the bed. Returns the spots by index in `sizes`
+/// (`n` of them) and the number of plates.
+fn free_rects(items: &mut [Item], area: &Area, gap: f32, n: usize) -> (Vec<Option<Spot>>, usize) {
+    let on_bed = |s: Vec2| s.x <= area.w + EPS && s.y <= area.d + EPS;
+    items.sort_by(|a, b| {
+        (b.size.x * b.size.y)
+            .total_cmp(&(a.size.x * a.size.y))
+            .then(b.size.max_element().total_cmp(&a.size.max_element()))
+            .then(a.index.cmp(&b.index))
+    });
+    let bed = Vec2::new(area.w, area.d) + gap;
+    // The free rectangles (lower left, upper right) of each plate.
+    let mut plates: Vec<Vec<(Vec2, Vec2)>> = Vec::new();
+    let mut spots: Vec<Option<Spot>> = vec![None; n];
+    for it in items.iter() {
+        let turned_size = Vec2::new(it.size.y, it.size.x);
+        let mut options = vec![(it.size, it.turned)];
+        if on_bed(turned_size) {
+            options.push((turned_size, !it.turned));
         }
+        let best_on = |free: &[(Vec2, Vec2)]| {
+            let mut best: Option<((f32, f32), Vec2, Vec2, bool)> = None;
+            for &(lo, hi) in free {
+                let room = hi - lo;
+                for &(size, turned) in &options {
+                    let rest = room - (size + gap);
+                    if rest.x < -EPS || rest.y < -EPS {
+                        continue;
+                    }
+                    let score = (rest.min_element(), rest.max_element());
+                    if best.is_none_or(|(b, ..)| score < b) {
+                        best = Some((score, lo, size, turned));
+                    }
+                }
+            }
+            best
+        };
+        let found = plates
+            .iter()
+            .enumerate()
+            .find_map(|(p, free)| best_on(free).map(|b| (p, b)));
+        let (p, (_, at, size, turned)) = match found {
+            Some(f) => f,
+            None => {
+                plates.push(vec![(Vec2::ZERO, bed)]);
+                let p = plates.len() - 1;
+                // The bed is empty: the first option fits.
+                (p, best_on(&plates[p]).expect("the part fits the bed"))
+            }
+        };
+        let used = (at, at + size + gap);
+        let free = &mut plates[p];
+        let mut next = Vec::with_capacity(free.len() + 4);
+        for &(lo, hi) in free.iter() {
+            let apart = used.1.x <= lo.x + EPS
+                || used.0.x >= hi.x - EPS
+                || used.1.y <= lo.y + EPS
+                || used.0.y >= hi.y - EPS;
+            if apart {
+                next.push((lo, hi));
+                continue;
+            }
+            // The parts of the free rectangle around the used one.
+            if used.0.x > lo.x + EPS {
+                next.push((lo, Vec2::new(used.0.x, hi.y)));
+            }
+            if used.1.x < hi.x - EPS {
+                next.push((Vec2::new(used.1.x, lo.y), hi));
+            }
+            if used.0.y > lo.y + EPS {
+                next.push((lo, Vec2::new(hi.x, used.0.y)));
+            }
+            if used.1.y < hi.y - EPS {
+                next.push((Vec2::new(lo.x, used.1.y), hi));
+            }
+        }
+        // A rectangle inside another one is not needed.
+        let inside = |a: &(Vec2, Vec2), b: &(Vec2, Vec2)| {
+            a.0.cmpge(b.0 - EPS).all() && a.1.cmple(b.1 + EPS).all()
+        };
+        let mut kept: Vec<(Vec2, Vec2)> = Vec::with_capacity(next.len());
+        for (i, r) in next.iter().enumerate() {
+            let covered = next.iter().enumerate().any(|(j, o)| {
+                j != i && inside(r, o) && (!inside(o, r) || j < i)
+            });
+            if !covered {
+                kept.push(*r);
+            }
+        }
+        *free = kept;
+        spots[it.index] = Some((p, at, size, turned));
     }
-    let bed = Vec2::new(area.w, area.d);
-    (0..sizes.len())
-        .map(|i| {
-            if !placed[i] {
-                return Placed {
-                    plate: None,
-                    center: Vec2::ZERO,
-                    turned: false,
-                };
-            }
-            let (p, at, size, turned) = spots[i];
-            let offset = ((bed - extent[p]) * 0.5).max(Vec2::ZERO);
-            Placed {
-                plate: Some(p),
-                center: at + size * 0.5 + offset,
-                turned,
-            }
-        })
-        .collect()
+    (spots, plates.len())
 }
 
 #[cfg(test)]
@@ -1024,5 +1151,71 @@ mod tests {
         assert_eq!(out[0].plate, Some(0));
         assert!(out[0].turned);
         assert!((out[0].center - Vec2::new(50.0, 100.0)).length() < 1e-3);
+    }
+
+    #[test]
+    fn layout_uses_the_room_beside_a_row() {
+        // The two pieces of a split plate, a stand and three clips. Shelf
+        // packing needs two plates: the stand goes beside the pieces only
+        // when it turns.
+        let area = Area::default();
+        let mut sizes = vec![
+            Vec2::new(134.9, 80.0),
+            Vec2::new(129.9, 80.0),
+            Vec2::new(100.0, 60.0),
+        ];
+        sizes.extend([Vec2::new(17.0, 14.0); 3]);
+        let out = check_layout(&sizes, &area, 10.0);
+        assert!(out.iter().all(|p| p.plate == Some(0)), "{out:?}");
+    }
+
+    #[test]
+    fn free_rects_keep_the_parts_apart_and_on_the_bed() {
+        // A simple random generator, so the test does not change.
+        let mut seed = 12345u32;
+        let mut rnd = move |lo: f32, hi: f32| {
+            seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            lo + (hi - lo) * (seed >> 8) as f32 / (1u32 << 24) as f32
+        };
+        let area = Area {
+            w: 250.0,
+            d: 210.0,
+            h: 200.0,
+        };
+        for _ in 0..200 {
+            let n = 1 + (rnd(0.0, 12.0) as usize);
+            let sizes: Vec<Vec2> = (0..n)
+                .map(|_| Vec2::new(rnd(2.0, 240.0), rnd(2.0, 200.0)))
+                .collect();
+            let gap = rnd(0.0, 12.0);
+            let mut items = items_of(&sizes, &area);
+            let (spots, plates) = free_rects(&mut items, &area, gap, n);
+            for (i, a) in spots.iter().enumerate() {
+                let (p, lo, size, turned) = a.expect("each part fits");
+                assert!(p < plates);
+                let want = if turned { Vec2::new(sizes[i].y, sizes[i].x) } else { sizes[i] };
+                assert!((size - want).abs().max_element() < 1e-4);
+                let hi = lo + size;
+                assert!(lo.min_element() >= -1e-3, "{lo}");
+                assert!(hi.x <= area.w + 1e-3 && hi.y <= area.d + 1e-3, "{hi}");
+                for b in spots.iter().skip(i + 1) {
+                    let (q, l2, s2, _) = b.unwrap();
+                    if q != p {
+                        continue;
+                    }
+                    let h2 = l2 + s2;
+                    let apart = l2.x - hi.x >= gap - 1e-3
+                        || lo.x - h2.x >= gap - 1e-3
+                        || l2.y - hi.y >= gap - 1e-3
+                        || lo.y - h2.y >= gap - 1e-3;
+                    assert!(apart, "{a:?} {b:?} gap {gap}");
+                }
+            }
+            // The layout never needs more plates than shelf packing.
+            let out = layout(&sizes, &area, gap);
+            let used = out.iter().filter_map(|p| p.plate).max().map_or(0, |p| p + 1);
+            let (_, shelf_plates) = shelf(&mut items_of(&sizes, &area), &area, gap, n);
+            assert!(used <= shelf_plates);
+        }
     }
 }

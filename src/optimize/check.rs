@@ -585,22 +585,26 @@ pub(super) fn arc_points(pts: &[Vec2]) -> usize {
 }
 
 /// The number of outline points of the triangles `tris` that are on an
-/// arc. Pinch points do not count (`overhang.py`).
+/// arc. Pinch points do not count (`overhang.py`). A point counts only when
+/// the point before or after it is also on an arc: one small turn is a
+/// corner, not a round outline. For example, a bridge that ends at a curved
+/// wall can touch the curve on one short segment.
 pub(super) fn group_arcs(mesh: &Mesh, tris: &[u32]) -> usize {
     let (loops, pinch) = outline_loops(mesh, tris);
     let xy = |v: u32| mesh.vertices[v as usize].truncate();
     let mut n = 0;
     for lp in &loops {
         let m = lp.len();
-        for i in 0..m {
-            if pinch.contains(&lp[i]) {
-                continue;
-            }
-            let t = turn_deg(xy(lp[(i + m - 1) % m]), xy(lp[i]), xy(lp[(i + 1) % m]));
-            if t.is_some_and(is_arc) {
-                n += 1;
-            }
-        }
+        let on: Vec<bool> = (0..m)
+            .map(|i| {
+                !pinch.contains(&lp[i])
+                    && turn_deg(xy(lp[(i + m - 1) % m]), xy(lp[i]), xy(lp[(i + 1) % m]))
+                        .is_some_and(is_arc)
+            })
+            .collect();
+        n += (0..m)
+            .filter(|&i| on[i] && (on[(i + m - 1) % m] || on[(i + 1) % m]))
+            .count();
     }
     n
 }
@@ -949,6 +953,24 @@ mod tests {
         let m = mesh(&[
             block(Vec3::new(0.0, 0.0, 0.0), Vec3::new(30.0, 30.0, 5.0)),
             prism(&hex, 10.0, 12.0),
+        ]);
+        let i = run(&m, Layers::default(), &Limits::default(), &Area::default());
+        assert!(i.is_empty(), "{i:?}");
+    }
+
+    #[test]
+    fn one_small_turn_is_a_corner_not_an_arc() {
+        // A floating plate with one corner that turns by about 9.5 degrees.
+        let poly = [
+            Vec2::new(10.0, 10.0),
+            Vec2::new(16.0, 10.0),
+            Vec2::new(16.0, 15.0),
+            Vec2::new(15.5, 18.0),
+            Vec2::new(10.0, 18.0),
+        ];
+        let m = mesh(&[
+            block(Vec3::new(0.0, 0.0, 0.0), Vec3::new(30.0, 30.0, 5.0)),
+            prism(&poly, 10.0, 12.0),
         ]);
         let i = run(&m, Layers::default(), &Limits::default(), &Area::default());
         assert!(i.is_empty(), "{i:?}");

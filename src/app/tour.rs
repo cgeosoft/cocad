@@ -92,7 +92,7 @@ const STEPS: [Step; 10] = [
         intro: "The Optimize tab puts the parts on the bed of your printer. Press O to open it.",
         points: &[
             "Same parts show as one row with a count. When the parts do not fit on one plate, CoCAD fills more plates.",
-            "Custom orientation puts a part on its best face, or on a face that you click.",
+            "CoCAD puts each part on its best face. You can also click the face that goes on the bed.",
             "Turn on print fixes: teardrop holes, bridges, bed chamfer and brims.",
             "Split a part that is too large. The Check card lists the problems.",
             "Layers shows the slice of the plate. The Export card at the bottom writes the plate.",

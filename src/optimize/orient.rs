@@ -15,9 +15,10 @@ use std::f64::consts::{FRAC_PI_2, PI};
 /// How a part lies on the bed.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Choice {
-    /// The model rotation. The default.
+    /// The model rotation.
     Model,
-    /// The best face, found by `auto_down`.
+    /// The best face, found by `auto_down`. The default: a model gives
+    /// the parts in their position in use, not in print position.
     Auto,
     /// The user selected a face: this direction of the model points down.
     Face(Vec3),
@@ -33,7 +34,7 @@ pub struct Orientation {
 impl Default for Orientation {
     fn default() -> Self {
         Orientation {
-            choice: Choice::Model,
+            choice: Choice::Auto,
             quarter_turns: 0,
         }
     }
@@ -1049,7 +1050,10 @@ mod tests {
         let turned = transformed(&m, Mat4::from_rotation_z(std::f32::consts::FRAC_PI_6));
         assert!(near(size(&turned, face(0), &wide), Vec3::new(40.0, 10.0, 5.0), 1e-3));
         // The model choice does not turn.
-        let model = Orientation::default();
+        let model = Orientation {
+            choice: Choice::Model,
+            quarter_turns: 0,
+        };
         assert!(near(size(&m, model, &wide), Vec3::new(10.0, 40.0, 5.0), 1e-4));
     }
 

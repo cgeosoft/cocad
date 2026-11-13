@@ -68,7 +68,7 @@ When a fix found a place that it did not change, the row shows "1 skipped". Hold
 
 #### More than one plate
 
-CoCAD puts the parts in rows on the bed, the largest first, with a gap between them. It can turn a part by 90 degrees on the bed to fit it. This does not change how the part prints. The parts are in the center of the bed.
+CoCAD puts the parts in rows on the bed, the largest first, with a gap between them. When rows need more plates, CoCAD also tries to put the parts in the empty spaces between larger parts, and uses that layout when it needs fewer plates. It can turn a part by 90 degrees on the bed to fit it. This does not change how the part prints. The parts are in the center of the bed.
 
 When the parts do not fit on one plate, CoCAD fills plate 1, then plate 2, and so on. The menu of the **Export** card then has **3MF: all 2 plates** and **STL: all 2 plates**, with the number of plates. These items write one file for each plate. To open the menu, click the arrow at the right of **Export 3MF**.
 
@@ -93,14 +93,14 @@ After the split, each piece is a print part, for example "Part 1 1/2" and "Part 
 
 When a cut face has no room for pins or tabs, that cut is a flat cut. The **Plate** card tells you, for example "the cut at 130.0 mm has no room for pins. It is a flat cut."
 
-When no cuts make the part fit, the section says so. Turn the part with a [custom orientation](#orientation), or use a larger print area. When the part fits on a different side, the **Plate** card tells you to turn on **Custom orientation**.
+When no cuts make the part fit, the section says so. Turn the part with a [custom orientation](#orientation), or use a larger print area. When the part fits on a different side, the **Plate** card tells you so. Then click **Select face** in the **Orientation** card and click that side.
 
 ### Orientation
 
 Select a part first, in the **Plate** card or in the 3D view.
 
-- **Custom orientation**: off by default. When it is off, the part keeps the rotation of the model. CoCAD only moves its lowest point down to the bed.
-- When you turn it on, two choices show:
+- **Custom orientation**: on by default, with **Auto**. When you turn it off, the part keeps the rotation of the model. CoCAD then only moves its lowest point down to the bed.
+- When it is on, two choices show:
   - **Auto**: CoCAD puts the part on its best face. It compares the flat faces of the outer shape of the part. It prefers less overhang, more area on the bed and a lower part. When the rotation of the model is almost as good, the part keeps it.
   - **Select face**: click a face of the selected part in the 3D view. That face goes on the bed.
 - **Turn 90°** turns the part by 90 degrees on the bed.

@@ -141,7 +141,11 @@ pub fn bed_cut_module(c: f32, layers: Layers) -> Option<String> {
     // bed_keep(s) is the section above the chamfer, made smaller by s. A
     // wall thinner than 2 s would go away, so the parts of the section that
     // an opening (smaller by s, then larger by s) loses stay at full size:
-    // a thin wall keeps its first layers and gets no chamfer.
+    // a thin wall keeps its first layers and gets no chamfer. The opening
+    // by 0.01 mm removes the slivers with no width that the difference
+    // leaves along curves. It uses chamfer joins: a miter join turns such a
+    // sliver into a long spike, and the cut then leaves edges in more than
+    // two triangles.
     // bed_low(z, d) keeps the material of the layer at z that is outside the
     // section above the chamfer (a flap, a sheet or a foot), and the edge
     // near it: these edges get no chamfer.
@@ -149,7 +153,7 @@ pub fn bed_cut_module(c: f32, layers: Layers) -> Option<String> {
         "module bed_ref() projection(cut = true) translate([0, 0, -{zref}]) children();\n\
          module bed_keep(d) {{\n    \
              offset(delta = -d) bed_ref() children();\n    \
-             offset(delta = 0.01) offset(delta = -0.01) difference() {{\n        \
+             offset(delta = 0.01, chamfer = true) offset(delta = -0.01, chamfer = true) difference() {{\n        \
                  bed_ref() children();\n        \
                  offset(delta = d) offset(delta = -d) bed_ref() children();\n    \
              }}\n\

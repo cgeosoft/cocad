@@ -32,6 +32,11 @@ stop() {
 }
 trap stop EXIT
 
+# Another program on the same display would get the app and the clicks.
+if [ -e "/tmp/.X11-unix/X${disp#:}" ]; then
+    echo "Display $disp is in use. Stop the program that uses it, then run again." >&2
+    exit 1
+fi
 Xephyr "$disp" -screen "${width}x${height}" -ac -br -noreset 2>/dev/null &
 xephyr=$!
 sleep 1
@@ -67,8 +72,6 @@ before=$(mcp get_optimize '{}')
 shot app-2-before
 mcp set_optimize '{"fixes":{"teardrops":true,"bridges":true,"chamfer":true,"brim":true}}' >/dev/null
 shot app-3-fixes 4
-mcp set_optimize '{"parts":{"Part 3":{"orient":"auto"}}}' >/dev/null
-shot app-4-auto 4
 # Accept the split that CoCAD proposes for the base plate.
 split=$(printf '%s' "$before" | python3 -c '
 import json, sys

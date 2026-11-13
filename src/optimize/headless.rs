@@ -948,7 +948,7 @@ mod tests {
 
         let mut st = stored();
         parse(&["--orient", "model"]).unwrap().apply(&mut st);
-        assert_eq!(st.parts["Part 1"].orientation, Orientation::default());
+        assert_eq!(st.parts["Part 1"].orientation.choice, Choice::Model);
         // The other values of the part stay.
         assert!(!st.parts["Part 1"].include);
 

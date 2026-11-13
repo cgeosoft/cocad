@@ -36,6 +36,11 @@ stop() {
 }
 trap stop EXIT
 
+# Another program on the same display would get the app and the clicks.
+if [ -e "/tmp/.X11-unix/X${disp#:}" ]; then
+    echo "Display $disp is in use. Stop the program that uses it, then run again." >&2
+    exit 1
+fi
 Xephyr "$disp" -screen "${width}x${height}" -ac -br -noreset 2>/dev/null &
 xephyr=$!
 sleep 1

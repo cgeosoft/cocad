@@ -66,7 +66,7 @@ With **Model defaults** selected, auto save saves nothing. Select a set, or make
 **The Plate card says "Too large for the print area".**
 The part does not fit the print area of the **Printer** card. Do one of these:
 - Check the print area. Select your printer in the **Printer** card.
-- Turn on **Custom orientation** for the part. When the part fits on a different side, the **Plate** card tells you so.
+- Put the part on a different side: click **Select face** in the **Orientation** card. When the part fits on a different side, the **Plate** card tells you so.
 - Click **Split** in the **Split** section below the row. See [Optimize](Optimize#split-a-part-that-is-too-large).
 
 A part that is too large is on no plate, so it is not in the STL or 3MF export.

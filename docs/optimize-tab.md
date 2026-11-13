@@ -46,7 +46,7 @@ Today the models in `scad-models` do the print preparation in OpenSCAD. This tab
 | # | Feature | Short description |
 |---|---|---|
 | 1 | Export card at the bottom | One Export card, fixed at the bottom of the right panel, in all tabs |
-| 2 | Orientation | Off by default. With custom orientation on, CoCAD puts a part on its best face (Auto), or the user selects the face |
+| 2 | Orientation | On by default: CoCAD puts a part on its best face (Auto). The user can select the face, or turn custom orientation off to keep the model rotation |
 | 3 | Teardrop holes | Round holes with a horizontal axis get a 45 degree point at the top |
 | 4 | Bridges | Bridged ceilings start on straight edges. A hole above a bridge starts on a sacrificial layer or a stepped bridge |
 | 4.1 | Brim on small islands | A one-layer brim on small first-layer islands, with a gap to the rest of the part |
@@ -64,7 +64,7 @@ CoCAD does these steps in this order. Each step uses the result of the step befo
 2. **Parts.** CoCAD finds the parts, as today: the `cocad_part` list, the module split, or the solids of the mesh.
 3. **Print parts.** CoCAD joins parts that overlap in volume, finds parts with the same shape, and applies the part selection (feature 6).
 4. **Split** (feature 9). When the user accepts it, a part that does not fit the print area (feature 8) is cut into pieces, with joints. Each piece is a print part from here on.
-5. **Orientation** (feature 2). Each print part keeps its model rotation, or, with custom orientation on, gets the Auto rotation or the face that the user selected. Its lowest point goes to z = 0.
+5. **Orientation** (feature 2). Each print part gets the Auto rotation or the face that the user selected, or, with custom orientation off, keeps its model rotation. Its lowest point goes to z = 0.
 6. **Analysis.** In print position, CoCAD finds the horizontal holes, the bridged ceilings and the bed islands of each part.
 7. **Fixes** (features 3, 4, 5 and 4.1, in this order). CoCAD changes the geometry of each part, only for the fixes that the user turned on. All fixes are off by default. The brim comes last, because the bed chamfer must not cut it. The fixes also apply to the joints of step 4: a horizontal pin hole gets a teardrop.
 8. **Plate layout.** CoCAD puts the parts on the bed, with a gap.
@@ -139,7 +139,7 @@ What the export contains (decision, owner):
 
 ## Feature 2: Orientation
 
-The model gives each part in its position in use. By default, CoCAD keeps this rotation: the part only goes down to z = 0. When the user turns on **Custom orientation** for a part, CoCAD can find the print position (Auto), or the user selects the face that goes on the bed. See User control below.
+The model gives each part in its position in use. By default, CoCAD finds the print position (Auto). The user can select the face that goes on the bed, or turn off **Custom orientation** to keep the model rotation: the part then only goes down to z = 0. See User control below.
 
 ### Auto: the method
 
@@ -173,11 +173,11 @@ After the bed face, CoCAD turns the part about z:
 
 ### User control
 
-Decision (owner): custom orientation is an option, off by default.
+Decision (owner): custom orientation is on by default, with Auto. Since 0.7.0 a model gives only the assembled model, so the model rotation is the position in use. A panel of a case frame then stands on its edge. Until 0.7.1, custom orientation was off by default. The stored values of 0.7 have no key for the model rotation: these parts get Auto.
 
 For the selected part, the Orientation card has:
 
-- **Custom orientation**: a switch, off by default. Off: the part keeps its model rotation.
+- **Custom orientation**: a switch, on by default. Off: the part keeps its model rotation.
 - With the switch on:
   - **Auto**: CoCAD puts the part on its best face (the method above). This is the first value when the user turns the switch on.
   - **Select face**: a click on a face in the 3D view turns the part so that this face is on the bed.
@@ -327,6 +327,7 @@ CoCAD finds parts with the same shape: the same volume, surface area and princip
 
 - CoCAD puts the footprint rectangles of the parts in rows, the largest first, with a gap (10 mm by default, as `print_layout(g = 10)`). It keeps room for the brims. It centers the result on the bed.
 - The layout can turn a part by 90 degrees about z to fit. This does not change how the part prints.
+- When the rows need more than one plate, CoCAD also packs the parts with free rectangles (MaxRects: the largest part first, in the free space that leaves the smallest rest). It uses that layout only when it needs fewer plates. Example: the eight flat parts of a case frame on a 250 x 220 mm bed need 5 plates in rows and 4 with free rectangles.
 - A part that does not fit the bed alone goes to the split (feature 9). It is on no plate until the user splits it.
 - The bed is the print area of the model (feature 8).
 
@@ -488,7 +489,7 @@ The 3D view of the Optimize tab shows the bed with a grid and the parts in print
 - Default print area: global, in `<config>/config` (feature 8).
 - Print area of a model: per model in `models.json` (feature 8).
 - Cuts and joints: per model and per part, in `models.json` (feature 9).
-- Optimize tab values: per model in `models.json`, as the slice settings today. New keys: part selection, copies, the custom orientation switch and choice of each part, the fix switches and values. A new model starts with custom orientation off and all fixes off.
+- Optimize tab values: per model in `models.json`, as the slice settings today. New keys: part selection, copies, the custom orientation switch and choice of each part, the fix switches and values. A new model starts with Auto orientation and all fixes off.
 - Card open state: global (feature 7).
 - `models.json` today stores `"mode": "slice"` or `"photo"`. Read them as `"optimize"` and `"render"`.
 
