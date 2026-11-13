@@ -146,6 +146,26 @@ impl Outcome {
         out
     }
 
+    /// The print parts that should be on the plates but are not, because
+    /// they are too large for the print area.
+    pub fn left_out(&self) -> Vec<&str> {
+        (self.parts.iter())
+            .filter(|p| p.copies > 0 && !p.fits)
+            .map(|p| p.name.as_str())
+            .collect()
+    }
+
+    /// A note for an export that leaves parts out, or `None`.
+    pub fn left_out_note(&self) -> Option<String> {
+        let names = self.left_out();
+        (!names.is_empty()).then(|| {
+            format!(
+                "Not on a plate, too large for the print area: {}. Split or turn it in the Optimize tab.",
+                names.join(", ")
+            )
+        })
+    }
+
     /// The copies on `plate`: (print part, bed matrix).
     pub fn on_plate(&self, plate: usize) -> Vec<(usize, Mat4)> {
         self.instances
@@ -677,6 +697,8 @@ mod tests {
         assert!(!o.parts[big].fits);
         assert!(o.parts[big].proposal.is_some());
         assert!(o.instances.iter().all(|i| i.part != big));
+        assert_eq!(o.left_out(), vec!["Big"]);
+        assert!(o.left_out_note().unwrap().contains("Big"));
     }
 
     #[test]

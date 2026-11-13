@@ -24,7 +24,7 @@ The **Model** menu has the same commands.
 
 You do not have to open the **Optimize** tab before an export. When the plates are not ready, CoCAD prepares them first. A model that you did not change in the **Optimize** tab gives all parts in the rotation of the model, with no print fixes, on the print area from **File > Settings > Printer**.
 
-A part that is too large for the print area is on no plate, so it is not in the STL or the 3MF file. [Split](Optimize#split-a-part-that-is-too-large) it in the **Optimize** tab, or set a larger print area. When no part is on a plate, the **STL** and **3MF** buttons are not available. **STEP** still works.
+A part that is too large for the print area is on no plate, so it is not in the STL or the 3MF file. The message after the export names each part that it left out. [Split](Optimize#split-a-part-that-is-too-large) it in the **Optimize** tab, or set a larger print area. When no part is on a plate, the **STL** and **3MF** buttons are not available. **STEP** still works.
 
 For a print in more than one color, see [Multicolor prints](Multicolor-prints).
 

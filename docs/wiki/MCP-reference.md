@@ -103,7 +103,7 @@ For example, this call turns on the bed chamfer, puts the part "Clip" on its bes
 
 ### Files
 
-- `export_model` writes `.stl` and `.3mf` as the window does: a plate of the Optimize tab, with the print parts in print position and the fixes that are on. `plate` selects the plate (from 1) or `all`. The default is the plate that the window shows. With `all`, each plate goes to its own file, with `-plateN` before the extension. A plate 3MF has one object for each print part and one build item for each copy.
+- `export_model` writes `.stl` and `.3mf` as the window does: a plate of the Optimize tab, with the print parts in print position and the fixes that are on. `plate` selects the plate (from 1) or `all`. The default is the plate that the window shows. With `all`, each plate goes to its own file, with `-plateN` before the extension. A plate 3MF has one object for each print part and one build item for each copy. When print parts are too large for the print area, the reply lists them in `left_out`: they are not in the file.
 - `export_model` writes `.step` as the model as built. When `only` of the Optimize state names a part, the STEP file has only that part.
 - `export_model` prepares the plates when they are not ready.
 - `export_model` and `save_photo` do not replace a file without `overwrite`.

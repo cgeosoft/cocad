@@ -564,6 +564,7 @@ impl App {
         self.note(format!("exporting {}", target.display()));
         let reply = reply.clone();
         std::thread::spawn(move || {
+            let mut left_out: Vec<String> = Vec::new();
             let written: Result<Vec<PathBuf>, String> = match (job, slicer, source) {
                 (Some((file, cfg, params)), Some(slicer), _) => {
                     let cancel = Arc::new(AtomicBool::new(false));
@@ -583,19 +584,26 @@ impl App {
                 }),
                 (_, _, Some(src)) => src.outcome().and_then(|o| {
                     let files = optimize_tab::write_plates(&target, &o, which, &meta, check)?;
+                    left_out = o.left_out().iter().map(|s| s.to_string()).collect();
                     Ok(files)
                 }),
             };
             let r = written.map(|files| {
                 let bytes = |p: &PathBuf| std::fs::metadata(p).map(|m| m.len()).unwrap_or(0);
-                if files.len() == 1 {
+                let mut v = if files.len() == 1 {
                     json!({ "path": files[0], "bytes": bytes(&files[0]) })
                 } else {
                     let list: Vec<Json> = (files.iter())
                         .map(|p| json!({ "path": p, "bytes": bytes(p) }))
                         .collect();
                     json!({ "files": list })
+                };
+                // Parts that are too large for the print area are not in the file.
+                if !left_out.is_empty() {
+                    v["left_out"] = json!(left_out);
+                    v["note"] = json!("These print parts are too large for the print area and are not in the file. Split or turn them with set_optimize.");
                 }
+                v
             });
             let _ = reply.send(r);
         });

@@ -309,6 +309,10 @@ impl MeshInfo {
     }
 }
 
+/// The files that an export wrote, and a note (for example the parts that
+/// it left out).
+type Exported = (Vec<PathBuf>, Option<String>);
+
 pub struct App {
     file: Option<PathBuf>,
     mtime: Option<SystemTime>,
@@ -384,7 +388,7 @@ pub struct App {
     renderer: Option<Arc<Mutex<Renderer>>>,
     toast: Option<(String, Instant)>,
     /// A running export: the written files, or the error.
-    export_rx: Option<Receiver<Result<Vec<PathBuf>, String>>>,
+    export_rx: Option<Receiver<Result<Exported, String>>>,
     /// The Optimize tab: its state, the pipeline and the plate view.
     opt: optimize_tab::Opt,
     menu: Option<Menu>,
@@ -1013,14 +1017,18 @@ impl App {
             self.export_rx = None;
             self.toast = Some((
                 match r {
-                    Ok(paths) => {
+                    Ok((paths, note)) => {
                         if let Some(format) = paths.first().and_then(|p| Format::from_path(p)) {
                             telemetry::event(Event::ModelExported { format });
                         }
-                        match paths.as_slice() {
+                        let saved = match paths.as_slice() {
                             [] => "Nothing saved".to_string(),
                             [p] => format!("Saved {}", p.display()),
                             [p, ..] => format!("Saved {} files: {} …", paths.len(), p.display()),
+                        };
+                        match note {
+                            Some(n) => format!("{saved}. {n}"),
+                            None => saved,
                         }
                     }
                     Err(e) => format!("Export failed: {e}"),
@@ -1172,12 +1180,12 @@ impl App {
         std::thread::spawn(move || {
             let r = match (fmt, source) {
                 (Format::Step, None) => export::write(&path, &mesh, &meta)
-                    .map(|_| vec![path])
+                    .map(|_| (vec![path], None))
                     .map_err(|e| e.to_string()),
                 (Format::Step, Some(src)) => src.outcome().and_then(|o| {
                     let m = optimize_tab::only_mesh(&o, only.as_deref().unwrap_or_default())?;
                     export::write(&path, &m, &meta)
-                        .map(|_| vec![path])
+                        .map(|_| (vec![path], None))
                         .map_err(|e| e.to_string())
                 }),
                 (_, Some(src)) => src.outcome().and_then(|o| {
@@ -1186,7 +1194,8 @@ impl App {
                     } else {
                         optimize_tab::Plates::One(plate)
                     };
-                    optimize_tab::write_plates(&path, &o, which, &meta, |_| Ok(()))
+                    let files = optimize_tab::write_plates(&path, &o, which, &meta, |_| Ok(()))?;
+                    Ok((files, o.left_out_note()))
                 }),
                 (_, None) => Err("no plate".to_string()),
             };
@@ -1222,7 +1231,7 @@ impl App {
             let _ = tx.send(
                 crate::parts::render(&cfg, &file, &params, &cancel)
                     .and_then(|parts| export::write_parts(&path, &parts, &meta, slicer))
-                    .map(|_| vec![path])
+                    .map(|_| (vec![path], None))
                     .map_err(|e| e.to_string()),
             );
         });
