@@ -66,12 +66,13 @@ const STEPS: [Step; 10] = [
     },
     Step {
         title: "Check and export",
-        intro: "The status bar and the Mesh card of the Model tab show the mesh data. The Export card is at the bottom of each tab.",
+        intro: "The status bar and the Mesh card of the Model tab show the mesh data. The Export card is at the bottom of the Optimize tab.",
         points: &[
             "Check the size, volume, triangles and open edges.",
             "Back faces show in purple. Press W for the wireframe.",
-            "STL and 3MF write the print plate of the Optimize tab. STEP writes the model as built.",
+            "Export 3MF writes the print plate. The arrow opens a menu with STL, all plates and STEP of the model as built.",
             "A model with a cocad_part list shows each part in its color and exports a multicolor 3MF.",
+            "The Model menu has the export commands in all tabs.",
         ],
         image: shot!("4-export"),
     },
@@ -94,7 +95,7 @@ const STEPS: [Step; 10] = [
             "Custom orientation puts a part on its best face, or on a face that you click.",
             "Turn on print fixes: teardrop holes, bridges, bed chamfer and brims.",
             "Split a part that is too large. The Check card lists the problems.",
-            "Layers shows the slice of the plate. STL and 3MF export the plate.",
+            "Layers shows the slice of the plate. The Export card at the bottom writes the plate.",
         ],
         image: shot!("6-slice"),
     },
@@ -104,7 +105,7 @@ const STEPS: [Step; 10] = [
         points: &[
             "The image gets cleaner with each sample.",
             "Choose the plastic color, finish, studio and image size.",
-            "Save PNG writes the image at its full size.",
+            "The Render card at the bottom shows the progress. Save PNG writes the image at its full size.",
         ],
         image: shot!("7-photo"),
     },

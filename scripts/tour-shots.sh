@@ -89,10 +89,19 @@ mcp set_view '{"fit":true}'
 shot 3-sets
 quit
 
-# Mesh data and export.
-start "$models/knob.scad"
-mcp set_view '{"wireframe":true,"view":"iso","fit":true}'
+# Export: the Export card of the Optimize tab, with the menu of the arrow
+# open. The arrow is the narrow button at the right of Export 3MF.
+start --optimize "$models/lid-box.scad"
+mcp set_view '{"view":"iso","fit":true}'
+sleep 3
+xdotool mousemove 565 360 click 4 click 4 click 4
+sleep 1
+xdotool mousemove $((width - 54)) $((height - 80)) click 1
+# Move the pointer off the buttons, so that no tooltip shows. The menu stays
+# open. Then put it back in the middle for the next shots.
+xdotool mousemove 600 17
 shot 4-export
+xdotool mousemove $((width / 2)) $((height / 2))
 quit
 
 # Parts: colors, explode and a section cut. The parts job runs after the render.
