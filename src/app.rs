@@ -33,19 +33,63 @@ const DEBOUNCE: Duration = Duration::from_millis(350);
 /// Auto save writes the set when the values do not change for this time.
 const AUTOSAVE: Duration = Duration::from_millis(600);
 
-#[derive(PartialEq, Clone, Copy)]
-enum Mode {
+/// The tabs of the right panel.
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
+pub(crate) enum Mode {
     Model,
-    Slice,
-    Photo,
+    /// Print preparation and the slice preview. Was the Slice tab.
+    Optimize,
+    /// The path traced render. Was the Photo tab.
+    Render,
 }
 
 impl Mode {
+    pub const ALL: [Mode; 3] = [Mode::Model, Mode::Optimize, Mode::Render];
+
     fn screen(self) -> Screen {
         match self {
             Mode::Model => Screen::Model,
-            Mode::Slice => Screen::Slice,
-            Mode::Photo => Screen::Photo,
+            Mode::Optimize => Screen::Optimize,
+            Mode::Render => Screen::Render,
+        }
+    }
+
+    /// The name in `models.json`, the CLI and the MCP tools.
+    pub fn name(self) -> &'static str {
+        match self {
+            Mode::Model => "model",
+            Mode::Optimize => "optimize",
+            Mode::Render => "render",
+        }
+    }
+
+    /// The mode with this name. The old names "slice" and "photo" (before
+    /// 0.7) give Optimize and Render.
+    pub fn from_name(name: &str) -> Option<Mode> {
+        match name {
+            "model" => Some(Mode::Model),
+            "optimize" | "slice" => Some(Mode::Optimize),
+            "render" | "photo" => Some(Mode::Render),
+            _ => None,
+        }
+    }
+
+    /// The tab label.
+    pub fn label(self) -> &'static str {
+        match self {
+            Mode::Model => "Model",
+            Mode::Optimize => "Optimize",
+            Mode::Render => "Render",
+        }
+    }
+
+    /// The key that opens the tab, and the index of its letter in the
+    /// label. The same key again goes back to the Model tab.
+    fn key(self) -> Option<(egui::Key, usize)> {
+        match self {
+            Mode::Model => None,
+            Mode::Optimize => Some((egui::Key::O, 0)),
+            Mode::Render => Some((egui::Key::R, 0)),
         }
     }
 }
@@ -84,8 +128,8 @@ const SHORTCUTS: [(&str, &str); 16] = [
     ("F, double click", "Fit the model"),
     ("W", "Wireframe"),
     ("E", "Explode the parts"),
-    ("S", "Model or Slice tab"),
-    ("P", "Model or Photo tab"),
+    ("O", "Model or Optimize tab"),
+    ("R", "Model or Render tab"),
     ("Up, Down, PgUp, PgDn", "Change the slice layer"),
     ("Left drag", "Orbit"),
     ("Right drag, Shift + left drag", "Pan"),
@@ -117,7 +161,7 @@ enum SettingsPage {
     Privacy,
 }
 
-/// Photo render settings shown in the Photo panel.
+/// Photo render settings shown in the Render tab.
 struct PhotoSettings {
     color: [u8; 3],
     finish: &'static str,
@@ -382,11 +426,7 @@ impl App {
             }
         });
         let cfg = openscad::Config::load();
-        let start_mode = match mode {
-            "slice" => Mode::Slice,
-            "photo" => Mode::Photo,
-            _ => Mode::Model,
-        };
+        let start_mode = Mode::from_name(mode).unwrap_or(Mode::Model);
         let consent = telemetry::load_consent();
         telemetry::event(Event::AppStarted {
             view: start_mode.screen(),
@@ -837,7 +877,7 @@ impl App {
                         self.fit();
                         self.fit_pending = false;
                     }
-                    if self.mode == Mode::Slice {
+                    if self.mode == Mode::Optimize {
                         self.start_slice();
                     }
                 }
@@ -1241,12 +1281,9 @@ impl App {
     }
 
     fn view_menu(&mut self, ui: &mut egui::Ui) {
-        for (mode, label, key) in [
-            (Mode::Model, "Model", ""),
-            (Mode::Slice, "Slice", "S"),
-            (Mode::Photo, "Photo", "P"),
-        ] {
-            if ui::menu_item(ui, label, key, true, self.mode == mode).clicked() {
+        for mode in Mode::ALL {
+            let key = mode.key().map_or("", |(k, _)| k.name());
+            if ui::menu_item(ui, mode.label(), key, true, self.mode == mode).clicked() {
                 self.set_mode(mode);
             }
         }
@@ -1588,7 +1625,7 @@ impl App {
             });
         }
         self.mode = mode;
-        if mode == Mode::Slice && self.slice_for_rev != self.mesh_rev {
+        if mode == Mode::Optimize && self.slice_for_rev != self.mesh_rev {
             self.start_slice();
         }
     }
@@ -2152,7 +2189,7 @@ impl App {
 
             // Mode details.
             match self.mode {
-                Mode::Slice => {
+                Mode::Optimize => {
                     if let Some(sl) = &self.sliced {
                         sep(ui);
                         ui.label(small(format!(
@@ -2167,10 +2204,10 @@ impl App {
                         )));
                     }
                 }
-                Mode::Photo => {
+                Mode::Render => {
                     sep(ui);
                     ui.label(small(format!(
-                        "Photo {} / {}",
+                        "Render {} / {}",
                         self.photo_samples(),
                         self.photo.samples
                     )));
@@ -2360,7 +2397,7 @@ impl App {
         self.toast = Some((msg, Instant::now()));
     }
 
-    fn photo_panel(&mut self, ui: &mut egui::Ui) {
+    fn render_panel(&mut self, ui: &mut egui::Ui) {
         ui.label(ui::dim("Path-traced render of the current view."));
         ui.add_space(4.0);
         egui::ScrollArea::vertical()
@@ -2526,7 +2563,8 @@ impl App {
             });
     }
 
-    fn slice_panel(&mut self, ui: &mut egui::Ui) {
+    /// The Optimize tab. For now it holds the slice preview.
+    fn optimize_panel(&mut self, ui: &mut egui::Ui) {
         ui.label(ui::dim("Rough preview for checking. Not for printing."));
         ui.add_space(4.0);
         let before = self.settings;
@@ -2698,7 +2736,7 @@ impl App {
         self.update_selection();
 
         let layer_max = self.sliced.as_ref().map(|s| s.layers.len()).unwrap_or(0);
-        let slicing = self.mode == Mode::Slice && layer_max > 0;
+        let slicing = self.mode == Mode::Optimize && layer_max > 0;
         if let Some(r) = &self.renderer {
             let view = View {
                 mvp: self.cam.matrix(rect.width() / rect.height().max(1.0)),
@@ -2742,7 +2780,7 @@ impl App {
             );
         }
 
-        if self.mode == Mode::Photo {
+        if self.mode == Mode::Render {
             self.photo_view(ui, rect);
         } else {
             self.photo_job = None;
@@ -2920,7 +2958,7 @@ impl App {
             return;
         }
         self.select_escape(ctx);
-        let (f5, f, w, up, down, pgup, pgdn, tab) = ctx.input(|i| {
+        let (f5, f, w, up, down, pgup, pgdn) = ctx.input(|i| {
             (
                 i.key_pressed(egui::Key::F5),
                 i.key_pressed(egui::Key::F),
@@ -2929,18 +2967,22 @@ impl App {
                 i.key_pressed(egui::Key::ArrowDown),
                 i.key_pressed(egui::Key::PageUp),
                 i.key_pressed(egui::Key::PageDown),
-                i.key_pressed(egui::Key::S),
             )
         });
         if ctx.input(|i| i.key_pressed(egui::Key::E)) {
             self.toggle_explode();
         }
-        if ctx.input(|i| i.key_pressed(egui::Key::P)) {
-            self.set_mode(if self.mode == Mode::Photo {
-                Mode::Model
-            } else {
-                Mode::Photo
+        // O and R open their tab, and the same key goes back to the Model
+        // tab. Ctrl+O (open a file) is used above.
+        for mode in Mode::ALL {
+            let Some((key, _)) = mode.key() else { continue };
+            let pressed = ctx.input(|i| {
+                let m = i.modifiers;
+                i.key_pressed(key) && !m.command && !m.ctrl && !m.alt
             });
+            if pressed {
+                self.set_mode(if self.mode == mode { Mode::Model } else { mode });
+            }
         }
         if f5 {
             self.start_render();
@@ -2951,14 +2993,7 @@ impl App {
         if w {
             self.wireframe = !self.wireframe;
         }
-        if tab {
-            self.set_mode(if self.mode == Mode::Model {
-                Mode::Slice
-            } else {
-                Mode::Model
-            });
-        }
-        if self.mode == Mode::Slice {
+        if self.mode == Mode::Optimize {
             let max = self
                 .sliced
                 .as_ref()
@@ -3458,21 +3493,14 @@ impl eframe::App for App {
             .frame(side)
             .show(ctx, |ui| {
                 let mut mode = self.mode;
-                if ui::tabs(
-                    ui,
-                    &mut mode,
-                    &[
-                        (Mode::Model, "Model"),
-                        (Mode::Slice, "Slice"),
-                        (Mode::Photo, "Photo"),
-                    ],
-                ) {
+                let tabs = Mode::ALL.map(|m| (m, m.label(), m.key().map(|(_, at)| at)));
+                if ui::tabs(ui, &mut mode, &tabs) {
                     self.set_mode(mode);
                 }
                 match self.mode {
                     Mode::Model => self.model_panel(ui),
-                    Mode::Slice => self.slice_panel(ui),
-                    Mode::Photo => self.photo_panel(ui),
+                    Mode::Optimize => self.optimize_panel(ui),
+                    Mode::Render => self.render_panel(ui),
                 }
             });
         egui::CentralPanel::default()

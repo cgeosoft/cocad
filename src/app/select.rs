@@ -12,7 +12,7 @@
 //!   are done.
 //!
 //! The selection and the focus show in the 3D view of the Model and Photo
-//! tabs only. The Slice tab and the path traced photo do not show them.
+//! tabs only. The Optimize tab and the path traced photo do not show them.
 
 use super::{App, Camera, Mode};
 use crate::assembly::PartInfo;
@@ -200,7 +200,7 @@ impl App {
 
     /// Click and right click in the 3D view `rect`. A drag does not select.
     pub(super) fn select_input(&mut self, resp: &egui::Response, rect: Rect) {
-        if self.mode == Mode::Slice || self.assembly.is_none() {
+        if self.mode == Mode::Optimize || self.assembly.is_none() {
             return;
         }
         if resp.hovered() && resp.ctx.input(|i| i.pointer.primary_pressed()) {
@@ -321,7 +321,7 @@ impl App {
             Some(_) => part.is_some(),
             None => focus.is_some(),
         };
-        if self.mode == Mode::Slice || !valid {
+        if self.mode == Mode::Optimize || !valid {
             self.view3d.sel.menu = None;
             return;
         }

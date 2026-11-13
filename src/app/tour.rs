@@ -88,7 +88,7 @@ const STEPS: [Step; 10] = [
     },
     Step {
         title: "Slice preview",
-        intro: "The Slice tab shows the paths a printer would follow.",
+        intro: "The Optimize tab shows the paths a printer would follow. Press O to open it.",
         points: &[
             "Walls, infill and skin show as round strands at the real line width.",
             "Move the layer slider, or press Up and Down.",
@@ -99,7 +99,7 @@ const STEPS: [Step; 10] = [
     },
     Step {
         title: "Photo render",
-        intro: "The Photo tab path-traces the current view on all CPU cores.",
+        intro: "The Render tab path-traces the current view on all CPU cores. Press R to open it.",
         points: &[
             "The image gets cleaner with each sample.",
             "Choose the plastic color, finish, studio and image size.",

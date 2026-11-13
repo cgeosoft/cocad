@@ -289,11 +289,7 @@ impl App {
             .filter(|p| p.changed())
             .map(|p| (p.name.clone(), params::to_json(&p.value)))
             .collect();
-        let mode = match self.mode {
-            Mode::Model => "model",
-            Mode::Slice => "slice",
-            Mode::Photo => "photo",
-        };
+        let mode = self.mode.name();
         let lines: Vec<&str> = self.log.lines().collect();
         let log = lines[lines.len().saturating_sub(LOG_LINES)..].join("\n");
         let parts = self.assembly.as_ref().map_or(&[][..], |a| &a.parts[..]);
@@ -505,7 +501,7 @@ impl App {
     }
 
     /// The model for images: the current mesh with the part colors and the
-    /// explode of the window, as in the Photo tab.
+    /// explode of the window, as in the Render tab.
     fn current_model(&mut self) -> Result<pathtrace::Model, String> {
         let mesh = self.current_mesh()?;
         Ok(self.photo_model().unwrap_or_else(|| mesh.into()))
@@ -583,7 +579,7 @@ impl App {
             Some("light") => Some(pathtrace::Studio::Light),
             Some(s) => return Err(format!("Unknown studio {s}. Use dark or light.")),
         };
-        // Same values as the Photo panel, so that the panel shows the result.
+        // Same values as the Render tab, so that the panel shows the result.
         let p = &mut self.photo;
         (p.width, p.height, p.samples) = (width, height, samples);
         p.color = color.unwrap_or(p.color);
@@ -657,10 +653,10 @@ impl App {
     fn view_change(&mut self, args: &Json) -> Outcome {
         let mode = match args["mode"].as_str() {
             None => None,
-            Some("model") => Some(Mode::Model),
-            Some("slice") => Some(Mode::Slice),
-            Some("photo") => Some(Mode::Photo),
-            Some(m) => return Err(format!("Unknown mode {m}. Use model, slice or photo.")),
+            Some(m) => Some(
+                Mode::from_name(m)
+                    .ok_or_else(|| format!("Unknown mode {m}. Use model, optimize or render."))?,
+            ),
         };
         let view = view_angles(args)?;
         let explode = match &args["explode"] {

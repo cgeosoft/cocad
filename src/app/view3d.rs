@@ -1,6 +1,6 @@
 //! Options of the 3D view for the parts of the model: part colors and
 //! explode. The style of each part comes from `View3d::styles` every frame.
-//! The "Parts" and "Explode" cards are in the Model and Photo tabs.
+//! The "Parts" and "Explode" cards are in the Model and Render tabs.
 
 use super::{App, Mode};
 use crate::assembly::{PALETTE, PartInfo};
@@ -287,14 +287,14 @@ impl App {
         styles.iter().map(|s| s.offset).collect()
     }
 
-    /// The style of each part in the 3D view. The Slice tab shows each part
+    /// The style of each part in the 3D view. The Optimize tab shows each part
     /// at its real position, so that the mesh agrees with the tool paths.
     /// It does not show the selection and the focus.
     pub(super) fn part_styles(&self) -> Vec<PartStyle> {
         let Some(a) = &self.assembly else {
             return Vec::new();
         };
-        let view = self.mode != Mode::Slice;
+        let view = self.mode != Mode::Optimize;
         let mut styles = self.view3d.styles(&a.parts, view);
         if view {
             self.view3d.sel.mark(&a.parts, &mut styles);
@@ -381,7 +381,7 @@ impl App {
     }
 
     /// The "Parts" card: the part count and the part colors. The Model and
-    /// the Photo tabs show it.
+    /// the Render tabs show it.
     pub(super) fn parts_card(&mut self, ui: &mut egui::Ui) {
         let Some(a) = self.assembly.clone().filter(|a| !a.parts.is_empty()) else {
             return;
@@ -447,7 +447,7 @@ impl App {
     }
 
     /// The "Explode" card: moves the parts away from each other. The Model
-    /// and the Photo tabs show it. A change of the distance or the direction
+    /// and the Render tabs show it. A change of the distance or the direction
     /// turns the explode on.
     pub(super) fn explode_card(&mut self, ui: &mut egui::Ui) {
         let Some(a) = self.assembly.clone().filter(|a| !a.parts.is_empty()) else {
@@ -709,7 +709,7 @@ mod tests {
         assert_eq!(v.explode_distance(&parts).0, 30.0);
         let moved = v.styles(&parts, true);
         assert!(close(moved[1].offset.length(), 30.0));
-        // The Slice tab: no movement.
+        // The Optimize tab: no movement.
         assert!(
             v.styles(&parts, false)
                 .iter()

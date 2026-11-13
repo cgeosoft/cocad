@@ -277,11 +277,13 @@ Each event is one variant of an `enum` in `src/telemetry.rs`. A method on the en
 
 | Event | Properties | Values |
 |---|---|---|
-| `app_started` | `view`, `first_run` | `model`, `slice`, `photo`; boolean |
+| `app_started` | `view`, `first_run` | `model`, `optimize`, `render`; boolean |
 | `model_opened` | `parameters` | Count |
 | `model_exported` | `format` | `stl`, `3mf`, `step` |
-| `view_changed` | `view` | `model`, `slice`, `photo` |
+| `view_changed` | `view` | `model`, `optimize`, `render` |
 | `photo_saved` | `samples` | Count |
+
+In version 0.7 the `view` values `slice` and `photo` became `optimize` and `render`, because the tabs got new names. These are renamed values of the same property, with no new data, so `NOTICE_VERSION` stays.
 
 Common properties: `consent_version`, `$lib`, `$lib_version`, `$app_version`, `$os`, `arch`, `source`, `$geoip_disable`.
 

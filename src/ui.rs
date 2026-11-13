@@ -781,14 +781,20 @@ pub fn menu_separator(ui: &mut egui::Ui) {
     );
 }
 
-/// Full-width tab selector; returns true when the value changed.
-pub fn tabs<T: PartialEq + Copy>(ui: &mut egui::Ui, value: &mut T, options: &[(T, &str)]) -> bool {
+/// Full-width tab selector; returns true when the value changed. Each
+/// option has a value, a label and the index (in characters) of the letter
+/// of its key. The label shows that letter underlined.
+pub fn tabs<T: PartialEq + Copy>(
+    ui: &mut egui::Ui,
+    value: &mut T,
+    options: &[(T, &str, Option<usize>)],
+) -> bool {
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 40.0), Sense::hover());
     ui.painter().rect_filled(rect, 11.0, c().input);
     let inner = rect.shrink(4.0);
     let w = inner.width() / options.len() as f32;
     let mut changed = false;
-    for (i, (v, label)) in options.iter().enumerate() {
+    for (i, (v, label, key)) in options.iter().enumerate() {
         let cell =
             Rect::from_min_size(inner.min + vec2(w * i as f32, 0.0), vec2(w, inner.height()));
         let resp = ui.interact(cell, ui.id().with(("tab", i)), Sense::click());
@@ -804,18 +810,83 @@ pub fn tabs<T: PartialEq + Copy>(ui: &mut egui::Ui, value: &mut T, options: &[(T
         } else {
             c().dim
         };
-        let p = ui.painter();
         if sel {
-            p.rect_filled(cell, 8.0, ACCENT);
+            ui.painter().rect_filled(cell, 8.0, ACCENT);
         }
-        p.text(
-            cell.center(),
-            Align2::CENTER_CENTER,
-            label,
-            FontId::proportional(14.5),
-            fg,
-        );
+        let job = underlined(label, *key, FontId::proportional(14.5), fg);
+        let galley = ui.fonts(|f| f.layout_job(job));
+        ui.painter()
+            .galley(cell.center() - galley.size() / 2.0, galley, fg);
         resp.on_hover_cursor(egui::CursorIcon::PointingHand);
     }
     changed
+}
+
+/// The byte range of character `key` of `text`. `None` when the text is
+/// shorter.
+fn key_range(text: &str, key: usize) -> Option<std::ops::Range<usize>> {
+    let (at, ch) = text.char_indices().nth(key)?;
+    Some(at..at + ch.len_utf8())
+}
+
+/// `text` in one line, with character `key` underlined.
+pub fn underlined(
+    text: &str,
+    key: Option<usize>,
+    font: FontId,
+    color: Color32,
+) -> egui::text::LayoutJob {
+    let plain = egui::TextFormat {
+        font_id: font,
+        color,
+        ..Default::default()
+    };
+    let mut job = egui::text::LayoutJob::default();
+    match key.and_then(|k| key_range(text, k)) {
+        Some(r) => {
+            let mut under = plain.clone();
+            under.underline = Stroke::new(1.2_f32, color);
+            job.append(&text[..r.start], 0.0, plain.clone());
+            job.append(&text[r.clone()], 0.0, under);
+            job.append(&text[r.end..], 0.0, plain);
+        }
+        None => job.append(text, 0.0, plain),
+    }
+    job
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn key_letter_range() {
+        assert_eq!(key_range("Optimize", 0), Some(0..1));
+        assert_eq!(key_range("Render", 3), Some(3..4));
+        assert_eq!(key_range("Über", 1), Some(2..3));
+        assert_eq!(key_range("Ab", 2), None);
+    }
+
+    #[test]
+    fn underline_is_on_the_key_letter_only() {
+        let job = underlined(
+            "Render",
+            Some(0),
+            FontId::proportional(14.0),
+            Color32::WHITE,
+        );
+        let under: Vec<(&str, bool)> = (job.sections.iter())
+            .filter(|s| !s.byte_range.is_empty())
+            .map(|s| {
+                (
+                    &job.text[s.byte_range.clone()],
+                    s.format.underline.width > 0.0,
+                )
+            })
+            .collect();
+        assert_eq!(under, [("R", true), ("ender", false)]);
+        let job = underlined("Model", None, FontId::proportional(14.0), Color32::WHITE);
+        assert!(job.sections.iter().all(|s| s.format.underline.width == 0.0));
+        assert_eq!(job.text, "Model");
+    }
 }

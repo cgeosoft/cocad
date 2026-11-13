@@ -4,12 +4,15 @@
 //!
 //! ```json
 //! { "/home/me/box.scad": {
-//!     "mode": "slice", "auto_render": true,
+//!     "mode": "optimize", "auto_render": true,
 //!     "slice": { "layer_height": 0.2, ... }, "ghost": false,
 //!     "photo": { "color": [255, 147, 0], "finish": "satin", ... },
 //!     "parts": { "colors": true, "explode": false, "axis": "z", "custom": { "Lid": [1, 2, 3] } },
 //!     "set": "big", "edited": true, "params": { "width": "80" } } }
 //! ```
+//!
+//! Before 0.7 the "mode" values were "slice" and "photo". They read as
+//! "optimize" and "render".
 
 use super::view3d::Axis;
 use super::{App, Mode};
@@ -63,14 +66,6 @@ fn store(scad: &Path, state: Map<String, Json>) {
     }
 }
 
-fn mode_name(m: Mode) -> &'static str {
-    match m {
-        Mode::Model => "model",
-        Mode::Slice => "slice",
-        Mode::Photo => "photo",
-    }
-}
-
 fn axis_name(a: Axis) -> &'static str {
     match a {
         Axis::All => "all",
@@ -116,7 +111,7 @@ impl App {
             .map(|p| (p.name.clone(), json!(presets::to_text(&p.value))))
             .collect();
         let state = json!({
-            "mode": mode_name(self.mode),
+            "mode": self.mode.name(),
             "auto_render": self.auto_render,
             "slice": {
                 "layer_height": s.layer_height,
@@ -159,11 +154,7 @@ impl App {
     pub(super) fn restore_panels(&mut self, st: &Map<String, Json>) {
         let st = Json::Object(st.clone());
         if let Some(m) = st.get("mode").and_then(|m| m.as_str()) {
-            self.mode = match m {
-                "slice" => Mode::Slice,
-                "photo" => Mode::Photo,
-                _ => Mode::Model,
-            };
+            self.mode = Mode::from_name(m).unwrap_or(Mode::Model);
         }
         if let Some(b) = bool_of(&st, "auto_render") {
             self.auto_render = b;
@@ -298,5 +289,17 @@ mod tests {
         all = merged(all, "/m/10.scad".into(), Map::new());
         assert_eq!(all.len(), MAX);
         assert_eq!(all.keys().next_back().unwrap(), "/m/10.scad");
+    }
+
+    #[test]
+    fn old_mode_names_read_as_the_new_tabs() {
+        assert_eq!(Mode::from_name("slice"), Some(Mode::Optimize));
+        assert_eq!(Mode::from_name("photo"), Some(Mode::Render));
+        for m in Mode::ALL {
+            assert_eq!(Mode::from_name(m.name()), Some(m));
+        }
+        assert_eq!(Mode::Optimize.name(), "optimize");
+        assert_eq!(Mode::Render.name(), "render");
+        assert_eq!(Mode::from_name("other"), None);
     }
 }

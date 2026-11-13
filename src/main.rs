@@ -32,7 +32,9 @@ const USAGE: &str =
     "CoCAD: view OpenSCAD models, edit Customizer parameters, export and preview slices.
 
 Usage:
-  cocad [--slice|--photo] [FILE.scad]    Open the viewer (start in slice or photo view)
+  cocad [--optimize|--render] [FILE.scad]
+                                               Open the viewer (start in the Optimize or
+                                               Render tab; --slice and --photo also work)
   cocad mcp                              Serve MCP on stdin and stdout, for Claude Desktop and
                                                other MCP clients. Controls the open window.
   cocad params FILE.scad                 List the Customizer parameters
@@ -61,7 +63,7 @@ fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     #[cfg(windows)]
     if args.first().is_some_and(|a| {
-        a.starts_with('-') && a != "--slice" && a != "--photo"
+        a.starts_with('-') && start_tab(a).is_none()
             || matches!(a.as_str(), "params" | "export" | "slice" | "photo")
     }) {
         attach_console();
@@ -80,9 +82,21 @@ fn main() -> Result<()> {
         Some("export") => cmd_export(&args[1..]),
         Some("slice") => cmd_slice(&args[1..]),
         Some("photo") => cmd_photo(&args[1..]),
-        Some(m @ ("--slice" | "--photo")) => gui(args.get(1).map(PathBuf::from), &m[2..]),
+        Some(a) if start_tab(a).is_some() => gui(
+            args.get(1).map(PathBuf::from),
+            start_tab(a).unwrap_or("model"),
+        ),
         Some(a) if a.starts_with('-') => bail!("unknown option {a}\n\n{USAGE}"),
         file => gui(file.map(PathBuf::from), "model"),
+    }
+}
+
+/// The tab of a start flag. `--slice` and `--photo` are the names before 0.7.
+fn start_tab(flag: &str) -> Option<&'static str> {
+    match flag {
+        "--optimize" | "--slice" => Some("optimize"),
+        "--render" | "--photo" => Some("render"),
+        _ => None,
     }
 }
 

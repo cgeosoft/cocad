@@ -3,7 +3,7 @@
 //! space, before the explode offset, so each part keeps the same cut when
 //! it moves. The "Section" card is in the Model tab.
 //!
-//! The 3D view, the photo and the MCP images show the cut. The Slice tab,
+//! The 3D view, the photo and the MCP images show the cut. The Optimize tab,
 //! the grid, fit and the export ignore it.
 
 use super::{App, Mode};
@@ -221,11 +221,11 @@ impl Section {
 }
 
 impl App {
-    /// The section cut of the 3D view in this frame. The Slice tab shows
+    /// The section cut of the 3D view in this frame. The Optimize tab shows
     /// the real mesh, without a cut.
     pub(super) fn section_view(&self) -> render::Section {
         let s = &self.view3d.section;
-        if self.mode == Mode::Slice || !s.any() {
+        if self.mode == Mode::Optimize || !s.any() {
             return render::Section::default();
         }
         let mut outlines = Vec::new();

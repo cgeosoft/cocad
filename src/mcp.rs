@@ -446,7 +446,7 @@ pub(crate) fn tools() -> Json {
         ),
         tool(
             "slice",
-            "Slice the model and return layers, filament, weight and a rough print time. Given values also change the Slice panel.",
+            "Slice the model and return layers, filament, weight and a rough print time. Given values also change the print settings of the Optimize tab.",
             false,
             false,
             json!({
@@ -470,18 +470,18 @@ pub(crate) fn tools() -> Json {
             json!({
                 "type": "object",
                 "properties": {
-                    "mode": { "type": "string", "enum": ["model", "slice", "photo"] },
+                    "mode": { "type": "string", "enum": ["model", "optimize", "render"], "description": "The tab of the right panel. The old names slice and photo also work." },
                     "view": { "type": "string", "enum": ["iso", "top", "front", "right"] },
                     "fit": { "type": "boolean", "description": "Fit the model in the view" },
                     "wireframe": { "type": "boolean" },
                     "grid": { "type": "boolean" },
-                    "layer": { "type": "integer", "description": "Slice layer, from 1" },
+                    "layer": { "type": "integer", "description": "Slice layer of the Optimize tab, from 1" },
                     "part_colors": { "type": "boolean", "description": "Show each part in a different color. The 3D view, the photo and the images use the part colors." },
-                    "explode": { "type": "number", "description": "Move the parts apart by this distance in mm. The part farthest from the model center moves this far. 0 turns the explode off. The Slice tab shows no explode." },
+                    "explode": { "type": "number", "description": "Move the parts apart by this distance in mm. The part farthest from the model center moves this far. 0 turns the explode off. The Optimize tab shows no explode." },
                     "explode_axis": { "type": "string", "enum": ["all", "x", "y", "z"], "description": "Explode direction: all moves each part away from the model center, x, y or z moves the parts along that axis only. Turns the explode on." },
                     "section": {
                         "type": "object",
-                        "description": "Section cut: cut the model across x, y or z and keep one side, for example {\"x\": {\"at\": 12.5, \"keep\": \"+\"}}. The object replaces all cuts: a missing or null axis has no cut, and {} turns all cuts off. Two or three cuts together keep only the space that all of them keep. The cut moves with each part in the explode. The 3D view, the photo and the images show the cut. The Slice tab and the export do not.",
+                        "description": "Section cut: cut the model across x, y or z and keep one side, for example {\"x\": {\"at\": 12.5, \"keep\": \"+\"}}. The object replaces all cuts: a missing or null axis has no cut, and {} turns all cuts off. Two or three cuts together keep only the space that all of them keep. The cut moves with each part in the explode. The 3D view, the photo and the images show the cut. The Optimize tab and the export do not.",
                         "properties": {
                             "x": { "type": ["object", "null"], "properties": { "at": { "type": "number", "description": "Position on the axis in mm. Default: the model center." }, "keep": { "type": "string", "enum": ["+", "-"], "description": "+ keeps the side above the position, - the side below. Default +." } } },
                             "y": { "type": ["object", "null"], "properties": { "at": { "type": "number", "description": "Position on the axis in mm. Default: the model center." }, "keep": { "type": "string", "enum": ["+", "-"], "description": "+ keeps the side above the position, - the side below. Default +." } } },
