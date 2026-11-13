@@ -484,7 +484,7 @@ The pipeline does not change. Features 10 and 11 are fixes of step 7. Feature 12
 
 ## Feature 10: Hole size
 
-Status: implemented on 2026-11-13 in `src/optimize/holes.rs`, after 0.7.1. Not in a release. Differences from the text below:
+Status: implemented on 2026-11-13 in `src/optimize/holes.rs`, after 0.7.1. Released in 0.8.0. Differences from the text below:
 
 - A hole with six faces can be a pocket for a nut. Its flat faces only move out by one half of **Add to diameter**. They do not go to the circle. With the value 0, such a hole does not change. OpenSCAD also makes a round hole of about 3.2 to 3.8 mm with six faces at its default resolution. Such a hole gets the same small change.
 - `bridges.rs` does not read the plan of this fix. When the two fixes are on, `fixes::apply` runs OpenSCAD one more time: first the hole size, then the other fixes on the result. The bridge fix then finds the new holes in the mesh.
@@ -550,7 +550,7 @@ OrcaSlicer has "X-Y hole compensation" and a polyholes option that do the same i
 
 ## Feature 11: Mouse ears
 
-Status: implemented on 2026-11-13 in `src/optimize/ears.rs`, after 0.7.1. Not in a release. Differences from the text below:
+Status: implemented on 2026-11-13 in `src/optimize/ears.rs`, after 0.7.1. Released in 0.8.0. Differences from the text below:
 
 - The disks are not cut back where the part goes out over them above the first layer. The brim also does not do this.
 - The disks do not go into the holes of their island, so that an ear does not close a screw hole near a corner.
@@ -597,7 +597,7 @@ OrcaSlicer has the brim type "Mouse ear" (see Prior art, feature 4.1). The CoCAD
 
 ## Feature 12: Thin wall check
 
-Status: implemented on 2026-11-13 in `check::thin_walls()`, after 0.7.1. Not in a release.
+Status: implemented on 2026-11-13 in `check::thin_walls()`, after 0.7.1. Released in 0.8.0.
 
 A wall that is thinner than the line width of the Print settings (0.45 mm by default) is narrower than one printed line. The slicer cannot print it as it is in the model. The Check card shows such a wall, so that the user sees it before the print.
 
