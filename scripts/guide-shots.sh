@@ -12,7 +12,7 @@ cd "$(dirname "$0")/.."
 cargo build --quiet
 bin=$PWD/target/debug/cocad
 out=$PWD/assets/guide
-disp=:9
+disp=:19
 width=1400
 height=900
 
