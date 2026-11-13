@@ -412,7 +412,7 @@ pub fn run(
                     }
                     let i = next.fetch_add(1, Ordering::Relaxed);
                     let Some(p) = pres.get(i) else { break };
-                    let r = prepare(cfg, job, p, cache, cancel);
+                    let r = prepare(cfg, job, p, cache, &errs, cancel);
                     match r {
                         Ok(pp) => results.lock().unwrap().push((i, pp)),
                         Err(e) => errs.lock().unwrap().push(format!("{}: {e:#}", p.name)),
@@ -490,6 +490,7 @@ fn prepare(
     job: &Job,
     p: &Pre,
     cache: &Mutex<Cache>,
+    errs: &Mutex<Vec<String>>,
     cancel: &Arc<AtomicBool>,
 ) -> Result<PrintPart> {
     let st = &job.state;
@@ -517,6 +518,13 @@ fn prepare(
     } else {
         split::propose(&p.mesh, &st.area, default_joint(&p.mesh))
     };
+    // No split is needed when the part fits on another side.
+    if !fits && proposal.is_none() && p.piece.is_none() && split::fits(&p.mesh, &st.area) {
+        errs.lock().unwrap().push(format!(
+            "{}: too large in this orientation. It fits on another side: turn on Custom orientation.",
+            p.name
+        ));
+    }
     let key = hash_of(&[&mesh_hash(&print), &st.fixes, &job.layers, &job.limits, &st.area]);
     let hit = cache.lock().unwrap().fixed.get(&key).cloned();
     let fixed = match hit {

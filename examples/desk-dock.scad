@@ -14,6 +14,7 @@
 // - The phone, the magnets and the screws have the % mark: they show in
 //   gray and are not printed.
 // - Turn on the Bed chamfer for all parts.
+// - The plate has the CGEO/FAB wordmark engraved on its top face.
 
 /* [Plate] */
 // Length of the base plate
@@ -31,6 +32,12 @@ cable_d = 8; // [5:0.5:12]
 
 /* [Clips] */
 clip_hole = 7; // [4:0.5:10]
+
+/* [Logo] */
+// Engrave the CGEO/FAB wordmark on the plate
+logo = true;
+logo_size = 10; // [5:0.5:16]
+logo_depth = 0.6; // [0.2:0.2:1.2]
 
 /* [Hardware] */
 magnet_d = 10; // [6:0.5:15]
@@ -65,6 +72,10 @@ module rounded_rect(size, r) {
 }
 
 // ---------------------------------------------------------------- plate
+// Liberation Sans comes with OpenSCAD.
+module wordmark() text("CGEO/FAB", size = logo_size, font = "Liberation Sans:style=Bold",
+                       halign = "center", valign = "center");
+
 magnets = [[16, 16], [plate_l - 16, 16], [16, plate_w - 16], [plate_l - 16, plate_w - 16]];
 // The screws go up through the plate into the rear foot of the stand.
 screws = [for (x = [0.2, 0.8]) [stand_at[0] + stand_w * x, stand_at[1] + 45]];
@@ -75,6 +86,9 @@ module plate() {
         // magnet pockets from below
         for (p = magnets) translate([p[0], p[1], -eps])
             cylinder(d = magnet_d + fit, h = magnet_h + eps);
+        // the wordmark, on the right half of the top face
+        if (logo) translate([plate_l * 0.75, plate_w / 2, plate_t - logo_depth])
+            linear_extrude(logo_depth + eps) wordmark();
         // screw holes with a head counterbore from below
         for (p = screws) translate([p[0], p[1], 0]) {
             translate([0, 0, -eps]) cylinder(d = head_d + fit, h = head_h + eps);
