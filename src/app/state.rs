@@ -4,12 +4,16 @@
 //!
 //! ```json
 //! { "/home/me/box.scad": {
-//!     "mode": "slice", "auto_render": true,
+//!     "mode": "optimize", "auto_render": true,
 //!     "slice": { "layer_height": 0.2, ... }, "ghost": false,
 //!     "photo": { "color": [255, 147, 0], "finish": "satin", ... },
 //!     "parts": { "colors": true, "explode": false, "axis": "z", "custom": { "Lid": [1, 2, 3] } },
-//!     "set": "big", "edited": true, "params": { "width": "80" } } }
+//!     "set": "big", "edited": true, "params": { "width": "80" },
+//!     "closed_groups": ["Advanced"] } }
 //! ```
+//!
+//! Before 0.7 the "mode" values were "slice" and "photo". They read as
+//! "optimize" and "render".
 
 use super::view3d::Axis;
 use super::{App, Mode};
@@ -63,14 +67,6 @@ fn store(scad: &Path, state: Map<String, Json>) {
     }
 }
 
-fn mode_name(m: Mode) -> &'static str {
-    match m {
-        Mode::Model => "model",
-        Mode::Slice => "slice",
-        Mode::Photo => "photo",
-    }
-}
-
 fn axis_name(a: Axis) -> &'static str {
     match a {
         Axis::All => "all",
@@ -90,6 +86,13 @@ fn u32_of(o: &Json, k: &str) -> Option<u32> {
 
 fn bool_of(o: &Json, k: &str) -> Option<bool> {
     o.get(k)?.as_bool()
+}
+
+/// The names of the closed parameter groups.
+fn closed_groups(v: &Json) -> std::collections::HashSet<String> {
+    (v.as_array().into_iter().flatten())
+        .filter_map(|g| Some(g.as_str()?.to_string()))
+        .collect()
 }
 
 fn rgb(v: &Json) -> Option<[u8; 3]> {
@@ -115,8 +118,10 @@ impl App {
             .iter()
             .map(|p| (p.name.clone(), json!(presets::to_text(&p.value))))
             .collect();
+        let mut closed: Vec<&String> = self.collapsed.iter().collect();
+        closed.sort();
         let state = json!({
-            "mode": mode_name(self.mode),
+            "mode": self.mode.name(),
             "auto_render": self.auto_render,
             "slice": {
                 "layer_height": s.layer_height,
@@ -148,6 +153,7 @@ impl App {
             "set": self.active_set,
             "edited": self.set_edited,
             "params": params,
+            "closed_groups": closed,
         });
         if let Json::Object(state) = state {
             store(path, state);
@@ -159,17 +165,16 @@ impl App {
     pub(super) fn restore_panels(&mut self, st: &Map<String, Json>) {
         let st = Json::Object(st.clone());
         if let Some(m) = st.get("mode").and_then(|m| m.as_str()) {
-            self.mode = match m {
-                "slice" => Mode::Slice,
-                "photo" => Mode::Photo,
-                _ => Mode::Model,
-            };
+            self.mode = Mode::from_name(m).unwrap_or(Mode::Model);
         }
         if let Some(b) = bool_of(&st, "auto_render") {
             self.auto_render = b;
         }
         if let Some(b) = bool_of(&st, "ghost") {
             self.ghost = b;
+        }
+        if let Some(list) = st.get("closed_groups") {
+            self.collapsed = closed_groups(list);
         }
         if let Some(o) = st.get("slice") {
             let s = &mut self.settings;
@@ -298,5 +303,26 @@ mod tests {
         all = merged(all, "/m/10.scad".into(), Map::new());
         assert_eq!(all.len(), MAX);
         assert_eq!(all.keys().next_back().unwrap(), "/m/10.scad");
+    }
+
+    #[test]
+    fn closed_groups_read_strings_only() {
+        let v = json!(["Advanced", 3, "Size", null]);
+        let mut g: Vec<String> = closed_groups(&v).into_iter().collect();
+        g.sort();
+        assert_eq!(g, ["Advanced", "Size"]);
+        assert!(closed_groups(&json!("Advanced")).is_empty());
+    }
+
+    #[test]
+    fn old_mode_names_read_as_the_new_tabs() {
+        assert_eq!(Mode::from_name("slice"), Some(Mode::Optimize));
+        assert_eq!(Mode::from_name("photo"), Some(Mode::Render));
+        for m in Mode::ALL {
+            assert_eq!(Mode::from_name(m.name()), Some(m));
+        }
+        assert_eq!(Mode::Optimize.name(), "optimize");
+        assert_eq!(Mode::Render.name(), "render");
+        assert_eq!(Mode::from_name("other"), None);
     }
 }

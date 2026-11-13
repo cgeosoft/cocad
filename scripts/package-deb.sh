@@ -45,7 +45,7 @@ Version: $version
 Architecture: $arch
 Maintainer: Christos Georgiou <christos@cgeosoft.com>
 Installed-Size: $size
-Depends: libc6, libgcc-s1, libgl1, libx11-6, libxkbcommon0, libxcursor1, libxrandr2, libxi6, libgtk-3-0t64 | libgtk-3-0, openscad-nightly | openscad
+Depends: libc6, libgcc-s1, libgl1, libx11-6, libxkbcommon0, libxcursor1, libxrandr2, libxi6, libgtk-3-0t64 | libgtk-3-0
 Recommends: libwayland-client0, libxkbcommon-x11-0
 Section: graphics
 Priority: optional

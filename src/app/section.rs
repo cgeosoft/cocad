@@ -3,7 +3,7 @@
 //! space, before the explode offset, so each part keeps the same cut when
 //! it moves. The "Section" card is in the Model tab.
 //!
-//! The 3D view, the photo and the MCP images show the cut. The Slice tab,
+//! The 3D view, the photo and the MCP images show the cut. The Optimize tab,
 //! the grid, fit and the export ignore it.
 
 use super::{App, Mode};
@@ -221,11 +221,11 @@ impl Section {
 }
 
 impl App {
-    /// The section cut of the 3D view in this frame. The Slice tab shows
+    /// The section cut of the 3D view in this frame. The Optimize tab shows
     /// the real mesh, without a cut.
     pub(super) fn section_view(&self) -> render::Section {
         let s = &self.view3d.section;
-        if self.mode == Mode::Slice || !s.any() {
+        if self.mode == Mode::Optimize || !s.any() {
             return render::Section::default();
         }
         let mut outlines = Vec::new();
@@ -268,26 +268,41 @@ impl App {
 
     /// The "Section" card: cuts across X, Y and Z. The Model tab shows it.
     pub(super) fn section_card(&mut self, ui: &mut egui::Ui) {
-        let s = &mut self.view3d.section;
-        s.shown = None;
+        self.view3d.section.shown = None;
+        let s = &self.view3d.section;
         let Some(bounds) = s.bounds.filter(|_| self.assembly.is_some()) else {
             return;
         };
+        let on: Vec<&str> = (0..3)
+            .filter(|&k| s.cuts[k].on)
+            .map(|k| LABELS[k])
+            .collect();
+        let note = if on.is_empty() {
+            "Off".to_string()
+        } else {
+            format!("Cut {}", on.join(", "))
+        };
         ui::card(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui::section(ui, "Section");
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let moved = s.cuts.iter().any(|c| *c != Cut::default());
-                    if ui
-                        .add_enabled(moved, ui::ghost("Reset", false))
-                        .on_hover_text("Turn off all cuts and move them to the center")
-                        .clicked()
-                    {
-                        s.reset();
-                    }
+            if !self.card_head(ui, "Section", &note) {
+                return;
+            }
+            let s = &mut self.view3d.section;
+            let row = egui::Vec2::new(ui.available_width(), 24.0);
+            let rtl = egui::Layout::right_to_left(egui::Align::Center);
+            ui.allocate_ui_with_layout(row, rtl, |ui| {
+                let moved = s.cuts.iter().any(|c| *c != Cut::default());
+                if ui
+                    .add_enabled(moved, ui::ghost("Reset", false))
+                    .on_hover_text("Turn off all cuts and move them to the center")
+                    .clicked()
+                {
+                    s.reset();
+                }
+                let ltr = egui::Layout::left_to_right(egui::Align::Center);
+                ui.with_layout(ltr, |ui| {
+                    ui.label(ui::dim("Cuts the model to show the inside."))
                 });
             });
-            ui.label(ui::dim("Cuts the model to show the inside."));
             ui.add_space(2.0);
             for (k, axis) in LABELS.into_iter().enumerate() {
                 ui.horizontal(|ui| {

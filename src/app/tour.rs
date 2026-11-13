@@ -48,7 +48,7 @@ const STEPS: [Step; 10] = [
         points: &[
             "Sliders, dropdowns, switches, text and vectors are in collapsible groups.",
             "A parameter with a description comment shows the description as its label.",
-            "The model renders again when you change a value.",
+            "The model builds again when you change a value.",
             "A dot marks a changed value. The arrow sets it back.",
         ],
         image: shot!("2-customizer"),
@@ -88,7 +88,7 @@ const STEPS: [Step; 10] = [
     },
     Step {
         title: "Slice preview",
-        intro: "The Slice tab shows the paths a printer would follow.",
+        intro: "The Optimize tab shows the paths a printer would follow. Press O to open it.",
         points: &[
             "Walls, infill and skin show as round strands at the real line width.",
             "Move the layer slider, or press Up and Down.",
@@ -99,7 +99,7 @@ const STEPS: [Step; 10] = [
     },
     Step {
         title: "Photo render",
-        intro: "The Photo tab path-traces the current view on all CPU cores.",
+        intro: "The Render tab path-traces the current view on all CPU cores. Press R to open it.",
         points: &[
             "The image gets cleaner with each sample.",
             "Choose the plastic color, finish, studio and image size.",
@@ -112,7 +112,7 @@ const STEPS: [Step; 10] = [
         intro: "An AI agent can work with the open window through MCP. You see each change live.",
         points: &[
             "The agent reads the model, its parameters and its source.",
-            "It changes values, renders, and gets the result as an image.",
+            "It changes values, builds the model, and gets the result as an image.",
             "It slices, exports, and saves photos and parameter sets.",
             "A message in the view names each change.",
             "It cannot delete a file or a parameter set.",
@@ -131,7 +131,7 @@ const STEPS: [Step; 10] = [
         points: &[
             "File > Settings sets the theme, auto save of sets, the OpenSCAD binary and your \
              privacy choices.",
-            "An OpenSCAD development build with Manifold is much faster.",
+            "CoCAD needs an OpenSCAD development snapshot with the Manifold backend.",
             "Help > About and shortcuts lists all keys.",
             "The CLI exports, slices and makes photos without the window. Run cocad --help.",
             "Help > Welcome tour shows this tour again.",

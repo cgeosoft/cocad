@@ -1,7 +1,7 @@
 //! Runs MCP tool calls inside the window. `crate::mcp` receives them.
 //!
 //! Calls run on the UI thread in `App::poll`. A call that needs the mesh of a
-//! finished render stays in the queue until the render ends or `WAIT` passes.
+//! finished build stays in the queue until the build ends or `WAIT` passes.
 //! Slow work (exports, photos) runs on its own thread, which sends the reply.
 
 use super::*;
@@ -185,6 +185,27 @@ impl App {
     }
 
     fn exec(&mut self, tool: &str, args: &Json, reply: &Reply) -> Outcome {
+        // Without Manifold, CoCAD does not build. The window shows the steps.
+        let builds = matches!(
+            tool,
+            "build"
+                | "render"
+                | "set_params"
+                | "reset_params"
+                | "load_parameter_set"
+                | "export_model"
+                | "view_model"
+                | "save_photo"
+                | "slice"
+        );
+        if builds && let Some((binary, probe)) = &self.no_manifold {
+            let problem = openscad::problem(binary, probe).unwrap_or_default();
+            return Err(format!(
+                "{problem} CoCAD needs an OpenSCAD development snapshot with the Manifold \
+                 backend: {}. The CoCAD window shows the steps.",
+                openscad::SNAPSHOTS_URL
+            ));
+        }
         match tool {
             "get_state" | STATE_WHEN_DONE => Ok(Some(self.state())),
             "get_params" => {
@@ -212,7 +233,8 @@ impl App {
             }
             "set_params" => self.set_params(args, reply),
             "reset_params" => self.reset_params(args, reply),
-            "render" => {
+            // "render" is the name before 0.7.
+            "build" | "render" => {
                 self.need_model()?;
                 if self.file.as_deref().and_then(mtime) != self.mtime {
                     self.reload();
@@ -244,26 +266,28 @@ impl App {
         self.need_model()?;
         if let Some(e) = &self.error {
             return Err(format!(
-                "The last render failed, so the mesh is out of date: {e}"
+                "The last build failed, so the mesh is out of date: {e}"
             ));
         }
         if self.dirty_since.is_some() {
-            return Err("The values changed after the last render. Call render first.".into());
+            return Err("The values changed after the last build. Call build first.".into());
         }
         self.mesh
             .clone()
-            .ok_or_else(|| "The model has no mesh yet. Call render first.".to_string())
+            .ok_or_else(|| "The model has no mesh yet. Call build first.".to_string())
     }
 
     fn state(&self) -> Json {
-        let status = if self.file.is_none() {
+        let status = if self.no_manifold.is_some() {
+            "no openscad with manifold"
+        } else if self.file.is_none() {
             "no model"
         } else if self.job.is_some() {
-            "rendering"
+            "building"
         } else if self.error.is_some() {
             "failed"
         } else if self.dirty_since.is_some() {
-            "needs render"
+            "needs build"
         } else if self.mesh.is_some() {
             "ready"
         } else {
@@ -289,11 +313,7 @@ impl App {
             .filter(|p| p.changed())
             .map(|p| (p.name.clone(), params::to_json(&p.value)))
             .collect();
-        let mode = match self.mode {
-            Mode::Model => "model",
-            Mode::Slice => "slice",
-            Mode::Photo => "photo",
-        };
+        let mode = self.mode.name();
         let lines: Vec<&str> = self.log.lines().collect();
         let log = lines[lines.len().saturating_sub(LOG_LINES)..].join("\n");
         let parts = self.assembly.as_ref().map_or(&[][..], |a| &a.parts[..]);
@@ -313,8 +333,8 @@ impl App {
             "file": self.file,
             "status": status,
             "error": self.error,
-            "render_seconds": self.last_time.map(|t| t.as_secs_f32()),
-            "auto_render": self.auto_render,
+            "build_seconds": self.last_time.map(|t| t.as_secs_f32()),
+            "auto_build": self.auto_render,
             "mesh": mesh,
             "parameter_count": self.params.len(),
             "changed_params": changed,
@@ -333,7 +353,8 @@ impl App {
             "mode": mode,
             "wireframe": self.wireframe,
             "grid": self.grid,
-            "parts": parts.len(),
+            "parts": parts.iter().filter(|p| !p.reference).count(),
+            "reference_parts": parts.iter().filter(|p| p.reference).count(),
             "part_colors": v.part_colors,
             "explode": explode,
             "section": v.section.to_json(),
@@ -370,7 +391,8 @@ impl App {
         self.mark_set_edited();
         let names: Vec<&str> = values.keys().map(String::as_str).collect();
         self.note(format!("changed {}", names.join(", ")));
-        if flag(args, "render", true) {
+        // "render" is the name of the flag before 0.7.
+        if flag(args, "build", flag(args, "render", true)) {
             self.start_render();
             self.state_after(args, reply)
         } else {
@@ -505,7 +527,7 @@ impl App {
     }
 
     /// The model for images: the current mesh with the part colors and the
-    /// explode of the window, as in the Photo tab.
+    /// explode of the window, as in the Render tab.
     fn current_model(&mut self) -> Result<pathtrace::Model, String> {
         let mesh = self.current_mesh()?;
         Ok(self.photo_model().unwrap_or_else(|| mesh.into()))
@@ -583,7 +605,7 @@ impl App {
             Some("light") => Some(pathtrace::Studio::Light),
             Some(s) => return Err(format!("Unknown studio {s}. Use dark or light.")),
         };
-        // Same values as the Photo panel, so that the panel shows the result.
+        // Same values as the Render tab, so that the panel shows the result.
         let p = &mut self.photo;
         (p.width, p.height, p.samples) = (width, height, samples);
         p.color = color.unwrap_or(p.color);
@@ -657,10 +679,10 @@ impl App {
     fn view_change(&mut self, args: &Json) -> Outcome {
         let mode = match args["mode"].as_str() {
             None => None,
-            Some("model") => Some(Mode::Model),
-            Some("slice") => Some(Mode::Slice),
-            Some("photo") => Some(Mode::Photo),
-            Some(m) => return Err(format!("Unknown mode {m}. Use model, slice or photo.")),
+            Some(m) => Some(
+                Mode::from_name(m)
+                    .ok_or_else(|| format!("Unknown mode {m}. Use model, optimize or render."))?,
+            ),
         };
         let view = view_angles(args)?;
         let explode = match &args["explode"] {

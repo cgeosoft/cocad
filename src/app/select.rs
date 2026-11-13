@@ -12,7 +12,7 @@
 //!   are done.
 //!
 //! The selection and the focus show in the 3D view of the Model and Photo
-//! tabs only. The Slice tab and the path traced photo do not show them.
+//! tabs only. The Optimize tab and the path traced photo do not show them.
 
 use super::{App, Camera, Mode};
 use crate::assembly::PartInfo;
@@ -164,9 +164,9 @@ impl App {
         let (origin, dir) = self.cam.ray(aspect, ndc);
         let styles = self.part_styles();
         let offsets: Vec<Vec3> = styles.iter().map(|s| s.offset).collect();
-        let ghost: Vec<bool> = styles.iter().map(|s| s.alpha < 1.0).collect();
+        let alpha: Vec<f32> = styles.iter().map(|s| s.alpha).collect();
         let planes = self.view3d.clip_planes();
-        a.pick(origin, dir, &offsets, &planes, &ghost)
+        a.pick(origin, dir, &offsets, &planes, &alpha)
             .map(|(i, _)| i)
     }
 
@@ -200,7 +200,7 @@ impl App {
 
     /// Click and right click in the 3D view `rect`. A drag does not select.
     pub(super) fn select_input(&mut self, resp: &egui::Response, rect: Rect) {
-        if self.mode == Mode::Slice || self.assembly.is_none() {
+        if self.mode == Mode::Optimize || self.assembly.is_none() {
             return;
         }
         if resp.hovered() && resp.ctx.input(|i| i.pointer.primary_pressed()) {
@@ -321,7 +321,7 @@ impl App {
             Some(_) => part.is_some(),
             None => focus.is_some(),
         };
-        if self.mode == Mode::Slice || !valid {
+        if self.mode == Mode::Optimize || !valid {
             self.view3d.sel.menu = None;
             return;
         }
@@ -354,6 +354,7 @@ impl App {
                             act = Some(Act::Focus(i));
                         }
                         if part.is_some()
+                            && !p.reference
                             && ui::menu_item(ui, "Change color…", "", true, false).clicked()
                         {
                             act = Some(Act::Color(p.name.clone()));
@@ -470,6 +471,7 @@ mod tests {
             },
             center: Vec3::splat(0.5),
             volume: 1.0,
+            reference: false,
         }
     }
 

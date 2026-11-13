@@ -33,19 +33,75 @@ const DEBOUNCE: Duration = Duration::from_millis(350);
 /// Auto save writes the set when the values do not change for this time.
 const AUTOSAVE: Duration = Duration::from_millis(600);
 
-#[derive(PartialEq, Clone, Copy)]
-enum Mode {
+/// The tabs of the right panel.
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
+pub(crate) enum Mode {
     Model,
-    Slice,
-    Photo,
+    /// Print preparation and the slice preview. Was the Slice tab.
+    Optimize,
+    /// The path traced render. Was the Photo tab.
+    Render,
 }
 
 impl Mode {
+    pub const ALL: [Mode; 3] = [Mode::Model, Mode::Optimize, Mode::Render];
+
     fn screen(self) -> Screen {
         match self {
             Mode::Model => Screen::Model,
-            Mode::Slice => Screen::Slice,
-            Mode::Photo => Screen::Photo,
+            Mode::Optimize => Screen::Optimize,
+            Mode::Render => Screen::Render,
+        }
+    }
+
+    /// The name in `models.json`, the CLI and the MCP tools.
+    pub fn name(self) -> &'static str {
+        match self {
+            Mode::Model => "model",
+            Mode::Optimize => "optimize",
+            Mode::Render => "render",
+        }
+    }
+
+    /// The mode with this name. The old names "slice" and "photo" (before
+    /// 0.7) give Optimize and Render.
+    pub fn from_name(name: &str) -> Option<Mode> {
+        match name {
+            "model" => Some(Mode::Model),
+            "optimize" | "slice" => Some(Mode::Optimize),
+            "render" | "photo" => Some(Mode::Render),
+            _ => None,
+        }
+    }
+
+    /// The tab label.
+    pub fn label(self) -> &'static str {
+        match self {
+            Mode::Model => "Model",
+            Mode::Optimize => "Optimize",
+            Mode::Render => "Render",
+        }
+    }
+
+    /// The names of the cards that can close, in tab order. The names are
+    /// the card titles, and the config file stores them (`closed_cards`).
+    fn cards(self) -> &'static [&'static str] {
+        match self {
+            Mode::Model => &["Build", "Parts", "Explode", "Section", "Mesh"],
+            Mode::Optimize => &["Estimate", "Layer", "Print settings"],
+            Mode::Render => &[
+                "Progress", "Material", "Parts", "Explode", "Scene", "Quality",
+            ],
+        }
+    }
+
+    /// The key that opens the tab, and the index of its letter in the
+    /// label. The same key again goes back to the Model tab.
+    fn key(self) -> Option<(egui::Key, usize)> {
+        match self {
+            Mode::Model => None,
+            Mode::Optimize => Some((egui::Key::O, 0)),
+            Mode::Render => Some((egui::Key::R, 0)),
         }
     }
 }
@@ -80,12 +136,12 @@ const SHORTCUTS: [(&str, &str); 16] = [
     ("Ctrl+,", "Settings"),
     ("Ctrl+Q", "Quit"),
     ("Alt+F, M, V, H", "Open a menu"),
-    ("F5", "Render now"),
+    ("F5", "Build now"),
     ("F, double click", "Fit the model"),
     ("W", "Wireframe"),
     ("E", "Explode the parts"),
-    ("S", "Model or Slice tab"),
-    ("P", "Model or Photo tab"),
+    ("O", "Model or Optimize tab"),
+    ("R", "Model or Render tab"),
     ("Up, Down, PgUp, PgDn", "Change the slice layer"),
     ("Left drag", "Orbit"),
     ("Right drag, Shift + left drag", "Pan"),
@@ -112,12 +168,13 @@ enum SettingsPage {
     Appearance,
     Sets,
     OpenScad,
+    Printer,
     Mcp,
     Updates,
     Privacy,
 }
 
-/// Photo render settings shown in the Photo panel.
+/// Photo render settings shown in the Render tab.
 struct PhotoSettings {
     color: [u8; 3],
     finish: &'static str,
@@ -310,7 +367,9 @@ pub struct App {
     cfg: openscad::Config,
     cfg_edit: Option<openscad::Config>,
     settings_page: SettingsPage,
-    engine: String,
+    /// The OpenSCAD binary and its probe, while it has no Manifold
+    /// backend. The window then shows a notice and CoCAD does not build.
+    no_manifold: Option<(String, openscad::Probe)>,
     renderer: Option<Arc<Mutex<Renderer>>>,
     toast: Option<(String, Instant)>,
     export_rx: Option<Receiver<Result<PathBuf, String>>>,
@@ -382,11 +441,7 @@ impl App {
             }
         });
         let cfg = openscad::Config::load();
-        let start_mode = match mode {
-            "slice" => Mode::Slice,
-            "photo" => Mode::Photo,
-            _ => Mode::Model,
-        };
+        let start_mode = Mode::from_name(mode).unwrap_or(Mode::Model);
         let consent = telemetry::load_consent();
         telemetry::event(Event::AppStarted {
             view: start_mode.screen(),
@@ -471,7 +526,7 @@ impl App {
             cfg,
             cfg_edit: None,
             settings_page: SettingsPage::Appearance,
-            engine: String::new(),
+            no_manifold: None,
             renderer,
             toast: None,
             export_rx: None,
@@ -488,6 +543,7 @@ impl App {
             show_changes: false,
         };
         app.sync_server(&cc.egui_ctx);
+        app.check_openscad();
         if let Some(f) = file {
             app.open(f);
         }
@@ -519,6 +575,7 @@ impl App {
                 self.cancel_parts();
                 self.set_assembly(None);
                 self.view3d.new_model();
+                self.collapsed.clear();
                 if let Some(st) = &saved {
                     self.restore_panels(st);
                     if self.restore_params(st) {
@@ -674,10 +731,27 @@ impl App {
         }
     }
 
+    /// Probes the OpenSCAD binary again. Without Manifold, the notice
+    /// shows. With it, a model without a mesh builds.
+    fn check_openscad(&mut self) {
+        openscad::forget();
+        let binary = self.cfg.binary();
+        let probe = openscad::probe(&binary);
+        let was_missing = self.no_manifold.is_some();
+        self.no_manifold = (!probe.manifold).then_some((binary, probe));
+        if was_missing && self.no_manifold.is_none() && self.mesh.is_none() {
+            self.start_render();
+        }
+    }
+
     fn start_render(&mut self) {
         let Some(file) = self.file.clone() else {
             return;
         };
+        // CoCAD needs Manifold. The notice tells how to get it.
+        if self.no_manifold.is_some() {
+            return;
+        }
         if let Some(j) = self.job.take() {
             j.cancel.store(true, Ordering::Relaxed);
         }
@@ -691,12 +765,6 @@ impl App {
         let (tx, rx) = channel();
         let c = cancel.clone();
         let cfg = self.cfg.clone();
-        let manifold = cfg.args().iter().any(|a| a == "--backend=manifold");
-        self.engine = if manifold {
-            "Manifold".into()
-        } else {
-            "CGAL".into()
-        };
         std::thread::spawn(move || {
             let r = openscad::render(&cfg, &file, &defines, &c).map_err(|e| e.to_string());
             if c.load(Ordering::Relaxed) {
@@ -744,24 +812,40 @@ impl App {
 
     /// Finds the parts of the new mesh in the background. The parts then
     /// replace the shells of the mesh. With all parts of a multicolor model
-    /// shown, each part of the `cocad_part` list renders. A model without
+    /// shown, each part of the `cocad_part` list builds. A model without
     /// that list divides at its module instances (see `csg_split.rs`). A
-    /// model that shows one part of its list keeps the shells.
+    /// model that shows one part of its list keeps the shells, in the color
+    /// of that part. In all three cases, the `%` subtrees of the model
+    /// build as reference parts. Call it after `self.log` has the log of
+    /// the build.
     fn color_parts(&mut self, params: Vec<Param>) {
         self.cancel_parts();
         let Some(file) = self.file.clone() else {
             return;
         };
         let cfg = self.cfg.clone();
+        // The same values as the main build.
+        let defines = params::defines(&params);
         if crate::parts::needs_render(&params) {
-            self.start_parts_job(false, "Rendering the named parts…", move |cancel| {
-                crate::parts::render(&cfg, &file, &params, cancel).map(Some)
+            self.start_parts_job(false, None, "Building the named parts…", move |cancel| {
+                let parts = crate::parts::render(&cfg, &file, &params, cancel)?;
+                let references =
+                    crate::csg_split::render_references(&cfg, &file, &defines, cancel)?;
+                Ok(Some(crate::csg_split::Split { parts, references }))
             });
         } else if crate::parts::names(&params).is_empty() {
-            // The same values as the main render.
-            let defines = params::defines(&params);
-            self.start_parts_job(true, "Finding the parts…", move |cancel| {
+            self.start_parts_job(true, None, "Finding the parts…", move |cancel| {
                 crate::csg_split::render(&cfg, &file, &defines, cancel)
+            });
+        } else {
+            let paint = crate::parts::shown_color(&params, &self.log);
+            self.start_parts_job(true, paint, "Finding the parts…", move |cancel| {
+                let references =
+                    crate::csg_split::render_references(&cfg, &file, &defines, cancel)?;
+                Ok((!references.is_empty()).then(|| crate::csg_split::Split {
+                    parts: Vec::new(),
+                    references,
+                }))
             });
         }
     }
@@ -770,13 +854,14 @@ impl App {
     /// one by one. When it is done, its parts replace the shells of the mesh
     /// in the 3D view (see `Assembly::from_parts`). With `split_shells`, each
     /// shell of a part is one part. When `render` gives `None`, the shells
-    /// stay. A new render or file cancels the job. The Parts card shows
-    /// `note` while the job runs.
+    /// stay. `paint` gives all printed parts one color. A new build or file
+    /// cancels the job. The Parts card shows `note` while the job runs.
     fn start_parts_job(
         &mut self,
         split_shells: bool,
+        paint: Option<[u8; 3]>,
         note: &'static str,
-        render: impl FnOnce(&Arc<AtomicBool>) -> anyhow::Result<Option<Vec<crate::parts::Part>>>
+        render: impl FnOnce(&Arc<AtomicBool>) -> anyhow::Result<Option<crate::csg_split::Split>>
         + Send
         + 'static,
     ) {
@@ -789,7 +874,16 @@ impl App {
         let c = cancel.clone();
         std::thread::spawn(move || {
             let r = render(&c)
-                .map(|parts| parts.map(|p| Assembly::from_parts(&mesh, &p, split_shells)))
+                .map(|found| {
+                    found.map(|s| {
+                        let mut a =
+                            Assembly::from_parts(&mesh, &s.parts, split_shells, &s.references);
+                        if let Some(color) = paint {
+                            a.paint_all(color);
+                        }
+                        a
+                    })
+                })
                 .map_err(|e| format!("{e:#}"));
             let _ = tx.send(r);
         });
@@ -829,15 +923,15 @@ impl App {
                     self.mesh = Some(out.mesh);
                     self.mesh_rev += 1;
                     self.set_assembly(Some(out.assembly));
-                    self.color_parts(params);
                     self.log = out.log;
+                    self.color_parts(params);
                     self.last_time = Some(out.elapsed);
                     self.error = None;
                     if self.fit_pending {
                         self.fit();
                         self.fit_pending = false;
                     }
-                    if self.mode == Mode::Slice {
+                    if self.mode == Mode::Optimize {
                         self.start_slice();
                     }
                 }
@@ -1216,10 +1310,10 @@ impl App {
     }
 
     fn model_menu(&mut self, ui: &mut egui::Ui) {
-        if ui::menu_item(ui, "Render now", "F5", self.file.is_some(), false).clicked() {
+        if ui::menu_item(ui, "Build now", "F5", self.file.is_some(), false).clicked() {
             self.start_render();
         }
-        if ui::menu_item(ui, "Auto render", "", true, self.auto_render).clicked() {
+        if ui::menu_item(ui, "Auto build", "", true, self.auto_render).clicked() {
             self.auto_render = !self.auto_render;
         }
         ui::menu_separator(ui);
@@ -1241,12 +1335,9 @@ impl App {
     }
 
     fn view_menu(&mut self, ui: &mut egui::Ui) {
-        for (mode, label, key) in [
-            (Mode::Model, "Model", ""),
-            (Mode::Slice, "Slice", "S"),
-            (Mode::Photo, "Photo", "P"),
-        ] {
-            if ui::menu_item(ui, label, key, true, self.mode == mode).clicked() {
+        for mode in Mode::ALL {
+            let key = mode.key().map_or("", |(k, _)| k.name());
+            if ui::menu_item(ui, mode.label(), key, true, self.mode == mode).clicked() {
                 self.set_mode(mode);
             }
         }
@@ -1358,10 +1449,101 @@ impl App {
         });
     }
 
+    /// The notice when the OpenSCAD binary has no Manifold backend: what
+    /// CoCAD found and how to get a development snapshot. CoCAD does not
+    /// build while it shows. It waits while the Settings window is open.
+    fn openscad_notice(&mut self, ctx: &egui::Context) {
+        let Some((binary, probe)) = self.no_manifold.clone() else {
+            return;
+        };
+        if self.cfg_edit.is_some() {
+            return;
+        }
+        let (mut settings, mut again) = (false, false);
+        let frame = egui::Frame::NONE
+            .fill(ui::c().panel)
+            .corner_radius(14)
+            .inner_margin(egui::Margin::same(18))
+            .stroke(egui::Stroke::new(1.0_f32, ui::c().line));
+        egui::Modal::new(egui::Id::new("openscad_notice"))
+            .frame(frame)
+            .show(ctx, |ui| {
+                ui.set_width(520.0);
+                ui.heading("CoCAD needs OpenSCAD with Manifold");
+                ui.add_space(6.0);
+                ui.label(
+                    "CoCAD builds the models with the Manifold backend of OpenSCAD. The \
+                     development snapshots (nightly builds) of OpenSCAD have it. The release \
+                     2021.01 does not. CoCAD does not build a model until it finds a snapshot.",
+                );
+                ui.add_space(8.0);
+                let found = if probe.version == "not found" {
+                    "not found".to_string()
+                } else {
+                    probe.version.clone()
+                };
+                info_row(ui, "Found", &found);
+                info_row(ui, "Binary", &binary);
+                ui.add_space(8.0);
+                ui::section(ui, "Steps");
+                for (i, (step, line)) in openscad::install_steps().into_iter().enumerate() {
+                    ui.add(egui::Label::new(format!("{}. {step}", i + 1)).wrap());
+                    if let Some(line) = line {
+                        ui.horizontal(|ui| {
+                            ui.add_space(16.0);
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(line)
+                                        .monospace()
+                                        .size(12.0)
+                                        .color(ui::c().dim),
+                                )
+                                .wrap(),
+                            );
+                            if ui
+                                .add(ui::ghost("Copy", false))
+                                .on_hover_text("Copy this line")
+                                .clicked()
+                            {
+                                ui.ctx().copy_text(line.to_string());
+                            }
+                        });
+                    }
+                }
+                ui.add_space(4.0);
+                ui.hyperlink_to(
+                    "OpenSCAD downloads: development snapshots",
+                    openscad::SNAPSHOTS_URL,
+                );
+                ui.add_space(12.0);
+                let row = Vec2::new(ui.available_width(), 34.0);
+                let rtl = egui::Layout::right_to_left(egui::Align::Center);
+                ui.allocate_ui_with_layout(row, rtl, |ui| {
+                    ui.spacing_mut().button_padding = Vec2::new(16.0, 7.0);
+                    again = ui.add(ui::primary("Check again")).clicked();
+                    settings = ui
+                        .add(ui::ghost("OpenSCAD settings", false))
+                        .on_hover_text("Select the OpenSCAD binary")
+                        .clicked();
+                });
+            });
+        if settings {
+            self.open_settings();
+            self.settings_page = SettingsPage::OpenScad;
+        }
+        if again {
+            self.check_openscad();
+            if self.no_manifold.is_some() {
+                self.toast = Some(("No OpenSCAD with Manifold yet".to_string(), Instant::now()));
+            }
+        }
+    }
+
     /// A small notice at the bottom right. A click opens the list of changes.
     /// It waits while another window covers the app.
     fn update_notice(&mut self, ctx: &egui::Context) {
         let covered = self.consent.is_some()
+            || self.no_manifold.is_some()
             || self.tour.is_some()
             || self.cfg_edit.is_some()
             || self.show_changes
@@ -1498,87 +1680,186 @@ impl App {
         self.show_about = open;
     }
 
-    fn model_panel(&mut self, ui: &mut egui::Ui) {
-        ui.label(ui::dim("Render the model and export it."));
+    /// True when the user closed the right panel card `name`.
+    fn card_closed(&self, name: &str) -> bool {
+        self.cfg.closed_cards.contains(name)
+    }
+
+    /// The header of the right panel card `name`. A click opens or closes
+    /// the card, and the config file keeps the choice for all models.
+    /// `note` shows in the header while the card is closed. Returns true
+    /// when the card is open.
+    fn card_head(&mut self, ui: &mut egui::Ui, name: &str, note: &str) -> bool {
+        let open = !self.card_closed(name);
+        let note = if open { "" } else { note };
+        if ui::fold_header(ui, name, open, note).clicked() {
+            self.set_cards_closed(&[name], open);
+        }
+        let open = !self.card_closed(name);
+        if open {
+            ui.add_space(6.0);
+        }
+        open
+    }
+
+    /// Closes (`closed`) or opens the cards `names` and saves the choice.
+    fn set_cards_closed(&mut self, names: &[&str], closed: bool) {
+        for n in names {
+            if closed {
+                self.cfg.closed_cards.insert(n.to_string());
+            } else {
+                self.cfg.closed_cards.remove(*n);
+            }
+        }
+        if let Some(edit) = &mut self.cfg_edit {
+            edit.closed_cards = self.cfg.closed_cards.clone();
+        }
+        if let Err(e) = self.cfg.save() {
+            self.toast = Some((format!("Cannot save settings: {e}"), Instant::now()));
+        }
+    }
+
+    /// The first row of a tab: a short hint, and a button that opens or
+    /// closes all cards of the tab.
+    fn panel_head(&mut self, ui: &mut egui::Ui, hint: &str) {
+        let cards = self.mode.cards();
+        let all_closed = cards.iter().all(|c| self.card_closed(c));
+        let row = Vec2::new(ui.available_width(), 28.0);
+        let rtl = egui::Layout::right_to_left(egui::Align::Center);
+        ui.allocate_ui_with_layout(row, rtl, |ui| {
+            let (icon, label, hover) = if all_closed {
+                (ui::Icon::Expand, "Expand", "Open all cards")
+            } else {
+                (ui::Icon::Collapse, "Collapse", "Close all cards")
+            };
+            if ui::icon_text_button(ui, icon, label, 28.0)
+                .on_hover_text(hover)
+                .clicked()
+            {
+                self.set_cards_closed(cards, !all_closed);
+            }
+            let ltr = egui::Layout::left_to_right(egui::Align::Center);
+            ui.with_layout(ltr, |ui| {
+                ui.add(egui::Label::new(ui::dim(hint)).truncate());
+            });
+        });
         ui.add_space(4.0);
+    }
+
+    fn model_panel(&mut self, ui: &mut egui::Ui) {
+        self.panel_head(ui, "Build the model and export it.");
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 ui::card(ui, |ui| {
-                    ui::section(ui, "Render");
+                    let note = if self.job.is_some() {
+                        "Building".to_string()
+                    } else if self.error.is_some() {
+                        "Error".to_string()
+                    } else {
+                        self.last_time
+                            .map(|t| format!("{:.2} s", t.as_secs_f32()))
+                            .unwrap_or_default()
+                    };
+                    if !self.card_head(ui, "Build", &note) {
+                        return;
+                    }
                     ui.horizontal(|ui| {
-                        ui.label("Auto render");
+                        ui.label("Auto build");
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             ui::toggle(ui, &mut self.auto_render)
-                                .on_hover_text("Render when a parameter changes");
+                                .on_hover_text("Build when a parameter changes");
                         });
                     });
-                    let render =
-                        egui::Button::new("Render").min_size(Vec2::new(ui.available_width(), 34.0));
+                    let build =
+                        egui::Button::new("Build").min_size(Vec2::new(ui.available_width(), 34.0));
                     if ui
-                        .add_enabled(self.file.is_some(), render)
+                        .add_enabled(self.file.is_some(), build)
                         .on_hover_text("F5")
                         .clicked()
                     {
                         self.start_render();
                     }
                 });
-                ui::card(ui, |ui| {
-                    ui::section(ui, "Export");
-                    let can_export = self.can_export();
-                    let w = (ui.available_width() - 2.0 * ui.spacing().item_spacing.x) / 3.0;
-                    let mut pick = None;
-                    ui.horizontal(|ui| {
-                        for fmt in Format::ALL {
-                            let b =
-                                ui::primary(&fmt.ext().to_uppercase()).min_size(Vec2::new(w, 34.0));
-                            if ui
-                                .add_enabled(can_export, b)
-                                .on_hover_text(fmt.label())
-                                .clicked()
-                            {
-                                pick = Some(fmt);
-                            }
-                        }
-                    });
-                    if let Some(fmt) = pick {
-                        self.export(fmt);
-                    }
-                    if !crate::parts::names(&self.params).is_empty() {
-                        ui.label(ui::dim("Multicolor 3MF"));
-                        let w = (ui.available_width() - ui.spacing().item_spacing.x) / 2.0;
-                        let mut pick = None;
-                        ui.horizontal(|ui| {
-                            for slicer in Slicer::ALL {
-                                let b = ui::primary(slicer.label()).min_size(Vec2::new(w, 34.0));
-                                if ui.add_enabled(can_export, b).clicked() {
-                                    pick = Some(slicer);
-                                }
-                            }
-                        });
-                        if let Some(slicer) = pick {
-                            self.export_parts(slicer);
-                        }
-                    }
-                });
+                ui.add_space(4.0);
                 self.parts_card(ui);
                 self.explode_card(ui);
                 self.section_card(ui);
                 if let (Some(i), Some(mesh)) = (&self.info, &self.mesh) {
                     let size = i.bounds.size();
+                    let tris = mesh.triangles.len();
+                    let (volume, open_edges) = (i.volume, i.open_edges);
+                    let note = format!("{:.1} × {:.1} × {:.1} mm", size.x, size.y, size.z);
                     ui::card(ui, |ui| {
-                        ui::section(ui, "Mesh");
+                        if !self.card_head(ui, "Mesh", &note) {
+                            return;
+                        }
                         info_row(
                             ui,
                             "Size",
                             &format!("{:.1} × {:.1} × {:.1} mm", size.x, size.y, size.z),
                         );
-                        info_row(ui, "Volume", &format!("{:.2} cm³", i.volume / 1000.0));
-                        info_row(ui, "Triangles", &mesh.triangles.len().to_string());
-                        info_row(ui, "Open edges", &i.open_edges.to_string());
+                        info_row(ui, "Volume", &format!("{:.2} cm³", volume / 1000.0));
+                        info_row(ui, "Triangles", &tris.to_string());
+                        info_row(ui, "Open edges", &open_edges.to_string());
                     });
                 }
             });
+    }
+
+    /// The default print area from Settings > Printer, for a model that
+    /// has no print area of its own yet.
+    #[allow(dead_code)]
+    pub(crate) fn default_area(&self) -> crate::optimize::Area {
+        self.cfg.bed
+    }
+
+    /// What the export buttons write, in one short line above them.
+    pub(crate) fn export_summary(&self) -> String {
+        "Model as built.".to_string()
+    }
+
+    /// The Export card. It stays at the bottom of the right panel in all
+    /// tabs, and it does not close.
+    fn export_card(&mut self, ui: &mut egui::Ui) {
+        ui::card(ui, |ui| {
+            ui::section(ui, "Export");
+            ui.add(egui::Label::new(ui::dim(self.export_summary())).wrap());
+            let can_export = self.can_export();
+            let w = (ui.available_width() - 2.0 * ui.spacing().item_spacing.x) / 3.0;
+            let mut pick = None;
+            ui.horizontal(|ui| {
+                for fmt in Format::ALL {
+                    let b = ui::primary(&fmt.ext().to_uppercase()).min_size(Vec2::new(w, 34.0));
+                    if ui
+                        .add_enabled(can_export, b)
+                        .on_hover_text(fmt.label())
+                        .clicked()
+                    {
+                        pick = Some(fmt);
+                    }
+                }
+            });
+            if let Some(fmt) = pick {
+                self.export(fmt);
+            }
+            if !crate::parts::names(&self.params).is_empty() {
+                ui.label(ui::dim("Multicolor 3MF"));
+                let w = (ui.available_width() - ui.spacing().item_spacing.x) / 2.0;
+                let mut pick = None;
+                ui.horizontal(|ui| {
+                    for slicer in Slicer::ALL {
+                        let b = ui::primary(slicer.label()).min_size(Vec2::new(w, 34.0));
+                        if ui.add_enabled(can_export, b).clicked() {
+                            pick = Some(slicer);
+                        }
+                    }
+                });
+                if let Some(slicer) = pick {
+                    self.export_parts(slicer);
+                }
+            }
+        });
     }
 
     fn set_mode(&mut self, mode: Mode) {
@@ -1588,7 +1869,7 @@ impl App {
             });
         }
         self.mode = mode;
-        if mode == Mode::Slice && self.slice_for_rev != self.mesh_rev {
+        if mode == Mode::Optimize && self.slice_for_rev != self.mesh_rev {
             self.start_slice();
         }
     }
@@ -2073,7 +2354,7 @@ impl App {
         }
     }
 
-    /// Thin bar at the bottom: render state, engine, model, mode details.
+    /// Thin bar at the bottom: build state, OpenSCAD version, model, mode details.
     fn status_bar(&mut self, ui: &mut egui::Ui) {
         let small = |t: String| RichText::new(t).size(12.5);
         let dim = |t: String| RichText::new(t).size(12.5).color(ui::c().dim);
@@ -2090,7 +2371,7 @@ impl App {
                 ui.add(egui::Spinner::new().size(12.0).color(ui::ACCENT));
                 ui.label(
                     small(format!(
-                        "Rendering {:.1} s",
+                        "Building {:.1} s",
                         job.started.elapsed().as_secs_f32()
                     ))
                     .color(ui::ACCENT),
@@ -2103,6 +2384,8 @@ impl App {
                 if r.on_hover_text("Show the OpenSCAD output").clicked() {
                     self.show_log = true;
                 }
+            } else if self.no_manifold.is_some() {
+                ui.label(small("Not built: OpenSCAD has no Manifold".into()).color(ui::c().danger));
             } else if self.dirty_since.is_some() && !self.auto_render {
                 ui.label(small("Parameters changed. Press F5.".into()).color(ui::ACCENT));
             } else if self.file.is_some() {
@@ -2124,13 +2407,13 @@ impl App {
                 .version
                 .trim_start_matches("OpenSCAD version ")
                 .to_string();
-            let backend = if self.engine.is_empty() {
-                String::new()
+            let label = format!("OpenSCAD {version}");
+            if probe.manifold {
+                ui.label(dim(label)).on_hover_text(self.cfg.binary());
             } else {
-                format!("  ·  {}", self.engine)
-            };
-            ui.label(dim(format!("OpenSCAD {version}{backend}")))
-                .on_hover_text(self.cfg.binary());
+                ui.label(small(label).color(ui::c().danger))
+                    .on_hover_text(format!("{}: no Manifold backend", self.cfg.binary()));
+            }
 
             // Model.
             if let Some(i) = &self.info {
@@ -2152,7 +2435,7 @@ impl App {
 
             // Mode details.
             match self.mode {
-                Mode::Slice => {
+                Mode::Optimize => {
                     if let Some(sl) = &self.sliced {
                         sep(ui);
                         ui.label(small(format!(
@@ -2167,10 +2450,10 @@ impl App {
                         )));
                     }
                 }
-                Mode::Photo => {
+                Mode::Render => {
                     sep(ui);
                     ui.label(small(format!(
-                        "Photo {} / {}",
+                        "Render {} / {}",
                         self.photo_samples(),
                         self.photo.samples
                     )));
@@ -2360,16 +2643,18 @@ impl App {
         self.toast = Some((msg, Instant::now()));
     }
 
-    fn photo_panel(&mut self, ui: &mut egui::Ui) {
-        ui.label(ui::dim("Path-traced render of the current view."));
-        ui.add_space(4.0);
+    fn render_panel(&mut self, ui: &mut egui::Ui) {
+        self.panel_head(ui, "Path-traced render of the current view.");
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 let samples = self.photo_samples();
                 ui::card(ui, |ui| {
-                    ui::section(ui, "Progress");
                     let target = self.photo.samples;
+                    let note = format!("{samples} / {target}");
+                    if !self.card_head(ui, "Progress", &note) {
+                        return;
+                    }
                     let waiting = self.photo_job.is_none() && self.mesh.is_some();
                     ui.horizontal(|ui| {
                         ui.label(RichText::new(format!("{samples}")).size(22.0));
@@ -2402,9 +2687,16 @@ impl App {
                 ui.add_space(4.0);
 
                 let part_colors = self.view3d.part_colors;
-                let p = &mut self.photo;
                 ui::card(ui, |ui| {
-                    ui::section(ui, "Material");
+                    let note = match self.photo.finish {
+                        "matte" => "Matte",
+                        "gloss" => "Gloss",
+                        _ => "Satin",
+                    };
+                    if !self.card_head(ui, "Material", note) {
+                        return;
+                    }
+                    let p = &mut self.photo;
                     ui.horizontal_wrapped(|ui| {
                         ui.spacing_mut().item_spacing = Vec2::new(8.0, 8.0);
                         for (name, c) in SWATCHES {
@@ -2453,9 +2745,15 @@ impl App {
                 ui.add_space(4.0);
                 self.parts_card(ui);
                 self.explode_card(ui);
-                let p = &mut self.photo;
                 ui::card(ui, |ui| {
-                    ui::section(ui, "Scene");
+                    let note = match self.photo.studio {
+                        pathtrace::Studio::Light => "Light studio",
+                        pathtrace::Studio::Dark => "Dark studio",
+                    };
+                    if !self.card_head(ui, "Scene", note) {
+                        return;
+                    }
+                    let p = &mut self.photo;
                     ui.label("Studio");
                     let mut studio = p.studio;
                     ui::segmented(
@@ -2472,7 +2770,11 @@ impl App {
                 });
                 ui.add_space(4.0);
                 ui::card(ui, |ui| {
-                    ui::section(ui, "Quality");
+                    let note = format!("{} × {}", self.photo.width, self.photo.height);
+                    if !self.card_head(ui, "Quality", &note) {
+                        return;
+                    }
+                    let p = &mut self.photo;
                     setting(ui, "Samples", &mut p.samples, 16..=2048, 16.0, "");
                     ui.add_space(4.0);
                     ui.label("Resolution");
@@ -2526,17 +2828,20 @@ impl App {
             });
     }
 
-    fn slice_panel(&mut self, ui: &mut egui::Ui) {
-        ui.label(ui::dim("Rough preview for checking. Not for printing."));
-        ui.add_space(4.0);
+    /// The Optimize tab. For now it holds the slice preview.
+    fn optimize_panel(&mut self, ui: &mut egui::Ui) {
+        self.panel_head(ui, "Rough preview for checking. Not for printing.");
         let before = self.settings;
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
-                if let Some(sl) = &self.sliced {
+                if let Some(sl) = self.sliced.clone() {
                     let st = &sl.stats;
                     ui::card(ui, |ui| {
-                        ui::section(ui, "Estimate");
+                        let note = format!("{}, {:.1} g", fmt_duration(st.seconds), st.grams);
+                        if !self.card_head(ui, "Estimate", &note) {
+                            return;
+                        }
                         ui.label(
                             RichText::new(fmt_duration(st.seconds))
                                 .size(30.0)
@@ -2550,7 +2855,10 @@ impl App {
                     });
                     ui.add_space(4.0);
                     ui::card(ui, |ui| {
-                        ui::section(ui, "Layer");
+                        let note = format!("{} / {}", self.layer + 1, sl.layers.len());
+                        if !self.card_head(ui, "Layer", &note) {
+                            return;
+                        }
                         if let Some(l) = sl.layers.get(self.layer) {
                             ui.horizontal(|ui| {
                                 ui.label(RichText::new(format!("{}", self.layer + 1)).size(22.0));
@@ -2608,9 +2916,13 @@ impl App {
                     });
                 }
 
-                let s = &mut self.settings;
                 ui::card(ui, |ui| {
-                    ui::section(ui, "Print settings");
+                    let s = self.settings;
+                    let note = format!("{:.2} mm, {:.0} %", s.layer_height, s.infill * 100.0,);
+                    if !self.card_head(ui, "Print settings", &note) {
+                        return;
+                    }
+                    let s = &mut self.settings;
                     setting(
                         ui,
                         "Layer height",
@@ -2698,7 +3010,7 @@ impl App {
         self.update_selection();
 
         let layer_max = self.sliced.as_ref().map(|s| s.layers.len()).unwrap_or(0);
-        let slicing = self.mode == Mode::Slice && layer_max > 0;
+        let slicing = self.mode == Mode::Optimize && layer_max > 0;
         if let Some(r) = &self.renderer {
             let view = View {
                 mvp: self.cam.matrix(rect.width() / rect.height().max(1.0)),
@@ -2742,7 +3054,7 @@ impl App {
             );
         }
 
-        if self.mode == Mode::Photo {
+        if self.mode == Mode::Render {
             self.photo_view(ui, rect);
         } else {
             self.photo_job = None;
@@ -2893,7 +3205,7 @@ impl App {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
         // The tour uses the arrow keys, and the app waits behind it.
-        if self.tour.is_some() || self.consent.is_some() {
+        if self.tour.is_some() || self.consent.is_some() || self.no_manifold.is_some() {
             return;
         }
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::O)) {
@@ -2920,7 +3232,7 @@ impl App {
             return;
         }
         self.select_escape(ctx);
-        let (f5, f, w, up, down, pgup, pgdn, tab) = ctx.input(|i| {
+        let (f5, f, w, up, down, pgup, pgdn) = ctx.input(|i| {
             (
                 i.key_pressed(egui::Key::F5),
                 i.key_pressed(egui::Key::F),
@@ -2929,18 +3241,22 @@ impl App {
                 i.key_pressed(egui::Key::ArrowDown),
                 i.key_pressed(egui::Key::PageUp),
                 i.key_pressed(egui::Key::PageDown),
-                i.key_pressed(egui::Key::S),
             )
         });
         if ctx.input(|i| i.key_pressed(egui::Key::E)) {
             self.toggle_explode();
         }
-        if ctx.input(|i| i.key_pressed(egui::Key::P)) {
-            self.set_mode(if self.mode == Mode::Photo {
-                Mode::Model
-            } else {
-                Mode::Photo
+        // O and R open their tab, and the same key goes back to the Model
+        // tab. Ctrl+O (open a file) is used above.
+        for mode in Mode::ALL {
+            let Some((key, _)) = mode.key() else { continue };
+            let pressed = ctx.input(|i| {
+                let m = i.modifiers;
+                i.key_pressed(key) && !m.command && !m.ctrl && !m.alt
             });
+            if pressed {
+                self.set_mode(if self.mode == mode { Mode::Model } else { mode });
+            }
         }
         if f5 {
             self.start_render();
@@ -2951,14 +3267,7 @@ impl App {
         if w {
             self.wireframe = !self.wireframe;
         }
-        if tab {
-            self.set_mode(if self.mode == Mode::Model {
-                Mode::Slice
-            } else {
-                Mode::Model
-            });
-        }
-        if self.mode == Mode::Slice {
+        if self.mode == Mode::Optimize {
             let max = self
                 .sliced
                 .as_ref()
@@ -3000,7 +3309,7 @@ impl App {
         let width = (screen.x - 80.0).clamp(420.0, 604.0);
         let height = (screen.y - 170.0).clamp(160.0, 360.0);
         let probe = settings_probe(ctx, &edit);
-        let missing = probe.as_ref().is_some_and(|p| p.version == "not found");
+        let missing = probe.as_ref().is_some_and(|p| !p.manifold);
         let mut page = self.settings_page;
         let mut pages = vec![
             (SettingsPage::Appearance, "Appearance", None),
@@ -3010,6 +3319,7 @@ impl App {
                 "OpenSCAD",
                 missing.then_some(ui::c().danger),
             ),
+            (SettingsPage::Printer, "Printer", None),
             (SettingsPage::Mcp, "MCP server", running.then_some(ui::GOOD)),
             (SettingsPage::Updates, "Updates", None),
         ];
@@ -3063,6 +3373,9 @@ impl App {
                                 SettingsPage::OpenScad => {
                                     ui::card(ui, |ui| openscad_settings(ui, &mut edit, &probe));
                                 }
+                                SettingsPage::Printer => {
+                                    ui::card(ui, |ui| printer_settings(ui, &mut edit));
+                                }
                                 SettingsPage::Mcp => {
                                     ui::card(ui, |ui| mcp_settings(ui, &mut edit, running));
                                 }
@@ -3096,8 +3409,7 @@ impl App {
             if let Err(e) = edit.save() {
                 self.toast = Some((format!("Cannot save settings: {e}"), Instant::now()));
             }
-            let rerender = (&edit.binary, &edit.args, edit.manifold)
-                != (&self.cfg.binary, &self.cfg.args, self.cfg.manifold);
+            let rerender = (&edit.binary, &edit.args) != (&self.cfg.binary, &self.cfg.args);
             self.cfg = edit;
             if self.privacy.dirty() {
                 let p = &self.privacy;
@@ -3107,6 +3419,7 @@ impl App {
             }
             self.sync_server(ctx);
             if rerender {
+                self.check_openscad();
                 self.start_render();
             }
         } else if !close {
@@ -3163,6 +3476,21 @@ fn sets_settings(ui: &mut egui::Ui, edit: &mut openscad::Config) {
          of the sets file. The sets file is <model>.json next to the model, or the file that \
          you opened for the model.",
     ));
+}
+
+/// The Printer page of the Settings window: the default print area.
+fn printer_settings(ui: &mut egui::Ui, edit: &mut openscad::Config) {
+    ui::section(ui, "Print area");
+    ui.add_space(4.0);
+    ui.add(
+        egui::Label::new(ui::dim(
+            "The default print area of the printer, for a model that you open for the first \
+             time. Select a printer, or type the width, depth and height.",
+        ))
+        .wrap(),
+    );
+    ui.add_space(6.0);
+    crate::printer::area_editor(ui, &mut edit.bed);
 }
 
 /// The MCP server page of the Settings window.
@@ -3229,7 +3557,8 @@ fn openscad_settings(
         Some(p) => {
             let version = p.version.trim_start_matches("OpenSCAD version ");
             let short: String = version.chars().take(32).collect();
-            card_header(ui, "OpenSCAD", ui::GOOD, &short);
+            let color = if p.manifold { ui::GOOD } else { ui::c().danger };
+            card_header(ui, "OpenSCAD", color, &short);
         }
     }
     ui.add_space(4.0);
@@ -3257,16 +3586,35 @@ fn openscad_settings(
             .desired_width(f32::INFINITY)
             .margin(Vec2::new(10.0, 6.0)),
     );
-    let manifold = probe.as_ref().is_none_or(|p| p.manifold);
-    let note = if manifold {
-        "Much faster renders with development builds."
-    } else {
-        "Needs an OpenSCAD development build, 2024 or later."
-    };
     ui.add_space(4.0);
-    ui.add_enabled_ui(manifold, |ui| {
-        toggle_row(ui, "Manifold backend", note, &mut edit.manifold);
-    });
+    if probe.as_ref().is_some_and(|p| !p.manifold) {
+        ui.label(
+            RichText::new(
+                "This binary has no Manifold backend. CoCAD needs an OpenSCAD development \
+                 snapshot.",
+            )
+            .size(12.5)
+            .color(ui::c().danger),
+        );
+        ui.hyperlink_to(
+            RichText::new("Development snapshots").size(12.5),
+            openscad::SNAPSHOTS_URL,
+        );
+    } else {
+        ui.label(ui::dim(
+            "CoCAD builds with the Manifold backend. It adds --backend=manifold.",
+        ));
+    }
+    if openscad::cgal_arg(&edit.args) {
+        ui.label(
+            RichText::new(
+                "--backend=cgal turns off Manifold. Builds are much slower, and CoCAD needs \
+                 Manifold.",
+            )
+            .size(12.5)
+            .color(ui::ACCENT),
+        );
+    }
     if std::env::var_os("OPENSCAD").is_some() || std::env::var_os("OPENSCAD_ARGS").is_some() {
         ui.label(ui::dim(
             "$OPENSCAD or $OPENSCAD_ARGS override these values.",
@@ -3401,6 +3749,8 @@ impl eframe::App for App {
         self.about_window(ctx);
         if self.consent.is_some() {
             self.consent_window(ctx);
+        } else if self.no_manifold.is_some() {
+            self.openscad_notice(ctx);
         } else {
             self.tour_window(ctx);
         }
@@ -3458,21 +3808,23 @@ impl eframe::App for App {
             .frame(side)
             .show(ctx, |ui| {
                 let mut mode = self.mode;
-                if ui::tabs(
-                    ui,
-                    &mut mode,
-                    &[
-                        (Mode::Model, "Model"),
-                        (Mode::Slice, "Slice"),
-                        (Mode::Photo, "Photo"),
-                    ],
-                ) {
+                let tabs = Mode::ALL.map(|m| (m, m.label(), m.key().map(|(_, at)| at)));
+                if ui::tabs(ui, &mut mode, &tabs) {
                     self.set_mode(mode);
                 }
+                // The Export card first, so that the tab gets the height
+                // that is left above it.
+                egui::TopBottomPanel::bottom("export")
+                    .frame(egui::Frame::NONE.inner_margin(egui::Margin {
+                        top: 10,
+                        ..Default::default()
+                    }))
+                    .show_separator_line(false)
+                    .show_inside(ui, |ui| self.export_card(ui));
                 match self.mode {
                     Mode::Model => self.model_panel(ui),
-                    Mode::Slice => self.slice_panel(ui),
-                    Mode::Photo => self.photo_panel(ui),
+                    Mode::Optimize => self.optimize_panel(ui),
+                    Mode::Render => self.render_panel(ui),
                 }
             });
         egui::CentralPanel::default()

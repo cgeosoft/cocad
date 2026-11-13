@@ -12,6 +12,11 @@
 //! that holds it. A shell with almost no volume (a sliver that a union can
 //! leave) goes to the nearest part. The shells of a source are in volume
 //! order, the largest first.
+//!
+//! Reference parts are the `%` subtrees of the model (see `csg_split.rs`).
+//! They show in the 3D view, but they are not printed: the export, the
+//! slice and the photo leave them out. They come after all other parts, so
+//! the triangles of the printed parts are the first part of the mesh.
 
 use crate::mesh::{Bounds, Mesh};
 use crate::parts::Part;
@@ -55,6 +60,8 @@ pub struct PartInfo {
     pub center: Vec3,
     /// Volume in mm^3. The cavities of the part are not in it.
     pub volume: f32,
+    /// A `%` part of the model: shown, but never printed or exported.
+    pub reference: bool,
 }
 
 /// The model as parts, for the 3D view and the photo.
@@ -77,10 +84,18 @@ pub struct Source<'a> {
     /// Each shell of the mesh is one part, with the name "Part N". The
     /// number counts on over all sources.
     pub split_shells: bool,
+    /// The part is a reference part (`PartInfo::reference`).
+    pub reference: bool,
 }
 
-/// Name, color, source and triangle range of a part, before the measurements.
-type Group = (String, Option<[u8; 3]>, usize, Range<usize>);
+/// A part before the measurements.
+struct Group {
+    name: String,
+    color: Option<[u8; 3]>,
+    source: usize,
+    tris: Range<usize>,
+    reference: bool,
+}
 
 impl Assembly {
     /// The parts of all sources, in source order. Empty sources give no part.
@@ -102,14 +117,24 @@ impl Assembly {
                     mesh.triangles
                         .extend(tris.iter().map(|&t| moved(&src[t as usize])));
                     number += 1;
-                    let name = format!("Part {number}");
-                    groups.push((name, s.color, k, start..mesh.triangles.len()));
+                    groups.push(Group {
+                        name: format!("Part {number}"),
+                        color: s.color,
+                        source: k,
+                        tris: start..mesh.triangles.len(),
+                        reference: s.reference,
+                    });
                 }
             } else {
                 let start = mesh.triangles.len();
                 mesh.triangles.extend(s.mesh.triangles.iter().map(moved));
-                let range = start..mesh.triangles.len();
-                groups.push((s.name.clone(), s.color, k, range));
+                groups.push(Group {
+                    name: s.name.clone(),
+                    color: s.color,
+                    source: k,
+                    tris: start..mesh.triangles.len(),
+                    reference: s.reference,
+                });
             }
         }
         Assembly::measure(Arc::new(mesh), groups)
@@ -123,6 +148,7 @@ impl Assembly {
             color: None,
             mesh,
             split_shells: true,
+            reference: false,
         }]);
         if a.mesh.triangles == mesh.triangles && a.mesh.vertices == mesh.vertices {
             a.mesh = mesh.clone();
@@ -140,29 +166,58 @@ impl Assembly {
     /// one part without a color, and there is no "Other" part. These parts
     /// come from the module split (`csg_split.rs`). They hold all of the
     /// model, but they render from the CSG tree, which has rounded numbers. So
-    /// their corners do not agree with the corners of `main`.
-    pub fn from_parts(main: &Mesh, parts: &[Part], split_shells: bool) -> Assembly {
+    /// their corners do not agree with the corners of `main`. With
+    /// `split_shells` and no parts (no module split), the shells of `main`
+    /// are the parts.
+    ///
+    /// `references` are the `%` parts. They come last, each one a part with
+    /// its name.
+    pub fn from_parts(
+        main: &Mesh,
+        parts: &[Part],
+        split_shells: bool,
+        references: &[Part],
+    ) -> Assembly {
         let other = if split_shells {
             Mesh::default()
         } else {
             leftover(main, parts)
         };
-        let mut sources: Vec<Source> = (parts.iter())
-            .map(|p| Source {
-                name: p.name.clone(),
-                color: (!split_shells).then_some(p.color),
-                mesh: &p.mesh,
-                split_shells,
-            })
-            .collect();
+        let mut sources: Vec<Source> = if split_shells && parts.is_empty() {
+            vec![Source {
+                name: String::new(),
+                color: None,
+                mesh: main,
+                split_shells: true,
+                reference: false,
+            }]
+        } else {
+            (parts.iter())
+                .map(|p| Source {
+                    name: p.name.clone(),
+                    color: (!split_shells).then_some(p.color),
+                    mesh: &p.mesh,
+                    split_shells,
+                    reference: false,
+                })
+                .collect()
+        };
+        let rest = sources.len();
         sources.push(Source {
             name: String::new(),
             color: None,
             mesh: &other,
             split_shells: true,
+            reference: false,
         });
+        sources.extend(references.iter().map(|r| Source {
+            name: r.name.clone(),
+            color: None,
+            mesh: &r.mesh,
+            split_shells: false,
+            reference: true,
+        }));
         let mut a = Assembly::build(&sources);
-        let rest = parts.len();
         let count = a.parts.iter().filter(|p| p.source == rest).count();
         for (i, p) in a.parts.iter_mut().filter(|p| p.source == rest).enumerate() {
             p.name = if count == 1 {
@@ -179,8 +234,15 @@ impl Assembly {
         let mut edges = Vec::new();
         let parts = groups
             .into_iter()
-            .filter(|(_, _, _, tris)| !tris.is_empty())
-            .map(|(name, color, source, tris)| {
+            .filter(|g| !g.tris.is_empty())
+            .map(|g| {
+                let Group {
+                    name,
+                    color,
+                    source,
+                    tris,
+                    reference,
+                } = g;
                 let start = edges.len();
                 let mut keys: Vec<u64> = Vec::with_capacity(tris.len() * 3);
                 let mut volume = 0.0f64;
@@ -213,17 +275,24 @@ impl Assembly {
                     bounds,
                     center: bounds.center(),
                     volume: (volume / 6.0).abs() as f32,
+                    reference,
                 }
             })
             .collect();
         Assembly { mesh, parts, edges }
     }
 
-    /// Gives all parts this color. For a model that shows one named part.
+    /// Gives all parts this color, except the reference parts. For a model
+    /// that shows one named part.
     pub fn paint_all(&mut self, color: [u8; 3]) {
-        for p in &mut self.parts {
+        for p in self.parts.iter_mut().filter(|p| !p.reference) {
             p.color = Some(color);
         }
+    }
+
+    /// The number of reference parts.
+    pub fn references(&self) -> usize {
+        self.parts.iter().filter(|p| p.reference).count()
     }
 
     /// The part that a ray from `origin` in the direction `dir` hits first,
@@ -233,8 +302,9 @@ impl Assembly {
     /// - `planes` are section planes in model space (before the offset). A
     ///   hit at the model point p counts only when
     ///   `plane.truncate().dot(p) + plane.w >= 0.0` for each plane.
-    /// - `ghost` marks the transparent parts. A hit on a part that is not
-    ///   transparent wins over a nearer hit on a transparent part.
+    /// - `alpha` is the transparency of each part, 1 when it is missing. A
+    ///   hit on a part that is not transparent (1) wins over a nearer hit on
+    ///   a transparent part. A part with 0 is hidden: the ray goes through.
     ///
     /// Front and back faces count. Through a section cut, the ray hits a
     /// back face of the part that the cut shows. The search tests each
@@ -246,7 +316,7 @@ impl Assembly {
         dir: Vec3,
         offsets: &[Vec3],
         planes: &[Vec4],
-        ghost: &[bool],
+        alpha: &[f32],
     ) -> Option<(usize, f32)> {
         let inv = dir.recip();
         let kept = |p: Vec3| planes.iter().all(|c| c.truncate().dot(p) + c.w >= 0.0);
@@ -255,7 +325,11 @@ impl Assembly {
         let mut best: [Option<(usize, f32)>; 2] = [None, None];
         for (i, part) in self.parts.iter().enumerate() {
             let o = origin - offsets.get(i).copied().unwrap_or(Vec3::ZERO);
-            let slot = &mut best[usize::from(ghost.get(i).copied().unwrap_or(false))];
+            let a = alpha.get(i).copied().unwrap_or(1.0);
+            if a <= 0.0 {
+                continue;
+            }
+            let slot = &mut best[usize::from(a < 1.0)];
             let mut limit = slot.map_or(f32::INFINITY, |b| b.1);
             match ray_box(o, inv, &part.bounds) {
                 Some(t) if t <= limit => {}
@@ -299,11 +373,12 @@ impl Assembly {
     }
 
     /// The display mesh with each part moved by its offset, for the photo.
-    /// The triangle order stays, so `paint` applies to it. Without a
-    /// movement, this is the display mesh itself, and the path tracer keeps
-    /// its geometry cache.
+    /// The reference parts are not in it. The triangle order stays, so
+    /// `paint` applies to it. Without a movement and without reference
+    /// parts, this is the display mesh itself, and the path tracer keeps its
+    /// geometry cache.
     pub fn moved(&self, offsets: &[Vec3]) -> Arc<Mesh> {
-        if offsets.iter().all(|d| *d == Vec3::ZERO) {
+        if offsets.iter().all(|d| *d == Vec3::ZERO) && self.references() == 0 {
             return self.mesh.clone();
         }
         let src = &self.mesh;
@@ -315,7 +390,7 @@ impl Assembly {
         // each part gets its own copy of its vertices.
         let mut owner = vec![u32::MAX; src.vertices.len()];
         let mut index = vec![0u32; src.vertices.len()];
-        for (i, p) in self.parts.iter().enumerate() {
+        for (i, p) in self.parts.iter().enumerate().filter(|(_, p)| !p.reference) {
             let d = offsets.get(i).copied().unwrap_or(Vec3::ZERO);
             for t in &src.triangles[p.tris.clone()] {
                 out.triangles.push(t.map(|v| {
@@ -670,7 +745,7 @@ mod tests {
             part("empty", [0, 0, 0], &[]),
             part("star", [4, 5, 6], &b_soup),
         ];
-        let a = Assembly::from_parts(&main, &parts, false);
+        let a = Assembly::from_parts(&main, &parts, false, &[]);
         check_ranges(&a);
         let names: Vec<_> = a.parts.iter().map(|p| p.name.as_str()).collect();
         assert_eq!(names, ["plate", "star", "Other 1", "Other 2"]);
@@ -683,7 +758,7 @@ mod tests {
 
         // One leftover shell is just "Other".
         let main: Vec<_> = a_soup.iter().chain(&screw).copied().collect();
-        let a = Assembly::from_parts(&Mesh::from_soup(&main), &parts[..1], false);
+        let a = Assembly::from_parts(&Mesh::from_soup(&main), &parts[..1], false, &[]);
         check_ranges(&a);
         assert_eq!(a.parts[1].name, "Other");
     }
@@ -737,7 +812,7 @@ mod tests {
             part("Part 1", [9, 9, 9], &first),
             part("Part 2", [9, 9, 9], &second),
         ];
-        let a = Assembly::from_parts(&Mesh::from_soup(&main), &parts, true);
+        let a = Assembly::from_parts(&Mesh::from_soup(&main), &parts, true, &[]);
         check_ranges(&a);
         let names: Vec<_> = a.parts.iter().map(|p| p.name.as_str()).collect();
         assert_eq!(names, ["Part 1", "Part 2", "Part 3"]);
@@ -745,6 +820,47 @@ mod tests {
         assert_eq!(sources, [0, 0, 1]);
         assert!(a.parts.iter().all(|p| p.color.is_none()));
         assert!((a.parts[1].volume - 8.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn reference_parts_come_last_and_are_not_in_the_photo_mesh() {
+        // The main mesh has two solids and no module split. The screw is a
+        // `%` part: it is not in the main mesh.
+        let mut main = cube_soup(10.0, Vec3::ZERO, false);
+        main.extend(cube_soup(4.0, Vec3::new(30.0, 0.0, 0.0), false));
+        let main = Mesh::from_soup(&main);
+        let screw = part(
+            "Reference",
+            [0xff; 3],
+            &cube_soup(2.0, Vec3::new(4.0, 4.0, 12.0), false),
+        );
+        let a = Assembly::from_parts(&main, &[], true, std::slice::from_ref(&screw));
+        check_ranges(&a);
+        let names: Vec<_> = a.parts.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(names, ["Part 1", "Part 2", "Reference"]);
+        let refs: Vec<_> = a.parts.iter().map(|p| p.reference).collect();
+        assert_eq!(refs, [false, false, true]);
+        assert_eq!(a.references(), 1);
+        assert_eq!(a.parts[2].color, None);
+        // The photo mesh has the printed parts only, in the same order.
+        let photo = a.moved(&[]);
+        assert_eq!(photo.triangles.len(), a.parts[1].tris.end);
+        assert_eq!(photo.triangles.len(), main.triangles.len());
+        // paint_all leaves the reference part as it is.
+        let mut b = Assembly::from_parts(&main, &[], true, std::slice::from_ref(&screw));
+        b.paint_all([1, 2, 3]);
+        assert_eq!(b.parts[0].color, Some([1, 2, 3]));
+        assert_eq!(b.parts[2].color, None);
+        // A hidden part (alpha 0) does not stop a ray. The screw is above
+        // the large cube: from above, the ray hits the screw first.
+        let none = [Vec3::ZERO; 3];
+        let o = Vec3::new(5.0, 5.0, 50.0);
+        assert_eq!(
+            a.pick(o, -Vec3::Z, &none, &[], &[1.0, 1.0, 1.0]).unwrap().0,
+            2
+        );
+        let hidden = [1.0, 1.0, 0.0];
+        assert_eq!(a.pick(o, -Vec3::Z, &none, &[], &hidden).unwrap().0, 0);
     }
 
     #[test]
@@ -839,17 +955,14 @@ mod tests {
         let none = [Vec3::ZERO; 2];
         let o = Vec3::new(-10.0, 1.0, 3.0);
         // The small cube is first, but it is transparent.
-        let ghost = [false, true];
+        let ghost = [1.0, 0.5];
         assert_eq!(a.pick(o, Vec3::X, &none, &[], &ghost), Some((0, 30.0)));
         // A ray that hits only the transparent cube still finds it.
         let o = Vec3::new(1.0, 3.0, 30.0);
         assert_eq!(a.pick(o, -Vec3::Z, &none, &[], &ghost), Some((1, 25.0)));
         // All transparent: the nearest part.
         let o = Vec3::new(-10.0, 1.0, 3.0);
-        assert_eq!(
-            a.pick(o, Vec3::X, &none, &[], &[true, true]),
-            Some((1, 10.0))
-        );
+        assert_eq!(a.pick(o, Vec3::X, &none, &[], &[0.5, 0.5]), Some((1, 10.0)));
     }
 
     #[test]

@@ -7,6 +7,11 @@
 //! instances, writes one .csg file for each piece and renders the pieces in
 //! parallel.
 //!
+//! Reference parts: OpenSCAD keeps the `%` (background) subtrees in the CSG
+//! tree, with `%` before the node, and leaves them out of the STL. CoCAD
+//! builds each outermost `%` subtree on its own, as a reference part: the
+//! 3D view shows it, but it is never printed or exported.
+//!
 //! Limits:
 //! - A model that is one part made of modules divides into these modules.
 //! - Fonts from `use <x.ttf>` in the main file are added to each piece.
@@ -286,9 +291,11 @@ impl Node {
 
     /// True when the node makes geometry. An empty `group()` makes none.
     pub fn has_geometry(&self) -> bool {
-        if self.is_background() {
-            return false;
-        }
+        !self.is_background() && self.makes_geometry()
+    }
+
+    /// True when the node makes geometry without its own modifiers.
+    fn makes_geometry(&self) -> bool {
         if self.children.is_empty() {
             return !OPERATORS.contains(&self.name.as_str());
         }
@@ -409,6 +416,82 @@ pub fn split(tree: &Tree, max: usize, levels: usize) -> Option<Vec<Piece<'_>>> {
         pieces = next;
     }
     Some(pieces)
+}
+
+/// More `%` subtrees than this build as one reference part.
+pub const MAX_REFERENCES: usize = MAX_PIECES;
+
+/// The outermost `%` (background) nodes that make geometry, with their
+/// ancestors, in tree order. `*` (disabled) nodes and their children are
+/// left out, as OpenSCAD does.
+pub fn backgrounds(tree: &Tree) -> Vec<Piece<'_>> {
+    fn walk<'a>(nodes: &'a [Node], ancestors: &mut Vec<&'a Node>, out: &mut Vec<Piece<'a>>) {
+        for n in nodes {
+            if n.modifiers.contains('*') {
+                continue;
+            }
+            if n.modifiers.contains('%') {
+                if n.makes_geometry() {
+                    out.push(Piece {
+                        ancestors: ancestors.clone(),
+                        node: n,
+                    });
+                }
+                continue;
+            }
+            ancestors.push(n);
+            walk(&n.children, ancestors, out);
+            ancestors.pop();
+        }
+    }
+    let mut out = Vec::new();
+    walk(&tree.nodes, &mut Vec::new(), &mut out);
+    out
+}
+
+/// The .csg text of a `%` subtree: the node without its `%` mark, inside
+/// the groups, transforms and colors above it. Other operators above it
+/// (for example the `difference()` that it is a child of) are left out.
+/// Inside the subtree, the marks go away and `*` nodes too, so OpenSCAD
+/// builds all that its preview shows. `uses` are as in `piece_text`.
+pub fn reference_text(tree: &Tree, piece: &Piece, dir: &Path, uses: &[String]) -> String {
+    let mut out = String::new();
+    for u in uses {
+        out.push_str(u);
+        out.push('\n');
+    }
+    reference_body(tree, piece, dir, &mut out);
+    out
+}
+
+fn reference_body(tree: &Tree, piece: &Piece, dir: &Path, out: &mut String) {
+    let kept: Vec<&Node> = (piece.ancestors.iter())
+        .filter(|a| DESCEND.contains(&a.name.as_str()))
+        .copied()
+        .collect();
+    for a in &kept {
+        write_span(tree, a.header.clone(), dir, out);
+        out.push_str(" {\n");
+    }
+    write_plain(tree, piece.node, dir, out);
+    for _ in &kept {
+        out.push_str("}\n");
+    }
+}
+
+/// Writes `node` and its children without their modifiers. `*` children
+/// are left out.
+fn write_plain(tree: &Tree, node: &Node, dir: &Path, out: &mut String) {
+    write_span(tree, node.header.clone(), dir, out);
+    if node.children.is_empty() {
+        out.push_str(";\n");
+        return;
+    }
+    out.push_str(" {\n");
+    for c in node.children.iter().filter(|c| !c.modifiers.contains('*')) {
+        write_plain(tree, c, dir, out);
+    }
+    out.push_str("}\n");
 }
 
 /// The innermost `color()` that applies to the whole piece, as RGB.
@@ -613,43 +696,183 @@ fn is_empty_error(e: &anyhow::Error) -> bool {
     .any(|m| first.contains(m))
 }
 
-/// Renders each part of an assembly on its own. Returns `None` when the
-/// CSG tree shows no parts, when it has more than `MAX_PIECES` pieces at the
-/// first level, or when fewer than two pieces have 3D geometry. The app
-/// keeps the shells of the main mesh then.
+/// The parts that the CSG tree shows.
+#[derive(Default)]
+pub struct Split {
+    /// The pieces of the module split: two or more, or none when the tree
+    /// does not divide.
+    pub parts: Vec<Part>,
+    /// The `%` subtrees, each built on its own: "Reference 1",
+    /// "Reference 2" and so on in tree order. They are not printed.
+    pub references: Vec<Part>,
+}
+
+impl Split {
+    fn is_empty(&self) -> bool {
+        self.parts.is_empty() && self.references.is_empty()
+    }
+}
+
+/// The CSG tree of a model and what the piece files need.
+struct Exported {
+    tree: Tree,
+    dir: PathBuf,
+    uses: Vec<String>,
+    temp: TempFiles,
+}
+
+/// Writes and parses the CSG tree of `file`. `None` when this parser cannot
+/// read it: the app can still show the shells, so that is no error.
+fn exported(
+    cfg: &Config,
+    file: &Path,
+    defines: &[String],
+    cancel: &Arc<AtomicBool>,
+) -> Result<Option<Exported>> {
+    let file = openscad::absolute(file)?;
+    let dir = file.parent().unwrap_or(Path::new("")).to_path_buf();
+    let csg_path = temp_path("tree.csg");
+    let temp = TempFiles(vec![csg_path.clone()]);
+    export_csg(cfg, &file, defines, &csg_path, cancel)?;
+    let text = std::fs::read_to_string(&csg_path).context("cannot read the CSG export")?;
+    let Ok(tree) = parse(text) else {
+        return Ok(None);
+    };
+    let source = std::fs::read_to_string(&file).unwrap_or_default();
+    let uses = font_uses(&source, &dir);
+    Ok(Some(Exported {
+        tree,
+        dir,
+        uses,
+        temp,
+    }))
+}
+
+/// The texts of the reference parts: one for each `%` subtree, or one for
+/// all of them when there are more than `MAX_REFERENCES`.
+fn reference_texts(e: &Exported) -> Vec<String> {
+    let refs = backgrounds(&e.tree);
+    if refs.len() <= MAX_REFERENCES {
+        return (refs.iter())
+            .map(|r| reference_text(&e.tree, r, &e.dir, &e.uses))
+            .collect();
+    }
+    let mut all = reference_text(&e.tree, &refs[0], &e.dir, &e.uses);
+    for r in &refs[1..] {
+        reference_body(&e.tree, r, &e.dir, &mut all);
+    }
+    vec![all]
+}
+
+/// The name of reference part `i` of `n`.
+fn reference_name(i: usize, n: usize) -> String {
+    if n == 1 {
+        "Reference".to_string()
+    } else {
+        format!("Reference {}", i + 1)
+    }
+}
+
+/// Builds each part of an assembly on its own, and each `%` subtree as a
+/// reference part. Returns `None` when the tree has neither: the app keeps
+/// the shells of the main mesh then.
 ///
-/// The parts are "Part 1", "Part 2", ... in tree order. `color` is the
-/// innermost `color()` of the part when the tree has one, else white. It is
-/// only a hint: the part has no color of its own.
+/// The module split gives parts when the CSG tree shows two or more module
+/// instances at a level, with `MAX_PIECES` pieces or fewer at the first
+/// level, and two or more of them have 3D geometry. The parts are "Part 1",
+/// "Part 2", ... in tree order. `color` is the innermost `color()` of the
+/// part when the tree has one, else white. It is only a hint: the part has
+/// no color of its own.
+///
+/// A reference part that fails to build is left out. A part that fails to
+/// build fails the job.
 pub fn render(
     cfg: &Config,
     file: &Path,
     defines: &[String],
     cancel: &Arc<AtomicBool>,
-) -> Result<Option<Vec<Part>>> {
-    let file = openscad::absolute(file)?;
-    let dir = file.parent().unwrap_or(Path::new("")).to_path_buf();
-    let csg_path = temp_path("tree.csg");
-    let mut temp = TempFiles(vec![csg_path.clone()]);
-    export_csg(cfg, &file, defines, &csg_path, cancel)?;
-    let text = std::fs::read_to_string(&csg_path).context("cannot read the CSG export")?;
-    // The app can still show the shells, so a tree that this parser cannot
-    // read is no error.
-    let Ok(tree) = parse(text) else {
+) -> Result<Option<Split>> {
+    let Some(mut e) = exported(cfg, file, defines, cancel)? else {
         return Ok(None);
     };
-    let Some(pieces) = split(&tree, MAX_PIECES, LEVELS) else {
-        return Ok(None);
+    let pieces = split(&e.tree, MAX_PIECES, LEVELS).unwrap_or_default();
+    let mut texts = Vec::new();
+    let mut colors = Vec::new();
+    for p in &pieces {
+        texts.push(piece_text(&e.tree, p, &e.dir, &e.uses));
+        colors.push(piece_color(&e.tree, p).unwrap_or([0xff; 3]));
+    }
+    texts.extend(reference_texts(&e));
+    let meshes = build_all(cfg, &texts, pieces.len(), &mut e.temp, cancel)?;
+    let mut out = Split::default();
+    let refs = texts.len() - pieces.len();
+    for (i, mesh) in meshes.into_iter().enumerate() {
+        let Some(mesh) = mesh else { continue };
+        if i < pieces.len() {
+            out.parts.push(Part {
+                name: format!("Part {}", out.parts.len() + 1),
+                color: colors[i],
+                mesh,
+            });
+        } else {
+            out.references.push(Part {
+                name: reference_name(i - pieces.len(), refs),
+                color: [0xff; 3],
+                mesh,
+            });
+        }
+    }
+    if out.parts.len() < 2 {
+        out.parts.clear();
+    }
+    Ok((!out.is_empty()).then_some(out))
+}
+
+/// Builds the `%` subtrees of `file` as reference parts, for a model whose
+/// parts come from somewhere else (the `cocad_part` list). See `render`.
+pub fn render_references(
+    cfg: &Config,
+    file: &Path,
+    defines: &[String],
+    cancel: &Arc<AtomicBool>,
+) -> Result<Vec<Part>> {
+    let Some(mut e) = exported(cfg, file, defines, cancel)? else {
+        return Ok(Vec::new());
     };
-    let source = std::fs::read_to_string(&file).unwrap_or_default();
-    let uses = font_uses(&source, &dir);
-    let mut jobs = Vec::with_capacity(pieces.len());
-    for (i, p) in pieces.iter().enumerate() {
+    let texts = reference_texts(&e);
+    let n = texts.len();
+    let meshes = build_all(cfg, &texts, 0, &mut e.temp, cancel)?;
+    Ok((meshes.into_iter().enumerate())
+        .filter_map(|(i, mesh)| {
+            Some(Part {
+                name: reference_name(i, n),
+                color: [0xff; 3],
+                mesh: mesh?,
+            })
+        })
+        .collect())
+}
+
+/// Builds each .csg text on its own, in parallel. The result has one entry
+/// for each text, `None` for a text without 3D geometry. An error of one of
+/// the first `required` texts stops the job; an error of a later text
+/// gives `None`. The piece files go into `temp`.
+fn build_all(
+    cfg: &Config,
+    texts: &[String],
+    required: usize,
+    temp: &mut TempFiles,
+    cancel: &Arc<AtomicBool>,
+) -> Result<Vec<Option<Mesh>>> {
+    if texts.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut jobs = Vec::with_capacity(texts.len());
+    for (i, text) in texts.iter().enumerate() {
         let path = temp_path(&format!("piece{}.csg", i + 1));
         temp.0.push(path.clone());
-        std::fs::write(&path, piece_text(&tree, p, &dir, &uses))?;
-        let color = piece_color(&tree, p).unwrap_or([0xff; 3]);
-        jobs.push((path, color));
+        std::fs::write(&path, text)?;
+        jobs.push(path);
     }
 
     let next = AtomicUsize::new(0);
@@ -666,12 +889,12 @@ pub fn render(
                         break;
                     }
                     let i = next.fetch_add(1, Ordering::Relaxed);
-                    let Some((path, _)) = jobs.get(i) else {
+                    let Some(path) = jobs.get(i) else {
                         break;
                     };
                     let r = match openscad::render(cfg, path, &[], cancel) {
                         Ok(out) => Ok(Some(out.mesh)),
-                        Err(e) if is_empty_error(&e) => Ok(None),
+                        Err(e) if is_empty_error(&e) || i >= required => Ok(None),
                         Err(e) => {
                             failed.store(true, Ordering::Relaxed);
                             Err(e)
@@ -687,20 +910,15 @@ pub fn render(
     }
     let mut results = results.into_inner().unwrap();
     results.sort_by_key(|(i, _)| *i);
-    let mut parts = Vec::new();
+    let mut out = Vec::with_capacity(jobs.len());
     for (i, r) in results {
-        match r {
-            Ok(Some(mesh)) => parts.push(Part {
-                name: format!("Part {}", parts.len() + 1),
-                color: jobs[i].1,
-                mesh,
-            }),
-            // An empty or 2D piece.
-            Ok(None) => {}
-            Err(e) => return Err(e.context(format!("piece {} of {}", i + 1, jobs.len()))),
-        }
+        // `None`: an empty or 2D piece.
+        out.push(r.map_err(|e| e.context(format!("piece {} of {}", i + 1, required)))?);
     }
-    Ok((parts.len() >= 2).then_some(parts))
+    if out.len() < jobs.len() {
+        bail!("a piece job stopped");
+    }
+    Ok(out)
 }
 
 #[cfg(test)]
@@ -993,6 +1211,74 @@ group() {
         );
     }
 
+    /// The example model with a `%` part, as OpenSCAD writes its tree.
+    const REFERENCE: &str = "\
+group() {
+\tcube(size = [20, 20, 10], center = false);
+}
+%group() {
+\tmultmatrix([[1, 0, 0, 10], [0, 1, 0, 10], [0, 0, 1, 0], [0, 0, 0, 1]]) {
+\t\tcylinder($fn = 16, $fa = 12, $fs = 2, h = 30, r1 = 1.5, r2 = 1.5, center = false);
+\t}
+}
+";
+
+    #[test]
+    fn background_subtrees_become_reference_pieces() {
+        let t = tree(REFERENCE);
+        // One module: no split, but one reference.
+        assert!(split(&t, MAX_PIECES, LEVELS).is_none());
+        let refs = backgrounds(&t);
+        assert_eq!(refs.len(), 1);
+        assert!(refs[0].ancestors.is_empty());
+        let text = reference_text(&t, &refs[0], Path::new("/m"), &[]);
+        assert!(text.starts_with("group() {\nmultmatrix("), "{text}");
+        assert!(!text.contains('%'), "{text}");
+        assert!(text.contains("cylinder($fn = 16"), "{text}");
+        assert!(parse(text).is_ok());
+    }
+
+    #[test]
+    fn only_outermost_background_nodes_and_no_disabled_ones() {
+        let t = tree(concat!(
+            "group() {\n",
+            "\tgroup() {\n\t\tcube(size = 1);\n\t}\n",
+            "\tmultmatrix([[1, 0, 0, 5], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]]) {\n",
+            "\t\t%group() {\n\t\t\tsphere(r = 1);\n\t\t\t%cube(size = 2);\n",
+            "\t\t\t*cube(size = 9);\n\t\t}\n",
+            "\t}\n",
+            "\tdifference() {\n\t\tcube(size = 4);\n\t\t%cylinder(h = 9, r = 1);\n\t}\n",
+            "\t*group() {\n\t\t%sphere(r = 5);\n\t}\n",
+            "\t%group();\n",
+            "}\n",
+        ));
+        let refs = backgrounds(&t);
+        let names: Vec<&str> = refs
+            .iter()
+            .map(|r| &t.text[r.node.header.clone()])
+            .collect();
+        assert_eq!(names, ["group()", "cylinder(h = 9, r = 1)"]);
+        // The transform stays, the inner marks and the disabled node go.
+        let text = reference_text(&t, &refs[0], Path::new("/m"), &[]);
+        assert_eq!(
+            text,
+            "group() {\nmultmatrix([[1, 0, 0, 5], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]]) {\n\
+             group() {\nsphere(r = 1);\ncube(size = 2);\n}\n}\n}\n"
+        );
+        // The difference() above the second one goes.
+        let text = reference_text(&t, &refs[1], Path::new("/m"), &["use <f.ttf>".into()]);
+        assert_eq!(text, "use <f.ttf>\ngroup() {\ncylinder(h = 9, r = 1);\n}\n");
+        // The module split does not see the % nodes.
+        let pieces = split(&t, MAX_PIECES, LEVELS);
+        assert!(pieces.is_none_or(|p| p.iter().all(|p| !p.node.modifiers.contains('%'))));
+    }
+
+    #[test]
+    fn reference_names() {
+        assert_eq!(reference_name(0, 1), "Reference");
+        assert_eq!(reference_name(1, 3), "Reference 2");
+    }
+
     /// Splits and renders real models. Run with
     /// `COCAD_SPLIT_MODELS=a.scad:b.scad cargo test csg_split -- --ignored --nocapture`.
     /// Without the variable it uses the example models.
@@ -1043,14 +1329,15 @@ group() {
                 Err(e) => println!("main: error {}", e.to_string().lines().next().unwrap_or("")),
             }
             match parts {
-                Ok(Some(parts)) => {
+                Ok(Some(split)) => {
+                    let parts = &split.parts;
                     let sum: f32 = parts.iter().map(|p| p.mesh.volume()).sum();
                     println!(
                         "split: {} parts, volume sum {sum:.0}, {:.2} s",
                         parts.len(),
                         time.as_secs_f32()
                     );
-                    for p in &parts {
+                    for p in parts.iter().chain(&split.references) {
                         println!(
                             "  {}: {} triangles, volume {:.0}, color {:?}",
                             p.name,
@@ -1061,7 +1348,12 @@ group() {
                     }
                     if let Ok(m) = &main {
                         // The parts that the 3D view shows.
-                        let a = crate::assembly::Assembly::from_parts(&m.mesh, &parts, true);
+                        let a = crate::assembly::Assembly::from_parts(
+                            &m.mesh,
+                            parts,
+                            true,
+                            &split.references,
+                        );
                         let other: Vec<String> = (a.parts.iter())
                             .filter(|p| p.name.starts_with("Other"))
                             .map(|p| format!("{} tris, {:.2} mm3", p.tris.len(), p.volume))

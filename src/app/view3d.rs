@@ -1,6 +1,6 @@
 //! Options of the 3D view for the parts of the model: part colors and
 //! explode. The style of each part comes from `View3d::styles` every frame.
-//! The "Parts" and "Explode" cards are in the Model and Photo tabs.
+//! The "Parts" and "Explode" cards are in the Model and Render tabs.
 
 use super::{App, Mode};
 use crate::assembly::{PALETTE, PartInfo};
@@ -16,6 +16,10 @@ use std::sync::Arc;
 
 /// The color of a part without a color of its own, when the part colors are off.
 const ORANGE: [u8; 3] = [0xff, 0x93, 0x00];
+/// Reference parts (the `%` parts of the model) are transparent gray, as in
+/// the OpenSCAD preview.
+const REFERENCE_COLOR: [f32; 3] = [0.72, 0.74, 0.78];
+const REFERENCE_ALPHA: f32 = 0.3;
 
 /// Options of the 3D view. They apply to the parts of the current assembly.
 #[derive(Default)]
@@ -266,10 +270,21 @@ impl View3d {
             vec![Vec3::ZERO; parts.len()]
         };
         (parts.iter().zip(offsets).enumerate())
-            .map(|(i, (p, offset))| PartStyle {
-                color: self.color(i, p).map(|c| c as f32 / 255.0),
-                offset,
-                ..PartStyle::default()
+            .map(|(i, (p, offset))| {
+                if p.reference {
+                    PartStyle {
+                        color: REFERENCE_COLOR,
+                        offset,
+                        alpha: REFERENCE_ALPHA,
+                        ..PartStyle::default()
+                    }
+                } else {
+                    PartStyle {
+                        color: self.color(i, p).map(|c| c as f32 / 255.0),
+                        offset,
+                        ..PartStyle::default()
+                    }
+                }
             })
             .collect()
     }
@@ -287,28 +302,49 @@ impl App {
         styles.iter().map(|s| s.offset).collect()
     }
 
-    /// The style of each part in the 3D view. The Slice tab shows each part
+    /// The style of each part in the 3D view. The Optimize tab shows each part
     /// at its real position, so that the mesh agrees with the tool paths.
-    /// It does not show the selection and the focus.
+    /// It does not show the selection and the focus. Only the Model tab
+    /// shows the reference parts: the slice and the render leave them out.
     pub(super) fn part_styles(&self) -> Vec<PartStyle> {
         let Some(a) = &self.assembly else {
             return Vec::new();
         };
-        let view = self.mode != Mode::Slice;
+        let view = self.mode != Mode::Optimize;
         let mut styles = self.view3d.styles(&a.parts, view);
         if view {
             self.view3d.sel.mark(&a.parts, &mut styles);
         }
+        if self.mode != Mode::Model {
+            for (s, p) in styles.iter_mut().zip(&a.parts) {
+                if p.reference {
+                    s.alpha = 0.0;
+                }
+            }
+        }
         styles
     }
 
-    /// The bounds of the model as the view shows it: each part with its
-    /// offset. Fit and the grid use them.
+    /// The bounds of the model as the view shows it: each part that shows,
+    /// with its offset. Fit and the grid use them.
     pub(super) fn view_bounds(&self) -> Option<Bounds> {
-        match &self.assembly {
-            Some(a) if !a.parts.is_empty() => a.bounds(&App::offsets(&self.part_styles())),
-            _ => self.info.as_ref().map(|i| i.bounds),
-        }
+        let fallback = || self.info.as_ref().map(|i| i.bounds);
+        let Some(a) = self.assembly.as_ref().filter(|a| !a.parts.is_empty()) else {
+            return fallback();
+        };
+        let styles = self.part_styles();
+        let shown = (a.parts.iter().zip(&styles))
+            .filter(|(_, s)| s.alpha > 0.0)
+            .map(|(p, s)| Bounds {
+                min: p.bounds.min + s.offset,
+                max: p.bounds.max + s.offset,
+            });
+        shown
+            .reduce(|a, b| Bounds {
+                min: a.min.min(b.min),
+                max: a.max.max(b.max),
+            })
+            .or_else(fallback)
     }
 
     /// Turns the explode on or off. A model with fewer than 2 parts has
@@ -381,42 +417,52 @@ impl App {
     }
 
     /// The "Parts" card: the part count and the part colors. The Model and
-    /// the Photo tabs show it.
+    /// the Render tabs show it.
     pub(super) fn parts_card(&mut self, ui: &mut egui::Ui) {
         let Some(a) = self.assembly.clone().filter(|a| !a.parts.is_empty()) else {
             return;
         };
-        let n = a.parts.len();
+        let refs = a.references();
+        let n = a.parts.len() - refs;
+        let mut count = if n == 1 {
+            "1 part".to_string()
+        } else {
+            format!("{n} parts")
+        };
+        if refs > 0 {
+            count.push_str(&format!(", {refs} not printed"));
+        }
         ui::card(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui::section(ui, "Parts");
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let count = if n == 1 {
-                        "1 part".to_string()
-                    } else {
-                        format!("{n} parts")
-                    };
-                    ui.label(ui::dim(count));
-                });
-            });
+            if !self.card_head(ui, "Parts", &count) {
+                return;
+            }
             let note = if let Some(job) = &self.parts_job {
                 job.note
             } else if n == 1 {
                 "The model is one solid."
             } else if crate::parts::needs_render(&self.params) {
                 "The parts of the cocad_part list."
-            } else if a.parts.iter().any(|p| p.source > 0) {
+            } else if a.parts.iter().any(|p| p.source > 0 && !p.reference) {
                 // The module split gives one source for each module.
                 "Each solid of each module is one part."
             } else {
                 "Each separate solid is one part."
             };
-            ui.label(ui::dim(note));
+            ui.label(ui::dim(format!("{count}. {note}")));
+            if refs > 0 {
+                ui.label(ui::dim(
+                    "The parts with a % mark in the model show in gray. They are not printed or \
+                     exported.",
+                ));
+            }
             if let Some(p) = self.view3d.sel.selected(&a.parts) {
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
                     ui.label(ui::dim("Selected"));
                     ui.label(egui::RichText::new(&p.name).strong());
+                    if p.reference {
+                        ui.label(ui::dim("(not printed)"));
+                    }
                     if self.view3d.sel.has_focus(&p.name) {
                         ui.label(ui::dim("(focus)"));
                     }
@@ -447,15 +493,23 @@ impl App {
     }
 
     /// The "Explode" card: moves the parts away from each other. The Model
-    /// and the Photo tabs show it. A change of the distance or the direction
+    /// and the Render tabs show it. A change of the distance or the direction
     /// turns the explode on.
     pub(super) fn explode_card(&mut self, ui: &mut egui::Ui) {
         let Some(a) = self.assembly.clone().filter(|a| !a.parts.is_empty()) else {
             return;
         };
-        let v = &mut self.view3d;
+        let note = if !self.view3d.explode || a.parts.len() < 2 {
+            "Off".to_string()
+        } else {
+            let (d, _) = self.view3d.explode_distance(&a.parts);
+            format!("{d:.0} mm, {}", self.view3d.explode_axis.label())
+        };
         ui::card(ui, |ui| {
-            ui::section(ui, "Explode");
+            if !self.card_head(ui, "Explode", &note) {
+                return;
+            }
+            let v = &mut self.view3d;
             if a.parts.len() < 2 {
                 ui.label(ui::dim("Explode needs two or more parts."));
                 return;
@@ -501,6 +555,10 @@ impl App {
         let row_height = 30.0;
         let height = (ctx.screen_rect().height() - 220.0).clamp(row_height * 3.0, 420.0);
         let v = &mut self.view3d;
+        // The reference parts are always gray.
+        let rows: Vec<usize> = (0..a.parts.len())
+            .filter(|&i| !a.parts[i].reference)
+            .collect();
         let modal = egui::Modal::new(egui::Id::new("part_colors"))
             .frame(frame)
             .show(ctx, |ui| {
@@ -514,8 +572,8 @@ impl App {
                 egui::ScrollArea::vertical()
                     .max_height(height)
                     .auto_shrink([false, true])
-                    .show_rows(ui, row_height, a.parts.len(), |ui, rows| {
-                        for i in rows {
+                    .show_rows(ui, row_height, rows.len(), |ui, range| {
+                        for &i in &rows[range] {
                             let p = &a.parts[i];
                             let row = Vec2::new(ui.available_width(), row_height);
                             let ltr = egui::Layout::left_to_right(egui::Align::Center);
@@ -589,6 +647,7 @@ mod tests {
             },
             center,
             volume,
+            reference: false,
         }
     }
 
@@ -709,7 +768,7 @@ mod tests {
         assert_eq!(v.explode_distance(&parts).0, 30.0);
         let moved = v.styles(&parts, true);
         assert!(close(moved[1].offset.length(), 30.0));
-        // The Slice tab: no movement.
+        // The Optimize tab: no movement.
         assert!(
             v.styles(&parts, false)
                 .iter()

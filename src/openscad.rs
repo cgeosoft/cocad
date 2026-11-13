@@ -1,8 +1,12 @@
 //! Runs the OpenSCAD CLI to turn a .scad file and parameters into a mesh.
+//!
+//! CoCAD needs an OpenSCAD build with the Manifold backend: today a
+//! development snapshot (nightly). `check` tells when the binary has no
+//! Manifold, and `install_steps` tells how to get one.
 
 use crate::mesh::{Mesh, read_stl};
 use anyhow::{Result, bail};
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -23,8 +27,6 @@ pub struct Config {
     pub binary: String,
     /// Extra arguments, split at whitespace.
     pub args: String,
-    /// Add `--backend=manifold` when the binary supports it.
-    pub manifold: bool,
     /// UI theme: "system", "dark" or "light".
     pub theme: String,
     /// Let MCP clients on this computer control the window.
@@ -33,6 +35,12 @@ pub struct Config {
     pub update_check: bool,
     /// Save the values to the active parameter set when they change.
     pub autosave_sets: bool,
+    /// The cards of the right panel that the user closed, by title. One
+    /// choice for all models.
+    pub closed_cards: BTreeSet<String>,
+    /// The default print area (Settings > Printer), for a model that has
+    /// no print area of its own yet.
+    pub bed: crate::optimize::Area,
 }
 
 impl Default for Config {
@@ -40,11 +48,12 @@ impl Default for Config {
         Config {
             binary: String::new(),
             args: String::new(),
-            manifold: true,
             theme: "system".into(),
             mcp: true,
             update_check: true,
             autosave_sets: false,
+            closed_cards: BTreeSet::new(),
+            bed: crate::optimize::Area::default(),
         }
     }
 }
@@ -71,21 +80,44 @@ fn config_path() -> Option<PathBuf> {
 
 impl Config {
     pub fn load() -> Config {
+        config_path()
+            .and_then(|p| std::fs::read_to_string(p).ok())
+            .map_or_else(Config::default, |text| Config::parse(&text))
+    }
+
+    /// The settings in the text of a config file. Unknown keys and keys of
+    /// older versions do nothing, for example `manifold` (before 0.7).
+    pub fn parse(text: &str) -> Config {
         let mut c = Config::default();
-        if let Some(text) = config_path().and_then(|p| std::fs::read_to_string(p).ok()) {
-            for line in text.lines() {
-                if let Some((k, v)) = line.split_once('=') {
-                    let v = v.trim().to_string();
-                    match k.trim() {
-                        "openscad" => c.binary = v,
-                        "openscad_args" => c.args = v,
-                        "manifold" => c.manifold = v != "false",
-                        "theme" => c.theme = v,
-                        "mcp" => c.mcp = v != "false",
-                        "update_check" => c.update_check = v != "false",
-                        "autosave_sets" => c.autosave_sets = v == "true",
-                        _ => {}
+        for line in text.lines() {
+            if let Some((k, v)) = line.split_once('=') {
+                let v = v.trim().to_string();
+                match k.trim() {
+                    "openscad" => c.binary = v,
+                    "openscad_args" => c.args = v,
+                    "theme" => c.theme = v,
+                    "mcp" => c.mcp = v != "false",
+                    "update_check" => c.update_check = v != "false",
+                    "autosave_sets" => c.autosave_sets = v == "true",
+                    "bed_w" | "bed_d" | "bed_h" => {
+                        let ok =
+                            |x: &f32| (crate::printer::MIN_MM..=crate::printer::MAX_MM).contains(x);
+                        if let Some(mm) = v.parse::<f32>().ok().filter(ok) {
+                            match k.trim() {
+                                "bed_w" => c.bed.w = mm,
+                                "bed_d" => c.bed.d = mm,
+                                _ => c.bed.h = mm,
+                            }
+                        }
                     }
+                    "closed_cards" => {
+                        c.closed_cards = (v.split(','))
+                            .map(str::trim)
+                            .filter(|s| !s.is_empty())
+                            .map(String::from)
+                            .collect();
+                    }
+                    _ => {}
                 }
             }
         }
@@ -102,65 +134,117 @@ impl Config {
     /// Consent is not here: see `telemetry::set_consent`. A save drops the
     /// consent keys of older versions.
     pub(crate) fn text(&self) -> String {
+        let closed: Vec<&str> = self.closed_cards.iter().map(String::as_str).collect();
         format!(
-            "openscad = {}\nopenscad_args = {}\nmanifold = {}\ntheme = {}\nmcp = {}\nupdate_check = {}\n\
-             autosave_sets = {}\n",
+            "openscad = {}\nopenscad_args = {}\ntheme = {}\nmcp = {}\nupdate_check = {}\n\
+             autosave_sets = {}\nclosed_cards = {}\nbed_w = {}\nbed_d = {}\nbed_h = {}\n",
             self.binary,
             self.args,
-            self.manifold,
             self.theme,
             self.mcp,
             self.update_check,
-            self.autosave_sets
+            self.autosave_sets,
+            closed.join(","),
+            self.bed.w,
+            self.bed.d,
+            self.bed.h
         )
     }
 
     /// The binary to run: `$OPENSCAD`, else the saved value, else the
-    /// first OpenSCAD found (nightly first), else `openscad`.
+    /// first OpenSCAD found with Manifold (nightly first), else the first
+    /// OpenSCAD found, else `openscad`.
     pub fn binary(&self) -> String {
         match std::env::var("OPENSCAD") {
             Ok(b) if !b.is_empty() => b,
             _ if !self.binary.trim().is_empty() => self.binary.trim().to_string(),
-            _ => detected().to_string(),
+            _ => detected(),
         }
     }
 
-    /// All extra arguments, with `--backend=manifold` added when it applies.
+    /// All extra arguments, with `--backend=manifold` added. A `--backend`
+    /// argument of the user stays and replaces it (see `cgal_arg`).
     pub fn args(&self) -> Vec<String> {
         let extra = std::env::var("OPENSCAD_ARGS").unwrap_or_else(|_| self.args.clone());
-        let mut args: Vec<String> = extra.split_whitespace().map(String::from).collect();
-        if self.manifold
-            && !args.iter().any(|a| a.starts_with("--backend"))
-            && probe(&self.binary()).manifold
-        {
-            args.push("--backend=manifold".into());
-        }
-        args
+        with_backend(&extra)
     }
 }
 
-/// Looks for OpenSCAD once: on the PATH, then in the usual install places.
-fn detected() -> &'static str {
-    static FOUND: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-    FOUND.get_or_init(|| {
-        // On Windows openscad.com is the console build: it reports errors.
-        let exts: &[&str] = if cfg!(windows) {
-            &[".com", ".exe"]
-        } else {
-            &[""]
-        };
-        let paths: Vec<PathBuf> = std::env::var_os("PATH")
-            .map(|p| std::env::split_paths(&p).collect())
-            .unwrap_or_default();
-        for name in ["openscad-nightly", "openscad"] {
-            for dir in &paths {
-                for ext in exts {
-                    if dir.join(format!("{name}{ext}")).is_file() {
-                        return format!("{name}{ext}");
-                    }
-                }
-            }
+/// The arguments in `extra`, with `--backend=manifold` added when `extra`
+/// has no `--backend` argument.
+fn with_backend(extra: &str) -> Vec<String> {
+    let mut args: Vec<String> = extra.split_whitespace().map(String::from).collect();
+    if !args.iter().any(|a| a.starts_with("--backend")) {
+        args.push("--backend=manifold".into());
+    }
+    args
+}
+
+/// True when the extra arguments `args` select the CGAL backend, as
+/// `--backend=cgal` or `--backend cgal`. The settings then show a warning.
+pub fn cgal_arg(args: &str) -> bool {
+    let list: Vec<&str> = args.split_whitespace().collect();
+    list.iter().enumerate().any(|(i, a)| {
+        a.eq_ignore_ascii_case("--backend=cgal")
+            || (*a == "--backend"
+                && list
+                    .get(i + 1)
+                    .is_some_and(|v| v.eq_ignore_ascii_case("cgal")))
+    })
+}
+
+/// The binary that the search found. `forget` clears it.
+static FOUND: Mutex<Option<String>> = Mutex::new(None);
+/// The probe of each binary. `forget` clears it.
+static PROBES: Mutex<Option<HashMap<String, Probe>>> = Mutex::new(None);
+
+/// Looks for OpenSCAD once (see `Config::binary`).
+fn detected() -> String {
+    let mut found = FOUND.lock().unwrap();
+    found
+        .get_or_insert_with(|| first_with_manifold(&candidates(), |b| probe(b).manifold))
+        .clone()
+}
+
+/// Forgets the probes and the binary that the search found. The next call
+/// probes again, for example after the user installs a snapshot.
+pub fn forget() {
+    *FOUND.lock().unwrap() = None;
+    *PROBES.lock().unwrap() = None;
+}
+
+/// The first binary of `found` that has Manifold, else the first one, else
+/// `openscad`.
+fn first_with_manifold(found: &[String], manifold: impl Fn(&str) -> bool) -> String {
+    found
+        .iter()
+        .find(|b| manifold(b))
+        .or(found.first())
+        .map_or_else(|| "openscad".to_string(), String::clone)
+}
+
+/// The OpenSCAD binaries on this computer, in search order: on the PATH
+/// (`openscad-nightly` first), then in the usual install places.
+fn candidates() -> Vec<String> {
+    let mut out = Vec::new();
+    // On Windows openscad.com is the console build: it reports errors.
+    let exts: &[&str] = if cfg!(windows) {
+        &[".com", ".exe"]
+    } else {
+        &[""]
+    };
+    let paths: Vec<PathBuf> = std::env::var_os("PATH")
+        .map(|p| std::env::split_paths(&p).collect())
+        .unwrap_or_default();
+    for name in ["openscad-nightly", "openscad"] {
+        let hit = paths
+            .iter()
+            .find_map(|dir| (exts.iter()).find(|ext| dir.join(format!("{name}{ext}")).is_file()));
+        if let Some(ext) = hit {
+            out.push(format!("{name}{ext}"));
         }
+    }
+    {
         let known: &[&str] = if cfg!(windows) {
             &[
                 r"C:\Program Files\OpenSCAD (Nightly)\openscad.com",
@@ -178,11 +262,101 @@ fn detected() -> &'static str {
         } else {
             &[]
         };
-        known
-            .iter()
-            .find(|p| Path::new(p).is_file())
-            .map_or_else(|| "openscad".to_string(), |p| p.to_string())
+        out.extend(
+            (known.iter())
+                .filter(|p| Path::new(p).is_file())
+                .map(|p| p.to_string()),
+        );
+    }
+    out
+}
+
+/// The download page of the development snapshots.
+pub const SNAPSHOTS_URL: &str = "https://openscad.org/downloads.html#snapshots";
+
+/// The steps to install an OpenSCAD development snapshot on this system.
+/// Each step has a text and an optional line to copy.
+pub fn install_steps() -> Vec<(&'static str, Option<&'static str>)> {
+    if cfg!(windows) {
+        vec![
+            (
+                "Download a development snapshot for Windows from the OpenSCAD download page.",
+                None,
+            ),
+            (
+                "Install it. CoCAD looks in C:\\Program Files\\OpenSCAD (Nightly) and \
+                 C:\\Program Files\\OpenSCAD.",
+                None,
+            ),
+            ("Click Check again.", None),
+        ]
+    } else if cfg!(target_os = "macos") {
+        vec![
+            (
+                "Download a development snapshot for macOS from the OpenSCAD download page.",
+                None,
+            ),
+            ("Install it in the Applications folder.", None),
+            ("Click Check again.", None),
+        ]
+    } else {
+        vec![
+            (
+                "Debian and Ubuntu: add the OpenSCAD repository on download.opensuse.org \
+                 (home:/t-paul). On Debian 13, the source line is below. Other releases use \
+                 another folder name.",
+                Some("deb https://download.opensuse.org/repositories/home:/t-paul/Debian_13/ ./"),
+            ),
+            (
+                "Add the signing key of the repository, as the OpenSCAD download page shows.",
+                None,
+            ),
+            (
+                "Install the package openscad-nightly.",
+                Some("sudo apt update && sudo apt install openscad-nightly"),
+            ),
+            ("Click Check again.", None),
+        ]
+    }
+}
+
+/// The problem when `probe` of `binary` has no Manifold backend. `None`
+/// when it has one.
+pub fn problem(binary: &str, probe: &Probe) -> Option<String> {
+    if probe.manifold {
+        return None;
+    }
+    Some(if probe.version == "not found" {
+        format!("OpenSCAD was not found ({binary}).")
+    } else {
+        format!(
+            "{} ({binary}) has no Manifold backend.",
+            probe.version.trim()
+        )
     })
+}
+
+/// An error when the OpenSCAD binary of `cfg` has no Manifold backend. The
+/// command line and `cocad mcp` stop with it.
+pub fn check(cfg: &Config) -> Result<()> {
+    let binary = cfg.binary();
+    let Some(problem) = problem(&binary, &probe(&binary)) else {
+        return Ok(());
+    };
+    let mut text = format!(
+        "{problem}\nCoCAD needs an OpenSCAD development snapshot with the Manifold backend.\n"
+    );
+    for (i, (step, line)) in install_steps().iter().enumerate() {
+        let step = step.replace("Click Check again.", "Run the command again.");
+        text.push_str(&format!("{}. {step}\n", i + 1));
+        if let Some(line) = line {
+            text.push_str(&format!("   {line}\n"));
+        }
+    }
+    text.push_str(&format!(
+        "Download page: {SNAPSHOTS_URL}\nTo use another binary, set $OPENSCAD or the binary in File > Settings > OpenSCAD."
+    ));
+    bail!(text)
 }
 
 /// A command that does not open a console window on Windows.
@@ -216,8 +390,7 @@ pub struct Probe {
 
 /// Version and features of an OpenSCAD binary. Cached per binary.
 pub fn probe(binary: &str) -> Probe {
-    static CACHE: Mutex<Option<HashMap<String, Probe>>> = Mutex::new(None);
-    let mut cache = CACHE.lock().unwrap();
+    let mut cache = PROBES.lock().unwrap();
     let map = cache.get_or_insert_with(HashMap::new);
     if let Some(p) = map.get(binary) {
         return p.clone();
@@ -341,4 +514,100 @@ pub fn render(
         log,
         elapsed: start.elapsed(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn config_text_round_trip() {
+        let mut c = Config {
+            binary: "/opt/openscad".into(),
+            args: "--enable=lazy-union".into(),
+            theme: "dark".into(),
+            mcp: false,
+            autosave_sets: true,
+            ..Config::default()
+        };
+        c.closed_cards = ["Mesh", "Print settings"].map(String::from).into();
+        c.bed = crate::optimize::Area {
+            w: 250.0,
+            d: 210.0,
+            h: 220.5,
+        };
+        let text = c.text();
+        assert!(
+            text.contains("bed_w = 250\nbed_d = 210\nbed_h = 220.5\n"),
+            "{text}"
+        );
+        assert!(
+            text.contains("closed_cards = Mesh,Print settings\n"),
+            "{text}"
+        );
+        assert_eq!(Config::parse(&text), c);
+        assert_eq!(Config::parse(&Config::default().text()), Config::default());
+    }
+
+    #[test]
+    fn config_reads_old_and_unknown_keys() {
+        let c = Config::parse(
+            "theme = light\nclosed_cards = , Build ,\nmanifold = false\nother = 1\nno equals sign\n",
+        );
+        assert_eq!(c.theme, "light");
+        assert_eq!(c.closed_cards, BTreeSet::from(["Build".to_string()]));
+        assert!(!Config::default().text().contains("manifold"));
+        // Print area values out of the limits keep the default.
+        let c = Config::parse("bed_w = 300\nbed_d = -5\nbed_h = x\n");
+        let default = crate::optimize::Area::default();
+        assert_eq!((c.bed.w, c.bed.d, c.bed.h), (300.0, default.d, default.h));
+    }
+
+    #[test]
+    fn manifold_is_always_added_unless_the_user_selects_a_backend() {
+        assert_eq!(with_backend(""), ["--backend=manifold"]);
+        assert_eq!(
+            with_backend("--enable=lazy-union"),
+            ["--enable=lazy-union", "--backend=manifold"]
+        );
+        assert_eq!(with_backend("--backend=cgal"), ["--backend=cgal"]);
+        assert!(cgal_arg("--backend=cgal"));
+        assert!(cgal_arg("-q --backend CGAL"));
+        assert!(!cgal_arg("--backend=manifold"));
+        assert!(!cgal_arg("--backend"));
+        assert!(!cgal_arg(""));
+    }
+
+    #[test]
+    fn search_takes_the_first_binary_with_manifold() {
+        let found = ["openscad-nightly".to_string(), "openscad".to_string()];
+        assert_eq!(first_with_manifold(&found, |b| b == "openscad"), "openscad");
+        assert_eq!(first_with_manifold(&found, |_| true), "openscad-nightly");
+        assert_eq!(first_with_manifold(&found, |_| false), "openscad-nightly");
+        assert_eq!(first_with_manifold(&[], |_| true), "openscad");
+    }
+
+    #[test]
+    fn problem_names_the_version_or_not_found() {
+        let old = Probe {
+            version: "OpenSCAD version 2021.01".into(),
+            manifold: false,
+        };
+        let text = problem("/usr/bin/openscad", &old).unwrap();
+        assert!(
+            text.contains("2021.01") && text.contains("/usr/bin/openscad"),
+            "{text}"
+        );
+        let none = Probe {
+            version: "not found".into(),
+            manifold: false,
+        };
+        assert!(problem("openscad", &none).unwrap().contains("not found"));
+        let nightly = Probe {
+            version: "OpenSCAD version 2026.11.11.nightly".into(),
+            manifold: true,
+        };
+        assert_eq!(problem("openscad-nightly", &nightly), None);
+        assert!(!install_steps().is_empty());
+    }
 }

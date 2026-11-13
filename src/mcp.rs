@@ -29,7 +29,7 @@ const CALL_TIMEOUT: Duration = Duration::from_secs(70);
 const INSTRUCTIONS: &str = "CoCAD shows one OpenSCAD model in a desktop window. \
 Start with get_state, then get_params to see the Customizer parameters and their limits. \
 Use get_source to read the model code. Use view_model to see the model as an image. \
-set_params changes values in the window and waits for the render. \
+set_params changes values in the window and waits for the build (the OpenSCAD run). \
 The mesh data in the reply shows the result. If the status is failed, read the error and the log.";
 
 fn endpoint_dir() -> Option<PathBuf> {
@@ -294,7 +294,7 @@ pub(crate) fn tools() -> Json {
         json!({ "type": "boolean", "description": "Show print layer lines" }),
     );
 
-    let wait = json!({ "type": "boolean", "description": "Wait for the render. Default: true." });
+    let wait = json!({ "type": "boolean", "description": "Wait for the build. Default: true." });
     json!([
         tool(
             "list_windows",
@@ -316,7 +316,7 @@ pub(crate) fn tools() -> Json {
         ),
         tool(
             "get_state",
-            "Get the loaded model and the app state: file, render status, last error, mesh size, volume and open edges, changed parameters, parameter sets, view mode, parts, part colors, explode, section cut and the end of the OpenSCAD log.",
+            "Get the loaded model and the app state: file, build status, last error, mesh size, volume and open edges, changed parameters, parameter sets, view mode, parts, part colors, explode, section cut and the end of the OpenSCAD log.",
             true,
             false,
             no_args()
@@ -358,7 +358,7 @@ pub(crate) fn tools() -> Json {
         ),
         tool(
             "set_params",
-            "Change Customizer parameters in the window. The change is all or nothing: one bad value rejects the call. Returns the state after the render.",
+            "Change Customizer parameters in the window. The change is all or nothing: one bad value rejects the call. Returns the state after the build.",
             false,
             false,
             json!({
@@ -369,7 +369,7 @@ pub(crate) fn tools() -> Json {
                         "description": "Parameter names and new values. Vectors are arrays of numbers.",
                         "additionalProperties": true,
                     },
-                    "render": { "type": "boolean", "description": "Render now. Default: true. With false, the app follows its Auto render switch." },
+                    "build": { "type": "boolean", "description": "Build now. Default: true. With false, the app follows its Auto build switch. The old name render also works." },
                     "wait": wait,
                 },
                 "required": ["values"],
@@ -389,8 +389,8 @@ pub(crate) fn tools() -> Json {
             })
         ),
         tool(
-            "render",
-            "Run OpenSCAD again with the current values. Reads the file again when it changed on disk.",
+            "build",
+            "Build the model: run OpenSCAD again with the current values. Reads the file again when it changed on disk. The old name render also works.",
             false,
             false,
             json!({ "type": "object", "properties": { "wait": wait } })
@@ -424,7 +424,7 @@ pub(crate) fn tools() -> Json {
         ),
         tool(
             "export_model",
-            "Save the current mesh. The file extension sets the format: .stl, .3mf or .step. With slicer, renders each cocad_part part and writes a multicolor .3mf for that slicer. Waits for a running render. Fails when the last render failed.",
+            "Save the current mesh. The file extension sets the format: .stl, .3mf or .step. With slicer, builds each cocad_part part and writes a multicolor .3mf for that slicer. Waits for a running build. Fails when the last build failed.",
             false,
             true,
             json!({
@@ -446,7 +446,7 @@ pub(crate) fn tools() -> Json {
         ),
         tool(
             "slice",
-            "Slice the model and return layers, filament, weight and a rough print time. Given values also change the Slice panel.",
+            "Slice the model and return layers, filament, weight and a rough print time. Given values also change the print settings of the Optimize tab.",
             false,
             false,
             json!({
@@ -470,18 +470,18 @@ pub(crate) fn tools() -> Json {
             json!({
                 "type": "object",
                 "properties": {
-                    "mode": { "type": "string", "enum": ["model", "slice", "photo"] },
+                    "mode": { "type": "string", "enum": ["model", "optimize", "render"], "description": "The tab of the right panel. The old names slice and photo also work." },
                     "view": { "type": "string", "enum": ["iso", "top", "front", "right"] },
                     "fit": { "type": "boolean", "description": "Fit the model in the view" },
                     "wireframe": { "type": "boolean" },
                     "grid": { "type": "boolean" },
-                    "layer": { "type": "integer", "description": "Slice layer, from 1" },
+                    "layer": { "type": "integer", "description": "Slice layer of the Optimize tab, from 1" },
                     "part_colors": { "type": "boolean", "description": "Show each part in a different color. The 3D view, the photo and the images use the part colors." },
-                    "explode": { "type": "number", "description": "Move the parts apart by this distance in mm. The part farthest from the model center moves this far. 0 turns the explode off. The Slice tab shows no explode." },
+                    "explode": { "type": "number", "description": "Move the parts apart by this distance in mm. The part farthest from the model center moves this far. 0 turns the explode off. The Optimize tab shows no explode." },
                     "explode_axis": { "type": "string", "enum": ["all", "x", "y", "z"], "description": "Explode direction: all moves each part away from the model center, x, y or z moves the parts along that axis only. Turns the explode on." },
                     "section": {
                         "type": "object",
-                        "description": "Section cut: cut the model across x, y or z and keep one side, for example {\"x\": {\"at\": 12.5, \"keep\": \"+\"}}. The object replaces all cuts: a missing or null axis has no cut, and {} turns all cuts off. Two or three cuts together keep only the space that all of them keep. The cut moves with each part in the explode. The 3D view, the photo and the images show the cut. The Slice tab and the export do not.",
+                        "description": "Section cut: cut the model across x, y or z and keep one side, for example {\"x\": {\"at\": 12.5, \"keep\": \"+\"}}. The object replaces all cuts: a missing or null axis has no cut, and {} turns all cuts off. Two or three cuts together keep only the space that all of them keep. The cut moves with each part in the explode. The 3D view, the photo and the images show the cut. The Optimize tab and the export do not.",
                         "properties": {
                             "x": { "type": ["object", "null"], "properties": { "at": { "type": "number", "description": "Position on the axis in mm. Default: the model center." }, "keep": { "type": "string", "enum": ["+", "-"], "description": "+ keeps the side above the position, - the side below. Default +." } } },
                             "y": { "type": ["object", "null"], "properties": { "at": { "type": "number", "description": "Position on the axis in mm. Default: the model center." }, "keep": { "type": "string", "enum": ["+", "-"], "description": "+ keeps the side above the position, - the side below. Default +." } } },
@@ -508,6 +508,14 @@ fn content(v: &Json) -> Json {
 }
 
 // --------------------------------------------------------------- JSON-RPC ----
+
+/// The current name of a tool. `render` is the name of `build` before 0.7.
+fn new_name(name: &str) -> &str {
+    match name {
+        "render" => "build",
+        other => other,
+    }
+}
 
 #[derive(Default)]
 struct Bridge {
@@ -547,6 +555,7 @@ impl Bridge {
     }
 
     fn call(&mut self, name: &str, args: &Json) -> Result<Json, String> {
+        let name = new_name(name);
         match name {
             "list_windows" => self.list_windows(),
             "select_window" => {
@@ -732,6 +741,18 @@ mod tests {
         names.dedup();
         assert_eq!(n, names.len());
         assert!(list.iter().all(|t| t["inputSchema"]["type"] == "object"));
+    }
+
+    #[test]
+    fn render_is_an_alias_of_build() {
+        let names: Vec<String> = (tools().as_array().unwrap().iter())
+            .map(|t| t["name"].as_str().unwrap().to_string())
+            .collect();
+        assert!(names.contains(&"build".to_string()));
+        assert!(!names.contains(&"render".to_string()));
+        assert_eq!(new_name("render"), "build");
+        assert_eq!(new_name("build"), "build");
+        assert_eq!(new_name("slice"), "slice");
     }
 
     #[test]

@@ -103,13 +103,13 @@ shot 5-parts 3
 quit
 
 # Slice preview.
-start --slice "$models/honeycomb-tray.scad"
+start --optimize "$models/honeycomb-tray.scad"
 mcp set_view '{"view":"iso","fit":true,"layer":60}'
 shot 6-slice 2
 
 # Photo render.
 quit
-start --photo "$models/gear.scad"
+start --render "$models/gear.scad"
 shot 7-photo 60
 quit
 

@@ -16,6 +16,7 @@ mod params;
 mod parts;
 mod pathtrace;
 mod presets;
+mod printer;
 mod recent;
 mod render;
 mod slicer;
@@ -32,12 +33,14 @@ const USAGE: &str =
     "CoCAD: view OpenSCAD models, edit Customizer parameters, export and preview slices.
 
 Usage:
-  cocad [--slice|--photo] [FILE.scad]    Open the viewer (start in slice or photo view)
+  cocad [--optimize|--render] [FILE.scad]
+                                               Open the viewer (start in the Optimize or
+                                               Render tab; --slice and --photo also work)
   cocad mcp                              Serve MCP on stdin and stdout, for Claude Desktop and
                                                other MCP clients. Controls the open window.
   cocad params FILE.scad                 List the Customizer parameters
   cocad export FILE.scad -o OUT [-P SET] [-D name=value]... [--for prusa|orca]
-                                               Render and write OUT (.stl, .3mf or .step).
+                                               Build and write OUT (.stl, .3mf or .step).
                                                --for writes a multicolor 3MF for that slicer.
   cocad slice FILE.scad [-P SET] [-D name=value]... [--layer-height MM] [--infill PCT] [--walls N]
                                                Slice and print estimates
@@ -54,14 +57,15 @@ Environment:
   OPENSCAD_ARGS  Extra OpenSCAD arguments (overrides the saved setting)
 
 Settings are saved in $XDG_CONFIG_HOME/cocad/config (Settings window in the app).
---backend=manifold is added when the OpenSCAD binary supports it.
+CoCAD needs an OpenSCAD development snapshot with the Manifold backend, and adds
+--backend=manifold. Get one at https://openscad.org/downloads.html#snapshots
 ";
 
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     #[cfg(windows)]
     if args.first().is_some_and(|a| {
-        a.starts_with('-') && a != "--slice" && a != "--photo"
+        a.starts_with('-') && start_tab(a).is_none()
             || matches!(a.as_str(), "params" | "export" | "slice" | "photo")
     }) {
         attach_console();
@@ -75,14 +79,33 @@ fn main() -> Result<()> {
             println!("cocad {}", env!("CARGO_PKG_VERSION"));
             Ok(())
         }
-        Some("mcp") => mcp::run(),
-        Some("params") => cmd_params(&args[1..]),
-        Some("export") => cmd_export(&args[1..]),
-        Some("slice") => cmd_slice(&args[1..]),
-        Some("photo") => cmd_photo(&args[1..]),
-        Some(m @ ("--slice" | "--photo")) => gui(args.get(1).map(PathBuf::from), &m[2..]),
+        Some(cmd @ ("mcp" | "params" | "export" | "slice" | "photo")) => {
+            // These stop when OpenSCAD has no Manifold. The window shows a
+            // notice instead.
+            openscad::check(&openscad::Config::load())?;
+            match cmd {
+                "mcp" => mcp::run(),
+                "params" => cmd_params(&args[1..]),
+                "export" => cmd_export(&args[1..]),
+                "slice" => cmd_slice(&args[1..]),
+                _ => cmd_photo(&args[1..]),
+            }
+        }
+        Some(a) if start_tab(a).is_some() => gui(
+            args.get(1).map(PathBuf::from),
+            start_tab(a).unwrap_or("model"),
+        ),
         Some(a) if a.starts_with('-') => bail!("unknown option {a}\n\n{USAGE}"),
         file => gui(file.map(PathBuf::from), "model"),
+    }
+}
+
+/// The tab of a start flag. `--slice` and `--photo` are the names before 0.7.
+fn start_tab(flag: &str) -> Option<&'static str> {
+    match flag {
+        "--optimize" | "--slice" => Some("optimize"),
+        "--render" | "--photo" => Some("render"),
+        _ => None,
     }
 }
 
@@ -215,7 +238,7 @@ fn parse_batch(args: &[String]) -> Result<Batch> {
     })
 }
 
-fn render(b: &Batch) -> Result<mesh::Mesh> {
+fn build(b: &Batch) -> Result<mesh::Mesh> {
     let cancel = Arc::new(AtomicBool::new(false));
     let out = openscad::render(
         &openscad::Config::load(),
@@ -226,7 +249,7 @@ fn render(b: &Batch) -> Result<mesh::Mesh> {
     let bb = out.mesh.bounds().unwrap();
     let s = bb.size();
     eprintln!(
-        "rendered {} triangles, {:.2} x {:.2} x {:.2} mm in {:.2} s",
+        "built {} triangles, {:.2} x {:.2} x {:.2} mm in {:.2} s",
         out.mesh.triangles.len(),
         s.x,
         s.y,
@@ -302,7 +325,7 @@ fn cmd_export(args: &[String]) -> Result<()> {
             );
         }
     } else {
-        export::write(&out, &render(&b)?, &meta)?;
+        export::write(&out, &build(&b)?, &meta)?;
     }
     eprintln!("wrote {}", out.display());
     Ok(())
@@ -310,7 +333,7 @@ fn cmd_export(args: &[String]) -> Result<()> {
 
 fn cmd_slice(args: &[String]) -> Result<()> {
     let b = parse_batch(args)?;
-    let mesh = render(&b)?;
+    let mesh = build(&b)?;
     let t = std::time::Instant::now();
     let r = slicer::slice(&mesh, &b.settings);
     let st = &r.stats;
@@ -325,7 +348,7 @@ fn cmd_slice(args: &[String]) -> Result<()> {
 fn cmd_photo(args: &[String]) -> Result<()> {
     let b = parse_batch(args)?;
     let out = b.out.clone().context("missing -o OUT.png")?;
-    let mesh = std::sync::Arc::new(render(&b)?);
+    let mesh = std::sync::Arc::new(build(&b)?);
     let p = &b.photo;
     let look = pathtrace::Look {
         color: pathtrace::srgb(p.color),

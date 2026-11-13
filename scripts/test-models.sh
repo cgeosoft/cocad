@@ -40,7 +40,7 @@ for m in "${models[@]}"; do
         if s=$("$bin" slice "$m" 2>/dev/null); then
             layers=$(echo "$s" | awk '/^layers/{print $2}')
             grams=$(echo "$s" | awk '/^filament/{print $4}')
-            tris=$("$bin" export "$m" -o "$out/x.stl" 2>&1 | sed -n 's/rendered \([0-9]*\) triangles.*/\1/p')
+            tris=$("$bin" export "$m" -o "$out/x.stl" 2>&1 | sed -n 's/built \([0-9]*\) triangles.*/\1/p')
             detail="$tris tris, $layers layers, $grams g"
         else
             ok=0; detail="slice failed"

@@ -52,16 +52,16 @@ static CLIENT: LazyLock<Client> = LazyLock::new(|| {
 #[derive(Clone, Copy, Debug)]
 pub enum Screen {
     Model,
-    Slice,
-    Photo,
+    Optimize,
+    Render,
 }
 
 impl Screen {
     fn as_str(self) -> &'static str {
         match self {
             Screen::Model => "model",
-            Screen::Slice => "slice",
-            Screen::Photo => "photo",
+            Screen::Optimize => "optimize",
+            Screen::Render => "render",
         }
     }
 }
@@ -697,7 +697,7 @@ pub(crate) mod tests {
             format: Format::ThreeMf,
         };
         let changed = Event::ViewChanged {
-            view: Screen::Slice,
+            view: Screen::Optimize,
         };
         let events = [
             (STARTED, vec!["source", "view", "first_run"]),
