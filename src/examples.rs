@@ -11,9 +11,10 @@ macro_rules! file {
 }
 
 /// Menu label and file name. Models that must fail (`// expect: error`) are not here.
-pub const MENU: [(&str, &str); 10] = [
+pub const MENU: [(&str, &str); 11] = [
     ("Bracket", "bracket.scad"),
     ("Demo box", "demo-box.scad"),
+    ("Desk dock", "desk-dock.scad"),
     ("Gear", "gear.scad"),
     ("Honeycomb tray", "honeycomb-tray.scad"),
     ("Knob", "knob.scad"),
@@ -25,9 +26,10 @@ pub const MENU: [(&str, &str); 10] = [
 ];
 
 /// The menu models and the libraries they include: path and source.
-const FILES: [(&str, &str); 13] = [
+const FILES: [(&str, &str); 14] = [
     file!("bracket.scad"),
     file!("demo-box.scad"),
+    file!("desk-dock.scad"),
     file!("gear.scad"),
     file!("honeycomb-tray.scad"),
     file!("knob.scad"),
