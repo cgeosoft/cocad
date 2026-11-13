@@ -17,7 +17,7 @@ Methods 1 and 2 use the part list of the model. It comes from the first of these
 For a model with a multicolor list that shows all parts, CoCAD builds each part in the background. See [Write models for CoCAD](Write-models-for-CoCAD#parts-for-a-multicolor-print).
 
 - When the parts are done, they replace the solids, so parts that touch stay separate.
-- Shapes that are in no part become "Other" parts.
+- Shapes that are in no part become "Other" parts. A seam where two parts touch is not an "Other" part.
 - Until the parts are done, the view shows the solids of the model in orange.
 - A model with a multicolor list that shows one part keeps the solids of the mesh.
 
@@ -31,7 +31,7 @@ When `part` is `all`:
 2. Each solid of each value is one part, so parts of different values that touch stay separate.
 3. Solids that touch in one value become one solid, for example four segments of one board. So CoCAD also applies the [module split](#method-3-the-module-split) to each value. When its pieces give more solids than the build of the value, each solid of each piece is one part.
 4. A part gets the name of its value. A value that gives two or more parts gives "Name 1", "Name 2" and so on. The solids of one build are in volume order, the largest first. The pieces of the module split are in the order of the model.
-5. Shapes of the `all` build that are in no value become "Other" parts.
+5. Shapes of the `all` build that are in no value become "Other" parts. Where two parts touch, for example a stand on a plate, the `all` build can divide the faces there in a different way. These areas are on the surface of a part, so they are not "Other" parts.
 6. A value that gives no 3D geometry gives no part.
 7. In the [Optimize](Optimize) tab, each part is a separate print part.
 

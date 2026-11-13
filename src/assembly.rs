@@ -245,7 +245,8 @@ impl Assembly {
     ///
     /// With `Colors` and `Labeled`, the triangles of `main` that are in no
     /// part, for example hardware previews, become the parts "Other 1",
-    /// "Other 2" and so on (one shell each), or "Other" for one shell. The
+    /// "Other 2" and so on (one shell each), or "Other" for one shell. A seam
+    /// where two parts touch is not a part (see `leftover`). The
     /// module split gives no "Other" part: its parts hold all of the model,
     /// but they render from the CSG tree, which has rounded numbers, so
     /// their corners do not agree with the corners of `main`.
@@ -626,25 +627,121 @@ fn leftover(main: &Mesh, parts: &[Part]) -> Mesh {
     let known: HashSet<[u32; 3]> = (parts.iter())
         .flat_map(|p| p.mesh.vertices.iter().map(|&v| vertex_key(v)))
         .collect();
-    let mut out = Mesh::default();
-    let mut index = vec![u32::MAX; main.vertices.len()];
     let colors = crate::parts::face_colors(main, parts);
-    for (t, c) in main.triangles.iter().zip(colors) {
-        let corner = |v: &u32| known.contains(&vertex_key(main.vertices[*v as usize]));
-        if c.is_some() || t.iter().all(corner) {
-            continue;
-        }
+    let rest = (main.triangles.iter().zip(colors))
+        .filter_map(|(t, c)| {
+            let corner = |v: &u32| known.contains(&vertex_key(main.vertices[*v as usize]));
+            (c.is_none() && !t.iter().all(corner)).then_some(*t)
+        })
+        .collect();
+    // Where two parts touch, for example a stand on a plate, the build of
+    // all parts can divide the faces there in a different way, with corners
+    // that no part has. These triangles are in no part, but they lie on the
+    // surface of a part: they are a seam. A part of the model that is in no
+    // part list has its own surface.
+    let out = compact(&main.vertices, off_surface(main, rest, parts));
+    // A seam that the surface test did not do (see `SURFACE_WORK`) is a
+    // flat patch when the parts touch on one face.
+    let shells = shell_groups(&out);
+    if !shells.iter().any(|s| flat(&out, s)) {
+        return out;
+    }
+    let solid = (shells.into_iter())
+        .filter(|s| !flat(&out, s))
+        .flatten()
+        .map(|t| out.triangles[t as usize]);
+    compact(&out.vertices, solid)
+}
+
+/// The distance in mm from a part surface below which a leftover triangle
+/// is a seam.
+const ON_SURFACE: f32 = 1e-3;
+/// More work than this (leftover triangles times part triangles near them)
+/// skips the surface test.
+const SURFACE_WORK: usize = 20_000_000;
+
+/// The triangles `tris` of `main` whose center is not on the surface of a
+/// part. The test is per triangle, against the part triangles in the
+/// bounds of `tris`.
+fn off_surface(main: &Mesh, tris: Vec<[u32; 3]>, parts: &[Part]) -> Vec<[u32; 3]> {
+    let corners = |t: &[u32; 3]| t.map(|v| main.vertices[v as usize]);
+    let (mut min, mut max) = (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN));
+    for v in tris.iter().flat_map(corners) {
+        min = min.min(v);
+        max = max.max(v);
+    }
+    let (min, max) = (min - ON_SURFACE, max + ON_SURFACE);
+    let near: Vec<[Vec3; 3]> = (parts.iter())
+        .flat_map(|p| (0..p.mesh.triangles.len()).map(|i| p.mesh.tri(i)))
+        .filter(|[a, b, c]| a.min(*b).min(*c).cmple(max).all() && min.cmple(a.max(*b).max(*c)).all())
+        .collect();
+    if near.is_empty() || tris.len().saturating_mul(near.len()) > SURFACE_WORK {
+        return tris;
+    }
+    (tris.into_iter())
+        .filter(|t| {
+            let [a, b, c] = corners(t);
+            let center = (a + b + c) / 3.0;
+            !near.iter().any(|&n| on_triangle(center, n))
+        })
+        .collect()
+}
+
+/// True when `p` is on the triangle `[a, b, c]`, to `ON_SURFACE`.
+fn on_triangle(p: Vec3, [a, b, c]: [Vec3; 3]) -> bool {
+    let n = (b - a).cross(c - a);
+    let n2 = n.length_squared();
+    if n2 <= f32::MIN_POSITIVE {
+        return false;
+    }
+    let d = (p - a).dot(n);
+    if d * d > ON_SURFACE * ON_SURFACE * n2 {
+        return false;
+    }
+    // `p` moved onto the plane of the triangle: inside when it is on the
+    // inner side of each edge. Each value is a barycentric weight times n2.
+    let q = p - n * (d / n2);
+    let tolerance = -1e-5 * n2;
+    (b - a).cross(q - a).dot(n) >= tolerance
+        && (c - b).cross(q - b).dot(n) >= tolerance
+        && (a - c).cross(q - c).dot(n) >= tolerance
+}
+
+/// A mesh of the triangles `tris`, with only the vertices of `vertices`
+/// that they use.
+fn compact(vertices: &[Vec3], tris: impl IntoIterator<Item = [u32; 3]>) -> Mesh {
+    let mut out = Mesh::default();
+    let mut index = vec![u32::MAX; vertices.len()];
+    for t in tris {
         let t = t.map(|v| {
             let v = v as usize;
             if index[v] == u32::MAX {
                 index[v] = out.vertices.len() as u32;
-                out.vertices.push(main.vertices[v]);
+                out.vertices.push(vertices[v]);
             }
             index[v]
         });
         out.triangles.push(t);
     }
     out
+}
+
+/// True when all corners of the triangles `tris` of `mesh` are in one plane,
+/// to 0.001 mm.
+fn flat(mesh: &Mesh, tris: &[u32]) -> bool {
+    let normal = (tris.iter())
+        .map(|&t| {
+            let [a, b, c] = mesh.tri(t as usize);
+            (b - a).cross(c - a)
+        })
+        .max_by(|x, y| x.length_squared().total_cmp(&y.length_squared()));
+    let Some(n) = normal.and_then(|n| n.try_normalize()) else {
+        return true;
+    };
+    let p = mesh.tri(tris[0] as usize)[0];
+    (tris.iter())
+        .flat_map(|&t| mesh.tri(t as usize))
+        .all(|v| (v - p).dot(n).abs() < 1e-3)
 }
 
 /// The same key for the same position, as in `Mesh::from_soup`.
@@ -962,6 +1059,82 @@ mod tests {
         let a = Assembly::from_split(&Mesh::from_soup(&main), &split);
         let colors: Vec<_> = a.parts.iter().map(|p| p.color).collect();
         assert_eq!(colors, [None, Some([1, 2, 3]), Some([1, 2, 3]), None]);
+    }
+
+    #[test]
+    fn a_flat_seam_between_parts_is_no_other_part() {
+        let plate = cube_soup(10.0, Vec3::ZERO, false);
+        let stand = cube_soup(10.0, Vec3::new(10.0, 0.0, 0.0), false);
+        let screw = cube_soup(2.0, Vec3::new(50.0, 0.0, 0.0), false);
+        // The build of all parts gives the face at z = 10 a new corner that
+        // no part has. The triangle has one corner of each part.
+        let seam = [[
+            Vec3::new(0.0, 0.0, 10.0),
+            Vec3::new(20.0, 10.0, 10.0),
+            Vec3::new(7.5, 3.3, 10.0),
+        ]];
+        let main: Vec<_> = [&plate[..], &stand, &seam, &screw]
+            .into_iter()
+            .flatten()
+            .copied()
+            .collect();
+        let parts = [
+            part("Plate", [0xff; 3], &plate),
+            part("Stand", [0xff; 3], &stand),
+        ];
+        let a = Assembly::from_parts(&Mesh::from_soup(&main), &parts, &Kind::Labeled, &[]);
+        check_ranges(&a);
+        let names: Vec<_> = a.parts.iter().map(|p| p.name.as_str()).collect();
+        // The screw is a solid in no part: it stays.
+        assert_eq!(names, ["Plate", "Stand", "Other"]);
+        assert!((a.parts[2].volume - 8.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn a_seam_around_an_edge_is_no_other_part() {
+        let plate = cube_soup(10.0, Vec3::ZERO, false);
+        let stand = cube_soup(10.0, Vec3::new(10.0, 0.0, 0.0), false);
+        let screw = cube_soup(2.0, Vec3::new(50.0, 0.0, 0.0), false);
+        // Two triangles with new corners, on the top and the front face of
+        // the plate. They share an edge, so they are one shell, not flat.
+        let seam = [
+            [
+                Vec3::new(0.0, 0.0, 10.0),
+                Vec3::new(7.5, 0.0, 10.0),
+                Vec3::new(5.0, 5.0, 10.0),
+            ],
+            [
+                Vec3::new(0.0, 0.0, 10.0),
+                Vec3::new(3.0, 0.0, 5.0),
+                Vec3::new(7.5, 0.0, 10.0),
+            ],
+        ];
+        let main: Vec<_> = [&plate[..], &stand, &seam, &screw]
+            .into_iter()
+            .flatten()
+            .copied()
+            .collect();
+        let parts = [
+            part("Plate", [0xff; 3], &plate),
+            part("Stand", [0xff; 3], &stand),
+        ];
+        let a = Assembly::from_parts(&Mesh::from_soup(&main), &parts, &Kind::Labeled, &[]);
+        check_ranges(&a);
+        let names: Vec<_> = a.parts.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(names, ["Plate", "Stand", "Other"]);
+        assert!((a.parts[2].volume - 8.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn a_point_is_on_a_triangle_to_the_tolerance() {
+        let t = [Vec3::ZERO, Vec3::new(10.0, 0.0, 0.0), Vec3::new(0.0, 10.0, 0.0)];
+        assert!(on_triangle(Vec3::new(2.0, 2.0, 0.0), t));
+        assert!(on_triangle(Vec3::new(2.0, 2.0, 0.0005), t));
+        // On an edge.
+        assert!(on_triangle(Vec3::new(5.0, 0.0, 0.0), t));
+        assert!(!on_triangle(Vec3::new(2.0, 2.0, 0.01), t));
+        assert!(!on_triangle(Vec3::new(6.0, 6.0, 0.0), t));
+        assert!(!on_triangle(Vec3::new(-0.1, 2.0, 0.0), t));
     }
 
     #[test]
