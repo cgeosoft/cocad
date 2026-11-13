@@ -129,7 +129,7 @@ quit
 # Optimize tab: the desk dock on the plate, with the print fixes on, the
 # clips flat on the bed (Auto) and the base plate split in two pieces.
 start --optimize "$models/desk-dock.scad"
-mcp set_optimize '{"fixes":{"chamfer":true,"teardrops":true,"bridges":true,"brim":true},"parts":{"Part 3":{"orient":"auto"},"Part 1":{"split":{"joint":"dovetail","cuts":[[0,130]],"clearance":0.2}}}}'
+mcp set_optimize '{"fixes":{"chamfer":true,"teardrops":true,"bridges":true,"brim":true},"parts":{"Cable clip 1":{"orient":"auto"},"Base plate":{"split":{"joint":"dovetail","cuts":[[0,130]],"clearance":0.2}}}}'
 mcp set_view '{"view":"iso","fit":true}'
 shot 6-slice 3
 

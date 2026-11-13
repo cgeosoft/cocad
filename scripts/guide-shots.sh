@@ -19,7 +19,8 @@ height=900
 work=$(mktemp -d)
 export XDG_CONFIG_HOME=$work/config XDG_DATA_HOME=$work/data
 mkdir -p "$XDG_CONFIG_HOME/cocad" "$work/models" "$out"
-cp examples/desk-dock.scad "$work/models/"
+# The model and its definition file: the title, the description and the sets.
+cp examples/desk-dock.scad examples/desk-dock.yml "$work/models/"
 touch "$XDG_CONFIG_HOME/cocad/tour_seen"
 echo 'theme = dark' > "$XDG_CONFIG_HOME/cocad/config"
 
@@ -67,7 +68,7 @@ before=$(mcp get_optimize '{}')
 shot app-2-before
 mcp set_optimize '{"fixes":{"teardrops":true,"bridges":true,"chamfer":true,"brim":true}}' >/dev/null
 shot app-3-fixes 4
-mcp set_optimize '{"parts":{"Part 3":{"orient":"auto"}}}' >/dev/null
+mcp set_optimize '{"parts":{"Cable clip 1":{"orient":"auto"}}}' >/dev/null
 shot app-4-auto 4
 # Accept the split that CoCAD proposes for the base plate.
 split=$(printf '%s' "$before" | python3 -c '
@@ -75,7 +76,7 @@ import json, sys
 r = json.load(sys.stdin)
 d = json.loads(r["result"]["content"][0]["text"])
 print(json.dumps(next(p["split_proposal"] for p in d["parts"] if p.get("split_proposal"))))')
-mcp set_optimize "{\"parts\":{\"Part 1\":{\"split\":$split}}}" >/dev/null
+mcp set_optimize "{\"parts\":{\"Base plate\":{\"split\":$split}}}" >/dev/null
 shot app-5-split 5
 mcp set_view '{"view":"top","fit":true}' >/dev/null
 shot app-6-top 3

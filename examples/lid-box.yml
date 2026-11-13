@@ -2,11 +2,23 @@
 cocad: 1
 title: Lid box
 description: >-
-  A small box with a lid and a knob. CoCAD finds the three parts from the
-  module calls. Try Part colors, Explode and Section in the Model tab.
+  A small box with a lid and a knob. The part parameter selects one part, and
+  lid-box.yml gives the part names and colors. Try Part colors, Explode and
+  Section in the Model tab.
 author: cgeosoft
 license: MIT
 url: https://github.com/cgeosoft/cocad/blob/main/examples/lid-box.scad
+
+parts:
+  - id: box
+    name: Box
+    color: "#3fb0a8"
+  - id: lid
+    name: Lid
+    color: "#7b6fd6"
+  - id: knob
+    name: Knob
+    color: "#edc948"
 
 sets:
   Small box:

@@ -27,21 +27,31 @@ Three rules:
 2. Mark each part that is not printed with `%`. See [Parts that are not printed](#parts-that-are-not-printed).
 3. Keep the design rules that only the model can follow, for example round corners, wall sizes and overhangs that need no support. The **Check** card of the Optimize tab shows the problems that stay.
 
-The example **Desk dock** (`desk-dock.scad`) uses this form:
+The example **Desk dock** (`desk-dock.scad`) uses this form, with a `part` list for the names:
 
 ```openscad
+part = "all"; // [all, plate, stand, clips]
+
+module show(name) if (part == "all" || part == name) children();
+
 module assembly() {
-    plate();
-    stand();
-    clip_at(0.3);    // three copies of one clip
-    clip_at(0.55);
-    clip_at(0.8);
-    %phone();        // shown, not printed
-    %magnets();
-    %screws();
+    show("plate") plate();
+    show("stand") stand();
+    show("clips") {
+        clip_at(0.3);    // three copies of one clip
+        clip_at(0.55);
+        clip_at(0.8);
+    }
+    if (part == "all") {
+        %phone();        // shown, not printed
+        %magnets();
+        %screws();
+    }
 }
 assembly();
 ```
+
+`desk-dock.yml` gives the parts the names "Base plate", "Stand" and "Cable clip".
 
 See [Prepare a model for printing](Prepare-a-model-for-printing) for the print preparation of this model.
 
@@ -93,7 +103,7 @@ module assembly() {
 assembly();
 ```
 
-For the rules and the limits, see [How CoCAD finds the parts](How-CoCAD-finds-the-parts). The example `lid-box.scad` uses this form.
+For the rules and the limits, see [How CoCAD finds the parts](How-CoCAD-finds-the-parts). The example `lid-box.scad` uses this form, with a [`part` list](#names-for-the-parts) for the names.
 
 ## Names for the parts
 

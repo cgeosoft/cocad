@@ -1,7 +1,11 @@
 // Small box with a lid and a knob: an assembly of parts that touch.
-// OpenSCAD joins the parts into one solid. CoCAD finds them from the module
-// calls in the assembly: box, lid and knob.
+// OpenSCAD joins the parts into one solid. The part parameter selects one
+// part, also in plain OpenSCAD. CoCAD builds each part on its own and takes
+// the part names and colors from lid-box.yml.
 // Try Part colors, Explode and Section in the Model tab.
+
+/* [Parts] */
+part = "all"; // [all, box, lid, knob]
 
 /* [Box] */
 width = 60; // [30:1:120]
@@ -56,6 +60,9 @@ module knob() {
         cylinder(d1 = knob_d, d2 = knob_d * 0.8, h = knob_h);
 }
 
-box();
-lid();
-knob();
+// Shows the children when this part is selected.
+module show(name) if (part == "all" || part == name) children();
+
+show("box") box();
+show("lid") lid();
+show("knob") knob();

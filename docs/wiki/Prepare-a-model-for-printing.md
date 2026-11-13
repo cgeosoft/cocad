@@ -29,9 +29,9 @@ The **Plate** card shows three print parts:
 
 | Print part | What it is | Status |
 |---|---|---|
-| **Part 1** | The base plate | Too large |
-| **Part 2** | The stand | 7 problems |
-| **Part 3 ×3** | The clips. CoCAD found three parts with the same shape. | 5 problems |
+| **Base plate** | The base plate | Too large |
+| **Stand** | The stand | 7 problems |
+| **Cable clip 1 ×3** | The clips. CoCAD found three parts with the same shape. | 5 problems |
 
 The print area is 220 × 220 × 250 mm, the default. The base plate is 260 mm long, so it is on no plate. Below its row, a **Split** section shows a proposal. You split the plate in [step 6](#6-split-the-base-plate).
 
@@ -145,7 +145,7 @@ The fixes work together. CoCAD applies them in this order: the hole size, the cu
 
 In the model, the clips sit tilted on the back of the stand. In this rotation, a clip stands on an edge on the bed. The **Check** card lists 5 problems for it.
 
-1. Click **Part 3 ×3** in the **Plate** card.
+1. Click **Cable clip 1 ×3** in the **Plate** card.
 2. In the **Orientation** card, turn on **Custom orientation**. **Auto** is the first choice.
 
 CoCAD puts the clip on its best face. The cable hole now goes up, so it needs no teardrop, and the clip has no problems.
@@ -169,8 +169,8 @@ The base plate is 260 mm long. It does not fit the print area of 220 × 220 mm. 
 
 Click **Split**. The plate becomes two print parts:
 
-- **Part 1 1/2**, 134.9 × 80.0 × 6.0 mm, with the tabs.
-- **Part 1 2/2**, 129.9 × 80.0 × 6.0 mm, with the sockets.
+- **Base plate 1/2**, 134.9 × 80.0 × 6.0 mm, with the tabs.
+- **Base plate 2/2**, 129.9 × 80.0 × 6.0 mm, with the sockets.
 
 All parts are now on one plate.
 

@@ -15,6 +15,11 @@
 //   gray and are not printed.
 // - Turn on the Bed chamfer for all parts.
 // - The plate has the CGEO/FAB wordmark engraved on its top face.
+// - The part parameter selects one part, also in plain OpenSCAD. The part
+//   names and colors are in desk-dock.yml.
+
+/* [Parts] */
+part = "all"; // [all, plate, stand, clips]
 
 /* [Plate] */
 // Length of the base plate
@@ -179,15 +184,22 @@ module screws() {
 }
 
 // ---------------------------------------------------------------- model
+// Shows the children when this part is selected.
+module show(name) if (part == "all" || part == name) children();
+
 module assembly() {
-    plate();
-    stand();
-    clip_at(0.3);
-    clip_at(0.55);
-    clip_at(0.8);
-    %phone();
-    %magnets();
-    %screws();
+    show("plate") plate();
+    show("stand") stand();
+    show("clips") {
+        clip_at(0.3);
+        clip_at(0.55);
+        clip_at(0.8);
+    }
+    if (part == "all") {
+        %phone();
+        %magnets();
+        %screws();
+    }
 }
 
 assembly();

@@ -3,11 +3,22 @@ cocad: 1
 title: Desk dock
 description: >-
   A phone stand on a base plate, with three cable clips. The model has no
-  print code: use the Optimize tab to split the plate, turn the clips and add
-  bridges, teardrop holes and a brim.
+  print code: use the Optimize tab to split the plate, print the stand upright
+  and add bridges, teardrop holes and a brim.
 author: cgeosoft
 license: MIT
 url: https://github.com/cgeosoft/cocad/blob/main/examples/desk-dock.scad
+
+parts:
+  - id: plate
+    name: Base plate
+    color: "#6c7a89"
+  - id: stand
+    name: Stand
+    color: "#4e8fd6"
+  - id: clips
+    name: Cable clip
+    color: "#edc948"
 
 sets:
   Phone dock:
