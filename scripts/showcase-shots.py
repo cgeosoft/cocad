@@ -28,13 +28,16 @@ def bounds(name):
 def imp(name):
     return 'import("%s/%s.stl", convexity = 10);' % (src, name)
 
-def render(tag, body, cam, size=(800, 600), ortho=False, bed=None):
+ORANGE, BLUE = "#f28e2b", "#2f6fd6"
+
+def render(tag, body, cam, size=(800, 600), ortho=False, bed=None, paint=ORANGE):
+    """`paint=None`: the body sets its own colors."""
     scad = os.path.join(work, tag + ".scad")
     head = ""
     if bed:
         (x0, y0, x1, y1) = bed
         head = 'color("#c9cbd1") translate([%g, %g, -0.6]) cube([%g, %g, 0.6]);\n' % (x0, y0, x1 - x0, y1 - y0)
-    open(scad, "w").write(head + 'color("#f28e2b") ' + body + "\n")
+    open(scad, "w").write(head + ('color("%s") ' % paint if paint else "") + body + "\n")
     png = os.path.join(work, tag + ".png")
     args = ["openscad-nightly", "--backend=manifold", "-o", png, "--imgsize=%d,%d" % size,
             "--camera=" + ",".join(str(c) for c in cam), "--colorscheme=Tomorrow", "--render=force"]
@@ -58,6 +61,14 @@ def cut(name, box):
     (x0, y0, z0, x1, y1, z1) = box
     return "intersection() { %s translate([%g, %g, %g]) cube([%g, %g, %g]); }" % (
         imp(name), x0, y0, z0, x1 - x0, y1 - y0, z1 - z0)
+
+def removed(before, after):
+    """`after` in orange, and the material that the fix removed in blue."""
+    return 'color("%s") %s\ncolor("%s") difference() { %s %s }' % (ORANGE, after, BLUE, before, after)
+
+def added(before, after):
+    """`before` in orange, and the material that the fix added in blue."""
+    return 'color("%s") %s\ncolor("%s") difference() { %s %s }' % (ORANGE, before, BLUE, after, before)
 
 def slab(name, axis, at, lo, hi):
     """A slice 0.1 mm thick across `axis` at `at`, inside the box lo..hi of
@@ -99,6 +110,19 @@ montage("3-stand-teardrops", [
     ("Before: round pilot hole", render("s-bp", s3p("stand-before"), cam_p, ortho=True)),
     ("Teardrop holes", render("s-tp", s3p("stand-teardrops"), cam_p, ortho=True)),
 ], "Stand on its side: cable hole and pilot hole (sections)")
+
+# 4. Hole size: the counterbore section of picture 1, and the layer at
+#    z 1.5 through a magnet pocket (x -114, y -24), from above. Blue: the
+#    material that the fix removes.
+mg = (-114, -24)
+s4 = lambda n: slab(n, 2, 1.5, (mg[0] - 8, mg[1] - 8), (mg[0] + 8, mg[1] + 8))
+cam4 = [mg[0], mg[1], 1.5, 0, 0, 0, 26]
+montage("4-plate-hole-size", [
+    ("Before", render("h-b", s1("plate-before"), cam, ortho=True)),
+    ("Hole size +0.2 mm (blue: removed)", render("h-a", removed(s1("plate-before"), s1("plate-holes")), cam, ortho=True, paint=None)),
+    ("Before: magnet pocket", render("h-mb", s4("plate-before"), cam4, ortho=True)),
+    ("Hole size +0.2 mm (blue: removed)", render("h-ma", removed(s4("plate-before"), s4("plate-holes")), cam4, ortho=True, paint=None)),
+], "Base plate: screw counterbore (section) and magnet pocket (layer at z 1.5)")
 
 # 5. Brim: the stand upright (custom orientation off), first layer, from
 #    above.
@@ -153,3 +177,16 @@ montage("9-all-fixes", [
     ("Stand before", render("a-sb", imp("stand-before"), cam_s)),
     ("Stand, all fixes", render("a-sa", imp("stand-all-sacrificial"), cam_s)),
 ], "Stand on its side: all fixes together")
+
+# 10. Mouse ears: the stand on its side. The first layer from above, and
+#     the part. Blue: the ears.
+slo, shi = bounds("stand-before")
+fl10 = (slo[0] - 10, slo[1] - 10, -1, shi[0] + 10, shi[1] + 10, 0.3)
+cam10 = [(slo[0] + shi[0]) / 2, (slo[1] + shi[1]) / 2, 0, 0, 0, 0, 240]
+montage("10-stand-mouse-ears", [
+    ("Before", render("m-b", cut("stand-before", fl10), cam10, ortho=True)),
+    ("Mouse ears (blue)", render("m-a", added(cut("stand-before", fl10), cut("stand-ears", fl10)), cam10, ortho=True, paint=None)),
+    # Only the first layer of the difference: a difference of the whole
+    # parts also has slivers on the faces that the fix did not change.
+    ("The part with the ears", render("m-p", added(imp("stand-before"), cut("stand-ears", fl10)), cam_s, paint=None)),
+], "Stand on its side: first layer and part")

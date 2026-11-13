@@ -47,11 +47,11 @@ To set the print area for all models that you open for the first time, use **Fil
 
 ## 4. Turn on the print fixes
 
-Open the **Print fixes** card. Turn on **Teardrop holes**, **Bridges**, **Bed chamfer** and **Brim on small islands**.
+Open the **Print fixes** card. Turn on all six fixes: **Teardrop holes**, **Hole size**, **Bridges**, **Bed chamfer**, **Brim on small islands** and **Mouse ears**.
 
-![Four print fixes on](https://raw.githubusercontent.com/cgeosoft/cocad/main/assets/guide/app-3-fixes.jpg)
+![All print fixes on](https://raw.githubusercontent.com/cgeosoft/cocad/main/assets/guide/app-3-fixes.jpg)
 
-Each fix shows the number of places that it changed. Hold the mouse on **Stand**: the status is now **Fits**, with no problems. The fixes removed all its problems. Hold the mouse on **Export 3MF** to see the fixes: "Bed chamfer, 4 teardrops, 6 bridge fixes".
+Each fix shows the number of places that it changed. Hold the mouse on **Stand**: the status is now **Fits**, with no problems. The fixes removed all its problems. Hold the mouse on **Export 3MF** to see the fixes: "Bed chamfer, 4 teardrops, 6 bridge fixes, 6 mouse ears, 9 hole size fixes".
 
 The sections below show each fix on a part of the desk dock. The parts are in print position. In the section pictures, the bed is at the bottom.
 
@@ -104,7 +104,11 @@ A round hole that goes up from the bed prints smaller than in the model. A screw
 
 **What the fix does.** CoCAD finds the round holes with a vertical axis, from 1 to 40 mm in diameter. Each hole gets the diameter of the model plus a value, 0.2 mm by default. A hole with six faces can be a pocket for a nut: it only gets the value. A blind hole does not get deeper.
 
-On the desk dock, the fix changes 9 holes.
+On the desk dock, the fix changes 9 holes: the two screw holes, the two counterbores and the four magnet pockets of the base plate, and the cable hole of the clip. The clip lies flat, so its cable hole goes up. The stand lies on its side, so its holes are horizontal: they get teardrops, not a new size. The counterbores and the magnet pockets do not get deeper.
+
+![The screw counterbore and a magnet pocket before and after the fix](https://raw.githubusercontent.com/cgeosoft/cocad/main/assets/guide/4-plate-hole-size.png)
+
+In the picture, the blue material is the material that the fix removes: 0.1 mm on each side of the hole.
 
 **When to use it.** Use it when screws, pins or shafts must go into vertical holes. The correct value depends on your printer and material: print a test part, measure the hole, and set the value. Then set the X-Y hole compensation of your slicer to 0. Without this, the holes get two corrections.
 
@@ -113,6 +117,10 @@ On the desk dock, the fix changes 9 holes.
 A large flat part can lift from the bed at its corners when the plastic cools.
 
 **What the fix does.** CoCAD finds the large areas of the first layer: areas with a long side of 100 mm or more. Each sharp corner of such an area gets a disk of one layer, 15 mm in diameter by default. The center of the disk is on the corner. The disks do not go into the holes of the part, and they stay inside the print area.
+
+On the desk dock, the stand lies on its side. Its outline on the bed is 115 mm long and has 6 sharp corners, so it gets 6 ears. The base plate has round corners, so it gets no ears. After the split in [step 6](#6-split-the-base-plate), each piece of the plate has sharp corners at the cut. The pieces get ears there.
+
+![The first layer of the stand before and after the fix](https://raw.githubusercontent.com/cgeosoft/cocad/main/assets/guide/10-stand-mouse-ears.png)
 
 **When to use it.** Use it for large plates, lids and frames with sharp corners. After the print, cut the ears off the part. An ear is only one layer thick.
 
@@ -211,12 +219,13 @@ At the bottom of the tab, click **Export 3MF**. For an STL file, click the arrow
 - The 3MF file has one object for each print part, and one item for each copy. Your slicer shows the parts as separate objects, in the positions of the plate.
 - When the parts need more room than the bed, the file still contains all of them. Your slicer arranges them on its plates.
 
-In your slicer, set the elephant foot compensation to 0, because the bed chamfer is on.
+In your slicer, set the elephant foot compensation to 0, because the bed chamfer is on. Set the X-Y hole compensation to 0, because **Hole size** is on.
 
 CoCAD stores all values of this guide with the model: the print area, the fixes, the orientation of each part and the split. When you open the model again, they are the same. The [command line](Command-line) uses them too.
 
 ## 10. After the print
 
 - Drill the screw holes of the plate open through the sacrificial layers. With **Stepped**, you do not have to do this.
+- Cut the mouse ears off the stand and off the pieces of the plate. Do this before you glue the pieces: the ears at the cut are in the way of the joint.
 - Glue the two pieces of the base plate together at the dovetail.
 - Put the magnets in their pockets, and attach the stand with the screws.

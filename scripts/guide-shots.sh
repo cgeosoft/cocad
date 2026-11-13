@@ -71,7 +71,7 @@ mcp set_view '{"mode":"optimize"}' >/dev/null
 sleep 3
 before=$(mcp get_optimize '{}')
 shot app-2-before
-mcp set_optimize '{"fixes":{"teardrops":true,"bridges":true,"chamfer":true,"brim":true}}' >/dev/null
+mcp set_optimize '{"fixes":{"teardrops":true,"hole_size":true,"bridges":true,"chamfer":true,"brim":true,"ears":true}}' >/dev/null
 shot app-3-fixes 4
 # Accept the split that CoCAD proposes for the base plate.
 split=$(printf '%s' "$before" | python3 -c '
