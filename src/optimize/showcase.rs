@@ -18,7 +18,7 @@ use crate::mesh::Mesh;
 use crate::openscad::{self, Config};
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 fn cancel() -> Arc<AtomicBool> {
     Arc::new(AtomicBool::new(false))
@@ -26,10 +26,14 @@ fn cancel() -> Arc<AtomicBool> {
 
 /// Builds one module call of the dock, as the module split does.
 fn part(call: &str) -> Mesh {
+    // Tests run at the same time and can build the same call. Each build
+    // gets its own file, so that no test removes the file of another.
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
     let model = std::fs::canonicalize("examples/desk-dock.scad").unwrap();
     let path = std::env::temp_dir().join(format!(
-        "cocad-showcase-{}-{}.scad",
+        "cocad-showcase-{}-{}-{}.scad",
         std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed),
         call.replace(['(', ')', '.'], "_")
     ));
     std::fs::write(
