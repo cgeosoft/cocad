@@ -387,18 +387,15 @@ impl App {
             return;
         };
         let n = a.parts.len();
+        let count = if n == 1 {
+            "1 part".to_string()
+        } else {
+            format!("{n} parts")
+        };
         ui::card(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui::section(ui, "Parts");
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let count = if n == 1 {
-                        "1 part".to_string()
-                    } else {
-                        format!("{n} parts")
-                    };
-                    ui.label(ui::dim(count));
-                });
-            });
+            if !self.card_head(ui, "Parts", &count) {
+                return;
+            }
             let note = if let Some(job) = &self.parts_job {
                 job.note
             } else if n == 1 {
@@ -411,7 +408,7 @@ impl App {
             } else {
                 "Each separate solid is one part."
             };
-            ui.label(ui::dim(note));
+            ui.label(ui::dim(format!("{count}. {note}")));
             if let Some(p) = self.view3d.sel.selected(&a.parts) {
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
@@ -453,9 +450,17 @@ impl App {
         let Some(a) = self.assembly.clone().filter(|a| !a.parts.is_empty()) else {
             return;
         };
-        let v = &mut self.view3d;
+        let note = if !self.view3d.explode || a.parts.len() < 2 {
+            "Off".to_string()
+        } else {
+            let (d, _) = self.view3d.explode_distance(&a.parts);
+            format!("{d:.0} mm, {}", self.view3d.explode_axis.label())
+        };
         ui::card(ui, |ui| {
-            ui::section(ui, "Explode");
+            if !self.card_head(ui, "Explode", &note) {
+                return;
+            }
+            let v = &mut self.view3d;
             if a.parts.len() < 2 {
                 ui.label(ui::dim("Explode needs two or more parts."));
                 return;

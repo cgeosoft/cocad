@@ -8,7 +8,8 @@
 //!     "slice": { "layer_height": 0.2, ... }, "ghost": false,
 //!     "photo": { "color": [255, 147, 0], "finish": "satin", ... },
 //!     "parts": { "colors": true, "explode": false, "axis": "z", "custom": { "Lid": [1, 2, 3] } },
-//!     "set": "big", "edited": true, "params": { "width": "80" } } }
+//!     "set": "big", "edited": true, "params": { "width": "80" },
+//!     "closed_groups": ["Advanced"] } }
 //! ```
 //!
 //! Before 0.7 the "mode" values were "slice" and "photo". They read as
@@ -87,6 +88,13 @@ fn bool_of(o: &Json, k: &str) -> Option<bool> {
     o.get(k)?.as_bool()
 }
 
+/// The names of the closed parameter groups.
+fn closed_groups(v: &Json) -> std::collections::HashSet<String> {
+    (v.as_array().into_iter().flatten())
+        .filter_map(|g| Some(g.as_str()?.to_string()))
+        .collect()
+}
+
 fn rgb(v: &Json) -> Option<[u8; 3]> {
     let a = v.as_array()?;
     let c = |i: usize| a.get(i)?.as_u64().and_then(|x| u8::try_from(x).ok());
@@ -110,6 +118,8 @@ impl App {
             .iter()
             .map(|p| (p.name.clone(), json!(presets::to_text(&p.value))))
             .collect();
+        let mut closed: Vec<&String> = self.collapsed.iter().collect();
+        closed.sort();
         let state = json!({
             "mode": self.mode.name(),
             "auto_render": self.auto_render,
@@ -143,6 +153,7 @@ impl App {
             "set": self.active_set,
             "edited": self.set_edited,
             "params": params,
+            "closed_groups": closed,
         });
         if let Json::Object(state) = state {
             store(path, state);
@@ -161,6 +172,9 @@ impl App {
         }
         if let Some(b) = bool_of(&st, "ghost") {
             self.ghost = b;
+        }
+        if let Some(list) = st.get("closed_groups") {
+            self.collapsed = closed_groups(list);
         }
         if let Some(o) = st.get("slice") {
             let s = &mut self.settings;
@@ -289,6 +303,15 @@ mod tests {
         all = merged(all, "/m/10.scad".into(), Map::new());
         assert_eq!(all.len(), MAX);
         assert_eq!(all.keys().next_back().unwrap(), "/m/10.scad");
+    }
+
+    #[test]
+    fn closed_groups_read_strings_only() {
+        let v = json!(["Advanced", 3, "Size", null]);
+        let mut g: Vec<String> = closed_groups(&v).into_iter().collect();
+        g.sort();
+        assert_eq!(g, ["Advanced", "Size"]);
+        assert!(closed_groups(&json!("Advanced")).is_empty());
     }
 
     #[test]

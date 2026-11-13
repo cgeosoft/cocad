@@ -2,7 +2,7 @@
 
 use crate::mesh::{Mesh, read_stl};
 use anyhow::{Result, bail};
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -33,6 +33,9 @@ pub struct Config {
     pub update_check: bool,
     /// Save the values to the active parameter set when they change.
     pub autosave_sets: bool,
+    /// The cards of the right panel that the user closed, by title. One
+    /// choice for all models.
+    pub closed_cards: BTreeSet<String>,
 }
 
 impl Default for Config {
@@ -45,6 +48,7 @@ impl Default for Config {
             mcp: true,
             update_check: true,
             autosave_sets: false,
+            closed_cards: BTreeSet::new(),
         }
     }
 }
@@ -71,21 +75,34 @@ fn config_path() -> Option<PathBuf> {
 
 impl Config {
     pub fn load() -> Config {
+        config_path()
+            .and_then(|p| std::fs::read_to_string(p).ok())
+            .map_or_else(Config::default, |text| Config::parse(&text))
+    }
+
+    /// The settings in the text of a config file. Unknown keys and keys of
+    /// older versions do nothing.
+    pub fn parse(text: &str) -> Config {
         let mut c = Config::default();
-        if let Some(text) = config_path().and_then(|p| std::fs::read_to_string(p).ok()) {
-            for line in text.lines() {
-                if let Some((k, v)) = line.split_once('=') {
-                    let v = v.trim().to_string();
-                    match k.trim() {
-                        "openscad" => c.binary = v,
-                        "openscad_args" => c.args = v,
-                        "manifold" => c.manifold = v != "false",
-                        "theme" => c.theme = v,
-                        "mcp" => c.mcp = v != "false",
-                        "update_check" => c.update_check = v != "false",
-                        "autosave_sets" => c.autosave_sets = v == "true",
-                        _ => {}
+        for line in text.lines() {
+            if let Some((k, v)) = line.split_once('=') {
+                let v = v.trim().to_string();
+                match k.trim() {
+                    "openscad" => c.binary = v,
+                    "openscad_args" => c.args = v,
+                    "manifold" => c.manifold = v != "false",
+                    "theme" => c.theme = v,
+                    "mcp" => c.mcp = v != "false",
+                    "update_check" => c.update_check = v != "false",
+                    "autosave_sets" => c.autosave_sets = v == "true",
+                    "closed_cards" => {
+                        c.closed_cards = (v.split(','))
+                            .map(str::trim)
+                            .filter(|s| !s.is_empty())
+                            .map(String::from)
+                            .collect();
                     }
+                    _ => {}
                 }
             }
         }
@@ -102,16 +119,18 @@ impl Config {
     /// Consent is not here: see `telemetry::set_consent`. A save drops the
     /// consent keys of older versions.
     pub(crate) fn text(&self) -> String {
+        let closed: Vec<&str> = self.closed_cards.iter().map(String::as_str).collect();
         format!(
             "openscad = {}\nopenscad_args = {}\nmanifold = {}\ntheme = {}\nmcp = {}\nupdate_check = {}\n\
-             autosave_sets = {}\n",
+             autosave_sets = {}\nclosed_cards = {}\n",
             self.binary,
             self.args,
             self.manifold,
             self.theme,
             self.mcp,
             self.update_check,
-            self.autosave_sets
+            self.autosave_sets,
+            closed.join(",")
         )
     }
 
@@ -341,4 +360,37 @@ pub fn render(
         log,
         elapsed: start.elapsed(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn config_text_round_trip() {
+        let mut c = Config {
+            binary: "/opt/openscad".into(),
+            args: "--enable=lazy-union".into(),
+            theme: "dark".into(),
+            mcp: false,
+            autosave_sets: true,
+            ..Config::default()
+        };
+        c.closed_cards = ["Mesh", "Print settings"].map(String::from).into();
+        let text = c.text();
+        assert!(
+            text.contains("closed_cards = Mesh,Print settings\n"),
+            "{text}"
+        );
+        assert_eq!(Config::parse(&text), c);
+        assert_eq!(Config::parse(&Config::default().text()), Config::default());
+    }
+
+    #[test]
+    fn config_reads_old_and_unknown_keys() {
+        let c =
+            Config::parse("theme = light\nclosed_cards = , Build ,\nother = 1\nno equals sign\n");
+        assert_eq!(c.theme, "light");
+        assert_eq!(c.closed_cards, BTreeSet::from(["Build".to_string()]));
+    }
 }

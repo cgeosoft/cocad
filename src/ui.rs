@@ -261,19 +261,10 @@ pub fn section(ui: &mut egui::Ui, text: &str) {
 
 /// Clickable group title with a chevron and a count of edited values.
 pub fn group_header(ui: &mut egui::Ui, title: &str, open: bool, edited: usize) -> egui::Response {
-    let w = ui.available_width();
-    let (rect, resp) = ui.allocate_exact_size(vec2(w, 20.0), Sense::click());
-    let p = ui.painter();
-    let color = if resp.hovered() { c().text } else { c().dim };
-    let galley = p.layout_no_wrap(title.to_uppercase(), FontId::proportional(11.5), color);
-    p.galley(
-        egui::pos2(rect.left(), rect.center().y - galley.size().y / 2.0),
-        galley,
-        color,
-    );
+    let (rect, resp, _) = fold_row(ui, title, open);
     if edited > 0 {
         pill(
-            p,
+            ui.painter(),
             egui::pos2(rect.right() - 26.0, rect.center().y),
             Align2::RIGHT_CENTER,
             &format!("{edited} edited"),
@@ -282,6 +273,39 @@ pub fn group_header(ui: &mut egui::Ui, title: &str, open: bool, edited: usize) -
             Color32::from_rgba_unmultiplied(0xff, 0x93, 0x00, 30),
         );
     }
+    resp
+}
+
+/// Clickable card title with a chevron, as `group_header`, and a short
+/// dim `note` at the right, for example a value of a closed card.
+pub fn fold_header(ui: &mut egui::Ui, title: &str, open: bool, note: &str) -> egui::Response {
+    let (rect, resp, title_w) = fold_row(ui, title, open);
+    if !note.is_empty() {
+        let max = (rect.width() - title_w - 34.0).max(0.0);
+        let galley = one_line(ui, note, FontId::proportional(12.5), max);
+        let at = egui::pos2(
+            rect.right() - 22.0 - galley.size().x,
+            rect.center().y - galley.size().y / 2.0,
+        );
+        ui.painter().galley(at, galley, c().dim);
+    }
+    resp
+}
+
+/// A row with an upper-case title and a chevron: down when open, right
+/// when closed. Returns the row, its response and the title width.
+fn fold_row(ui: &mut egui::Ui, title: &str, open: bool) -> (Rect, egui::Response, f32) {
+    let w = ui.available_width();
+    let (rect, resp) = ui.allocate_exact_size(vec2(w, 20.0), Sense::click());
+    let p = ui.painter();
+    let color = if resp.hovered() { c().text } else { c().dim };
+    let galley = p.layout_no_wrap(title.to_uppercase(), FontId::proportional(11.5), color);
+    let title_w = galley.size().x;
+    p.galley(
+        egui::pos2(rect.left(), rect.center().y - galley.size().y / 2.0),
+        galley,
+        color,
+    );
     // Chevron: down when open, right when closed.
     let c = egui::pos2(rect.right() - 8.0, rect.center().y);
     let pts = if open {
@@ -298,7 +322,11 @@ pub fn group_header(ui: &mut egui::Ui, title: &str, open: bool, edited: usize) -
         ]
     };
     p.add(egui::Shape::line(pts, Stroke::new(1.6_f32, color)));
-    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+    (
+        rect,
+        resp.on_hover_cursor(egui::CursorIcon::PointingHand),
+        title_w,
+    )
 }
 
 pub fn dim(text: impl Into<String>) -> RichText {

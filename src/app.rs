@@ -83,6 +83,18 @@ impl Mode {
         }
     }
 
+    /// The names of the cards that can close, in tab order. The names are
+    /// the card titles, and the config file stores them (`closed_cards`).
+    fn cards(self) -> &'static [&'static str] {
+        match self {
+            Mode::Model => &["Build", "Parts", "Explode", "Section", "Mesh"],
+            Mode::Optimize => &["Estimate", "Layer", "Print settings"],
+            Mode::Render => &[
+                "Progress", "Material", "Parts", "Explode", "Scene", "Quality",
+            ],
+        }
+    }
+
     /// The key that opens the tab, and the index of its letter in the
     /// label. The same key again goes back to the Model tab.
     fn key(self) -> Option<(egui::Key, usize)> {
@@ -559,6 +571,7 @@ impl App {
                 self.cancel_parts();
                 self.set_assembly(None);
                 self.view3d.new_model();
+                self.collapsed.clear();
                 if let Some(st) = &saved {
                     self.restore_panels(st);
                     if self.restore_params(st) {
@@ -1535,14 +1548,90 @@ impl App {
         self.show_about = open;
     }
 
-    fn model_panel(&mut self, ui: &mut egui::Ui) {
-        ui.label(ui::dim("Build the model and export it."));
+    /// True when the user closed the right panel card `name`.
+    fn card_closed(&self, name: &str) -> bool {
+        self.cfg.closed_cards.contains(name)
+    }
+
+    /// The header of the right panel card `name`. A click opens or closes
+    /// the card, and the config file keeps the choice for all models.
+    /// `note` shows in the header while the card is closed. Returns true
+    /// when the card is open.
+    fn card_head(&mut self, ui: &mut egui::Ui, name: &str, note: &str) -> bool {
+        let open = !self.card_closed(name);
+        let note = if open { "" } else { note };
+        if ui::fold_header(ui, name, open, note).clicked() {
+            self.set_cards_closed(&[name], open);
+        }
+        let open = !self.card_closed(name);
+        if open {
+            ui.add_space(6.0);
+        }
+        open
+    }
+
+    /// Closes (`closed`) or opens the cards `names` and saves the choice.
+    fn set_cards_closed(&mut self, names: &[&str], closed: bool) {
+        for n in names {
+            if closed {
+                self.cfg.closed_cards.insert(n.to_string());
+            } else {
+                self.cfg.closed_cards.remove(*n);
+            }
+        }
+        if let Some(edit) = &mut self.cfg_edit {
+            edit.closed_cards = self.cfg.closed_cards.clone();
+        }
+        if let Err(e) = self.cfg.save() {
+            self.toast = Some((format!("Cannot save settings: {e}"), Instant::now()));
+        }
+    }
+
+    /// The first row of a tab: a short hint, and a button that opens or
+    /// closes all cards of the tab.
+    fn panel_head(&mut self, ui: &mut egui::Ui, hint: &str) {
+        let cards = self.mode.cards();
+        let all_closed = cards.iter().all(|c| self.card_closed(c));
+        let row = Vec2::new(ui.available_width(), 28.0);
+        let rtl = egui::Layout::right_to_left(egui::Align::Center);
+        ui.allocate_ui_with_layout(row, rtl, |ui| {
+            let (icon, label, hover) = if all_closed {
+                (ui::Icon::Expand, "Expand", "Open all cards")
+            } else {
+                (ui::Icon::Collapse, "Collapse", "Close all cards")
+            };
+            if ui::icon_text_button(ui, icon, label, 28.0)
+                .on_hover_text(hover)
+                .clicked()
+            {
+                self.set_cards_closed(cards, !all_closed);
+            }
+            let ltr = egui::Layout::left_to_right(egui::Align::Center);
+            ui.with_layout(ltr, |ui| {
+                ui.add(egui::Label::new(ui::dim(hint)).truncate());
+            });
+        });
         ui.add_space(4.0);
+    }
+
+    fn model_panel(&mut self, ui: &mut egui::Ui) {
+        self.panel_head(ui, "Build the model and export it.");
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 ui::card(ui, |ui| {
-                    ui::section(ui, "Build");
+                    let note = if self.job.is_some() {
+                        "Building".to_string()
+                    } else if self.error.is_some() {
+                        "Error".to_string()
+                    } else {
+                        self.last_time
+                            .map(|t| format!("{:.2} s", t.as_secs_f32()))
+                            .unwrap_or_default()
+                    };
+                    if !self.card_head(ui, "Build", &note) {
+                        return;
+                    }
                     ui.horizontal(|ui| {
                         ui.label("Auto build");
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -1560,62 +1649,78 @@ impl App {
                         self.start_render();
                     }
                 });
-                ui::card(ui, |ui| {
-                    ui::section(ui, "Export");
-                    let can_export = self.can_export();
-                    let w = (ui.available_width() - 2.0 * ui.spacing().item_spacing.x) / 3.0;
-                    let mut pick = None;
-                    ui.horizontal(|ui| {
-                        for fmt in Format::ALL {
-                            let b =
-                                ui::primary(&fmt.ext().to_uppercase()).min_size(Vec2::new(w, 34.0));
-                            if ui
-                                .add_enabled(can_export, b)
-                                .on_hover_text(fmt.label())
-                                .clicked()
-                            {
-                                pick = Some(fmt);
-                            }
-                        }
-                    });
-                    if let Some(fmt) = pick {
-                        self.export(fmt);
-                    }
-                    if !crate::parts::names(&self.params).is_empty() {
-                        ui.label(ui::dim("Multicolor 3MF"));
-                        let w = (ui.available_width() - ui.spacing().item_spacing.x) / 2.0;
-                        let mut pick = None;
-                        ui.horizontal(|ui| {
-                            for slicer in Slicer::ALL {
-                                let b = ui::primary(slicer.label()).min_size(Vec2::new(w, 34.0));
-                                if ui.add_enabled(can_export, b).clicked() {
-                                    pick = Some(slicer);
-                                }
-                            }
-                        });
-                        if let Some(slicer) = pick {
-                            self.export_parts(slicer);
-                        }
-                    }
-                });
+                ui.add_space(4.0);
                 self.parts_card(ui);
                 self.explode_card(ui);
                 self.section_card(ui);
                 if let (Some(i), Some(mesh)) = (&self.info, &self.mesh) {
                     let size = i.bounds.size();
+                    let tris = mesh.triangles.len();
+                    let (volume, open_edges) = (i.volume, i.open_edges);
+                    let note = format!("{:.1} × {:.1} × {:.1} mm", size.x, size.y, size.z);
                     ui::card(ui, |ui| {
-                        ui::section(ui, "Mesh");
+                        if !self.card_head(ui, "Mesh", &note) {
+                            return;
+                        }
                         info_row(
                             ui,
                             "Size",
                             &format!("{:.1} × {:.1} × {:.1} mm", size.x, size.y, size.z),
                         );
-                        info_row(ui, "Volume", &format!("{:.2} cm³", i.volume / 1000.0));
-                        info_row(ui, "Triangles", &mesh.triangles.len().to_string());
-                        info_row(ui, "Open edges", &i.open_edges.to_string());
+                        info_row(ui, "Volume", &format!("{:.2} cm³", volume / 1000.0));
+                        info_row(ui, "Triangles", &tris.to_string());
+                        info_row(ui, "Open edges", &open_edges.to_string());
                     });
                 }
             });
+    }
+
+    /// What the export buttons write, in one short line above them.
+    pub(crate) fn export_summary(&self) -> String {
+        "Model as built.".to_string()
+    }
+
+    /// The Export card. It stays at the bottom of the right panel in all
+    /// tabs, and it does not close.
+    fn export_card(&mut self, ui: &mut egui::Ui) {
+        ui::card(ui, |ui| {
+            ui::section(ui, "Export");
+            ui.add(egui::Label::new(ui::dim(self.export_summary())).wrap());
+            let can_export = self.can_export();
+            let w = (ui.available_width() - 2.0 * ui.spacing().item_spacing.x) / 3.0;
+            let mut pick = None;
+            ui.horizontal(|ui| {
+                for fmt in Format::ALL {
+                    let b = ui::primary(&fmt.ext().to_uppercase()).min_size(Vec2::new(w, 34.0));
+                    if ui
+                        .add_enabled(can_export, b)
+                        .on_hover_text(fmt.label())
+                        .clicked()
+                    {
+                        pick = Some(fmt);
+                    }
+                }
+            });
+            if let Some(fmt) = pick {
+                self.export(fmt);
+            }
+            if !crate::parts::names(&self.params).is_empty() {
+                ui.label(ui::dim("Multicolor 3MF"));
+                let w = (ui.available_width() - ui.spacing().item_spacing.x) / 2.0;
+                let mut pick = None;
+                ui.horizontal(|ui| {
+                    for slicer in Slicer::ALL {
+                        let b = ui::primary(slicer.label()).min_size(Vec2::new(w, 34.0));
+                        if ui.add_enabled(can_export, b).clicked() {
+                            pick = Some(slicer);
+                        }
+                    }
+                });
+                if let Some(slicer) = pick {
+                    self.export_parts(slicer);
+                }
+            }
+        });
     }
 
     fn set_mode(&mut self, mode: Mode) {
@@ -2398,15 +2503,17 @@ impl App {
     }
 
     fn render_panel(&mut self, ui: &mut egui::Ui) {
-        ui.label(ui::dim("Path-traced render of the current view."));
-        ui.add_space(4.0);
+        self.panel_head(ui, "Path-traced render of the current view.");
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 let samples = self.photo_samples();
                 ui::card(ui, |ui| {
-                    ui::section(ui, "Progress");
                     let target = self.photo.samples;
+                    let note = format!("{samples} / {target}");
+                    if !self.card_head(ui, "Progress", &note) {
+                        return;
+                    }
                     let waiting = self.photo_job.is_none() && self.mesh.is_some();
                     ui.horizontal(|ui| {
                         ui.label(RichText::new(format!("{samples}")).size(22.0));
@@ -2439,9 +2546,16 @@ impl App {
                 ui.add_space(4.0);
 
                 let part_colors = self.view3d.part_colors;
-                let p = &mut self.photo;
                 ui::card(ui, |ui| {
-                    ui::section(ui, "Material");
+                    let note = match self.photo.finish {
+                        "matte" => "Matte",
+                        "gloss" => "Gloss",
+                        _ => "Satin",
+                    };
+                    if !self.card_head(ui, "Material", note) {
+                        return;
+                    }
+                    let p = &mut self.photo;
                     ui.horizontal_wrapped(|ui| {
                         ui.spacing_mut().item_spacing = Vec2::new(8.0, 8.0);
                         for (name, c) in SWATCHES {
@@ -2490,9 +2604,15 @@ impl App {
                 ui.add_space(4.0);
                 self.parts_card(ui);
                 self.explode_card(ui);
-                let p = &mut self.photo;
                 ui::card(ui, |ui| {
-                    ui::section(ui, "Scene");
+                    let note = match self.photo.studio {
+                        pathtrace::Studio::Light => "Light studio",
+                        pathtrace::Studio::Dark => "Dark studio",
+                    };
+                    if !self.card_head(ui, "Scene", note) {
+                        return;
+                    }
+                    let p = &mut self.photo;
                     ui.label("Studio");
                     let mut studio = p.studio;
                     ui::segmented(
@@ -2509,7 +2629,11 @@ impl App {
                 });
                 ui.add_space(4.0);
                 ui::card(ui, |ui| {
-                    ui::section(ui, "Quality");
+                    let note = format!("{} × {}", self.photo.width, self.photo.height);
+                    if !self.card_head(ui, "Quality", &note) {
+                        return;
+                    }
+                    let p = &mut self.photo;
                     setting(ui, "Samples", &mut p.samples, 16..=2048, 16.0, "");
                     ui.add_space(4.0);
                     ui.label("Resolution");
@@ -2565,16 +2689,18 @@ impl App {
 
     /// The Optimize tab. For now it holds the slice preview.
     fn optimize_panel(&mut self, ui: &mut egui::Ui) {
-        ui.label(ui::dim("Rough preview for checking. Not for printing."));
-        ui.add_space(4.0);
+        self.panel_head(ui, "Rough preview for checking. Not for printing.");
         let before = self.settings;
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
-                if let Some(sl) = &self.sliced {
+                if let Some(sl) = self.sliced.clone() {
                     let st = &sl.stats;
                     ui::card(ui, |ui| {
-                        ui::section(ui, "Estimate");
+                        let note = format!("{}, {:.1} g", fmt_duration(st.seconds), st.grams);
+                        if !self.card_head(ui, "Estimate", &note) {
+                            return;
+                        }
                         ui.label(
                             RichText::new(fmt_duration(st.seconds))
                                 .size(30.0)
@@ -2588,7 +2714,10 @@ impl App {
                     });
                     ui.add_space(4.0);
                     ui::card(ui, |ui| {
-                        ui::section(ui, "Layer");
+                        let note = format!("{} / {}", self.layer + 1, sl.layers.len());
+                        if !self.card_head(ui, "Layer", &note) {
+                            return;
+                        }
                         if let Some(l) = sl.layers.get(self.layer) {
                             ui.horizontal(|ui| {
                                 ui.label(RichText::new(format!("{}", self.layer + 1)).size(22.0));
@@ -2646,9 +2775,13 @@ impl App {
                     });
                 }
 
-                let s = &mut self.settings;
                 ui::card(ui, |ui| {
-                    ui::section(ui, "Print settings");
+                    let s = self.settings;
+                    let note = format!("{:.2} mm, {:.0} %", s.layer_height, s.infill * 100.0,);
+                    if !self.card_head(ui, "Print settings", &note) {
+                        return;
+                    }
+                    let s = &mut self.settings;
                     setting(
                         ui,
                         "Layer height",
@@ -3497,6 +3630,15 @@ impl eframe::App for App {
                 if ui::tabs(ui, &mut mode, &tabs) {
                     self.set_mode(mode);
                 }
+                // The Export card first, so that the tab gets the height
+                // that is left above it.
+                egui::TopBottomPanel::bottom("export")
+                    .frame(egui::Frame::NONE.inner_margin(egui::Margin {
+                        top: 10,
+                        ..Default::default()
+                    }))
+                    .show_separator_line(false)
+                    .show_inside(ui, |ui| self.export_card(ui));
                 match self.mode {
                     Mode::Model => self.model_panel(ui),
                     Mode::Optimize => self.optimize_panel(ui),
