@@ -30,7 +30,9 @@ const INSTRUCTIONS: &str = "CoCAD shows one OpenSCAD model in a desktop window. 
 Start with get_state, then get_params to see the Customizer parameters and their limits. \
 Use get_source to read the model code. Use view_model to see the model as an image. \
 set_params changes values in the window and waits for the build (the OpenSCAD run). \
-The mesh data in the reply shows the result. If the status is failed, read the error and the log.";
+The mesh data in the reply shows the result. If the status is failed, read the error and the log. \
+get_optimize shows the print preparation: the print parts, the plates, the fixes and the problems. \
+set_optimize changes it. export_model writes the plate as STL or 3MF, and the model as STEP.";
 
 fn endpoint_dir() -> Option<PathBuf> {
     Some(crate::openscad::config_dir()?.join("mcp"))
@@ -316,7 +318,7 @@ pub(crate) fn tools() -> Json {
         ),
         tool(
             "get_state",
-            "Get the loaded model and the app state: file, build status, last error, mesh size, volume and open edges, changed parameters, parameter sets, view mode, parts, part colors, explode, section cut and the end of the OpenSCAD log.",
+            "Get the loaded model and the app state: file, build status, last error, mesh size, volume and open edges, changed parameters, parameter sets, view mode, parts, part colors, explode, section cut, the plates of the Optimize tab and the end of the OpenSCAD log.",
             true,
             false,
             no_args()
@@ -424,17 +426,67 @@ pub(crate) fn tools() -> Json {
         ),
         tool(
             "export_model",
-            "Save the current mesh. The file extension sets the format: .stl, .3mf or .step. With slicer, builds each cocad_part part and writes a multicolor .3mf for that slicer. Waits for a running build. Fails when the last build failed.",
+            "Save the model. The file extension sets the format. .stl and .3mf write a print plate of the Optimize tab, as the window does: the print parts in print orientation, with the print fixes that are on, in the plate layout. A .3mf has one object for each print part and one build item for each copy. .step writes the model as built (with only set in the Optimize state: that part). With slicer, builds each cocad_part part and writes a multicolor .3mf for that slicer. Prepares the plates when they are not ready. Waits for a running build. Fails when the last build failed.",
             false,
             true,
             json!({
                 "type": "object",
                 "properties": {
-                    "path": { "type": "string", "description": "Absolute path of the output file" },
+                    "path": { "type": "string", "description": "Absolute path of the output file. With plate all, each plate goes to its own file with -plateN before the extension." },
                     "overwrite": { "type": "boolean", "description": "Replace an existing file" },
+                    "plate": {
+                        "oneOf": [
+                            { "type": "integer", "minimum": 1 },
+                            { "type": "string", "enum": ["all"] },
+                        ],
+                        "description": "The plate to write, from 1, or all. Default: the plate that the window shows. Only for .stl and .3mf.",
+                    },
                     "slicer": { "type": "string", "enum": ["prusa", "orca"], "description": "Write a multicolor 3MF for this slicer" },
                 },
                 "required": ["path"],
+            })
+        ),
+        tool(
+            "get_optimize",
+            "Get the print preparation of the Optimize tab: the state (print area, gap, the part on the plates, the plate, the fixes and the values of each print part) and the result: the print parts with count, copies, size, fit, orientation, fix counts, problems and split proposal; the number of plates; errors. Prepares the plates when they are not ready.",
+            true,
+            false,
+            no_args()
+        ),
+        tool(
+            "set_optimize",
+            "Change the print preparation of the Optimize tab. The keys are those of the state of get_optimize. Objects merge key by key, null removes a key (for example \"only\": null prints all parts, \"parts\": {\"Lid\": null} resets the part Lid). All fixes are off until you turn them on. Returns the result as get_optimize does.",
+            false,
+            false,
+            json!({
+                "type": "object",
+                "properties": {
+                    "area": { "type": "array", "items": { "type": "number" }, "description": "Print area [width, depth, height] in mm" },
+                    "gap": { "type": "number", "description": "Gap between the parts on a plate, in mm" },
+                    "only": { "type": ["string", "null"], "description": "Put only this print part on the plates. null: all parts." },
+                    "plate": { "type": "integer", "description": "The plate that the window and the export show, from 0" },
+                    "fixes": {
+                        "type": "object",
+                        "description": "The print fixes",
+                        "properties": {
+                            "teardrops": { "type": "boolean", "description": "Teardrop holes: round holes with a horizontal axis get a 45 degree point" },
+                            "bridges": { "type": "boolean", "description": "Bridged ceilings start on straight edges" },
+                            "hole_above": { "type": "string", "enum": ["sacrificial", "stepped"], "description": "A hole above a bridge: sacrificial layers or a stepped bridge" },
+                            "sacrificial_layers": { "type": "integer", "description": "1 to 10" },
+                            "chamfer": { "type": "boolean", "description": "45 degree chamfer of the bed edges" },
+                            "chamfer_mm": { "type": "number", "description": "Bed chamfer size in mm" },
+                            "brim": { "type": "boolean", "description": "A one-layer brim on small bed islands" },
+                            "brim_w": { "type": "number", "description": "Brim width in mm" },
+                            "brim_gap": { "type": "number", "description": "Gap between the brim and the rest of the part in mm" },
+                        },
+                    },
+                    "parts": {
+                        "type": "object",
+                        "description": "Values of each print part, by name: {\"include\": bool, \"copies\": n, \"orient\": \"model\" | \"auto\" | \"face\", \"down\": [x, y, z] (with face: the model direction that goes down), \"turns\": quarter turns about z, \"split\": {\"joint\": \"flat\" | \"pins\" | \"dovetail\", \"cuts\": [[axis 0 to 2, position mm]], \"clearance\": mm}}. A split_proposal of get_optimize is a valid split.",
+                        "additionalProperties": { "type": ["object", "null"] },
+                    },
+                    "wait": { "type": "boolean", "description": "Wait for the plates. Default: true." },
+                },
             })
         ),
         tool(
@@ -446,7 +498,7 @@ pub(crate) fn tools() -> Json {
         ),
         tool(
             "slice",
-            "Slice the model and return layers, filament, weight and a rough print time. Given values also change the print settings of the Optimize tab.",
+            "Slice the current plate of the Optimize tab and return layers, filament, weight and a rough print time. Given values also change the print settings of the Optimize tab.",
             false,
             false,
             json!({

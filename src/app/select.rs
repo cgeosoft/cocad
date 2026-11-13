@@ -129,7 +129,7 @@ impl Camera {
     /// The ray through the point `ndc` of the view (-1 to 1, y up), from
     /// the near plane: a start point and a unit direction. It inverts the
     /// view-projection matrix that the renderer uses.
-    fn ray(&self, aspect: f32, ndc: glam::Vec2) -> (Vec3, Vec3) {
+    pub(super) fn ray(&self, aspect: f32, ndc: glam::Vec2) -> (Vec3, Vec3) {
         let inv = self.matrix(aspect).inverse();
         let near = inv.project_point3(ndc.extend(-1.0));
         let far = inv.project_point3(ndc.extend(1.0));
@@ -176,12 +176,19 @@ impl App {
 
     /// The bounds of the part in focus, with its offset.
     pub(super) fn focus_bounds(&self) -> Option<Bounds> {
+        // The Optimize tab shows the plate, not the model parts.
+        if self.mode == Mode::Optimize {
+            return None;
+        }
         self.part_bounds(self.view3d.sel.focus.as_deref())
     }
 
     /// The bounds of the part that a view change turns around: the part in
     /// focus, else the selected part. With its offset.
     pub(super) fn pivot_bounds(&self) -> Option<Bounds> {
+        if self.mode == Mode::Optimize {
+            return None;
+        }
         self.focus_bounds()
             .or_else(|| self.part_bounds(self.view3d.sel.part.as_deref()))
     }

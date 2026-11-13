@@ -41,6 +41,9 @@ pub struct Config {
     /// The default print area (Settings > Printer), for a model that has
     /// no print area of its own yet.
     pub bed: crate::optimize::Area,
+    /// The printer preset that the user selected for `bed`, so that the
+    /// dropdown shows it when two presets have the same area. Empty: none.
+    pub bed_preset: String,
 }
 
 impl Default for Config {
@@ -54,6 +57,7 @@ impl Default for Config {
             autosave_sets: false,
             closed_cards: BTreeSet::new(),
             bed: crate::optimize::Area::default(),
+            bed_preset: String::new(),
         }
     }
 }
@@ -99,6 +103,7 @@ impl Config {
                     "mcp" => c.mcp = v != "false",
                     "update_check" => c.update_check = v != "false",
                     "autosave_sets" => c.autosave_sets = v == "true",
+                    "bed_preset" => c.bed_preset = v,
                     "bed_w" | "bed_d" | "bed_h" => {
                         let ok =
                             |x: &f32| (crate::printer::MIN_MM..=crate::printer::MAX_MM).contains(x);
@@ -137,7 +142,8 @@ impl Config {
         let closed: Vec<&str> = self.closed_cards.iter().map(String::as_str).collect();
         format!(
             "openscad = {}\nopenscad_args = {}\ntheme = {}\nmcp = {}\nupdate_check = {}\n\
-             autosave_sets = {}\nclosed_cards = {}\nbed_w = {}\nbed_d = {}\nbed_h = {}\n",
+             autosave_sets = {}\nclosed_cards = {}\nbed_w = {}\nbed_d = {}\nbed_h = {}\n\
+             bed_preset = {}\n",
             self.binary,
             self.args,
             self.theme,
@@ -147,7 +153,8 @@ impl Config {
             closed.join(","),
             self.bed.w,
             self.bed.d,
-            self.bed.h
+            self.bed.h,
+            self.bed_preset.trim()
         )
     }
 
@@ -536,6 +543,7 @@ mod tests {
             d: 210.0,
             h: 220.5,
         };
+        c.bed_preset = "Creality Ender-3 V3".into();
         let text = c.text();
         assert!(
             text.contains("bed_w = 250\nbed_d = 210\nbed_h = 220.5\n"),

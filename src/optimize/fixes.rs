@@ -263,6 +263,30 @@ pub fn apply(
         None
     };
     report.chamfer = chamfer.is_some();
+    if s.brim && chamfer.is_some() {
+        // The bed chamfer makes the first layer smaller, so it can make an
+        // island small or split it. The brim follows the islands of the
+        // chamfered part: one run for the other fixes, one for the brim.
+        let first = scad::run(
+            cfg,
+            &[mesh],
+            |imports| compose(&imports[0], &plans, chamfer),
+            cancel,
+        )?;
+        let p = brim::plan(&first, s, layers, area);
+        report.brims = p.fixed;
+        report.skipped.extend(p.skipped.iter().cloned());
+        if p.is_empty() {
+            return Ok((first, report));
+        }
+        let out = scad::run(
+            cfg,
+            &[&first],
+            |imports| compose(&imports[0], &[p], None),
+            cancel,
+        )?;
+        return Ok((out, report));
+    }
     if s.brim {
         let p = brim::plan(mesh, s, layers, area);
         report.brims = p.fixed;
@@ -374,6 +398,43 @@ mod tests {
         assert!((a - want).abs() < 1.0, "area {a}, want {want}");
         let b = out.bounds().unwrap();
         assert!((b.max.x - 30.0).abs() < 1e-3);
+    }
+
+    #[test]
+    #[ignore = "needs openscad-nightly"]
+    fn brim_follows_the_islands_of_the_chamfer() {
+        use std::sync::atomic::AtomicBool;
+        // A block and, apart from it, a wall of 3.4 mm: not thin. The
+        // chamfer makes its first layer 2.6 mm wide: thin.
+        let path = std::env::temp_dir().join(format!("cocad-fix-brim-{}.scad", std::process::id()));
+        std::fs::write(
+            &path,
+            "cube([20, 20, 10]); translate([30, 0, 0]) cube([3.4, 20, 5]);",
+        )
+        .unwrap();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let cfg = Config::default();
+        let mesh = crate::openscad::render(&cfg, &path, &[], &cancel).unwrap().mesh;
+        let _ = std::fs::remove_file(&path);
+        let l = Layers::default();
+        let only_brim = Settings {
+            brim: true,
+            ..Settings::default()
+        };
+        let (_, r) = apply(&cfg, &mesh, &only_brim, l, &Limits::default(), &Area::default(), &cancel).unwrap();
+        assert_eq!(r.brims, 0);
+        let both = Settings {
+            chamfer: true,
+            ..only_brim
+        };
+        let (out, r) = apply(&cfg, &mesh, &both, l, &Limits::default(), &Area::default(), &cancel).unwrap();
+        assert!(r.chamfer);
+        assert_eq!(r.brims, 1);
+        let issues = super::super::check::run(&out, l, &Limits::default(), &Area::default());
+        assert!(
+            !issues.iter().any(|i| i.kind == super::super::check::Kind::SmallIsland),
+            "{issues:?}"
+        );
     }
 
     #[test]

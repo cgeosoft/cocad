@@ -328,6 +328,10 @@ impl App {
     /// The bounds of the model as the view shows it: each part that shows,
     /// with its offset. Fit and the grid use them.
     pub(super) fn view_bounds(&self) -> Option<Bounds> {
+        // The Optimize tab shows the bed.
+        if self.mode == Mode::Optimize {
+            return Some(self.bed_bounds());
+        }
         let fallback = || self.info.as_ref().map(|i| i.bounds);
         let Some(a) = self.assembly.as_ref().filter(|a| !a.parts.is_empty()) else {
             return fallback();

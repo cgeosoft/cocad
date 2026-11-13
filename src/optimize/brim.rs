@@ -9,7 +9,7 @@
 //! around the outside of an island, not into its holes, so that no brim
 //! stays in a tube.
 
-use super::check::{bbox, inside_loop, seg_dist};
+use super::check::{SLIVER_MM2, bbox, inside_loop, seg_dist};
 use super::fixes::{Plan, Settings};
 use super::{Area, Layers, loop_area, scad, section};
 use crate::mesh::Mesh;
@@ -74,7 +74,9 @@ pub fn island_z(mesh: &Mesh, layers: Layers) -> f32 {
     zmin + layers.first * 0.5 + 1.234e-4
 }
 
-/// The bed islands of `mesh` (print frame).
+/// The bed islands of `mesh` (print frame). Loops with less area than
+/// `SLIVER_MM2` are slivers of a boolean result (for example at the joint
+/// of a brim and a chamfered part), not islands.
 pub fn islands(mesh: &Mesh, layers: Layers) -> Vec<Island> {
     let loops = section(mesh, island_z(mesh, layers));
     let (outers, holes): (Vec<Vec<Vec2>>, Vec<Vec<Vec2>>) =
@@ -106,6 +108,7 @@ pub fn islands(mesh: &Mesh, layers: Layers) -> Vec<Island> {
                 width,
             }
         })
+        .filter(|i| i.area >= SLIVER_MM2)
         .collect()
 }
 
@@ -309,6 +312,18 @@ mod tests {
             block(Vec3::ZERO, Vec3::new(30.0, 30.0, 2.0)),
             block(Vec3::new(35.0, 0.0, 0.0), Vec3::new(35.8, 20.0, 10.0)),
         ])
+    }
+
+    #[test]
+    fn a_sliver_is_not_an_island() {
+        // A plate and a sheet 0.001 mm thin: 0.02 mm² on the bed.
+        let m = mesh(&[
+            block(Vec3::ZERO, Vec3::new(30.0, 30.0, 2.0)),
+            block(Vec3::new(35.0, 0.0, 0.0), Vec3::new(35.001, 20.0, 5.0)),
+        ]);
+        let isl = islands(&m, Layers::default());
+        assert_eq!(isl.len(), 1, "{isl:?}");
+        assert!(!isl[0].small());
     }
 
     #[test]

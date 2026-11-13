@@ -55,13 +55,12 @@ fn shown_name(area: Area, picked: Option<&str>) -> &'static str {
 
 /// A dropdown of the presets and three fields: width, depth and height in
 /// mm. A preset fills the fields. An edit that matches no preset shows
-/// "Custom". Returns true when the area changed.
-pub fn area_editor(ui: &mut egui::Ui, area: &mut Area) -> bool {
+/// "Custom". `picked` is the name of the preset that the user selected
+/// last (empty: none). The dropdown shows it when two presets have the
+/// same area. The caller stores it. Returns true when the area changed.
+pub fn area_editor(ui: &mut egui::Ui, area: &mut Area, picked: &mut String) -> bool {
     let before = *area;
-    // The preset that the user picked last, for presets with the same area.
-    let picked_id = ui.id().with("printer-picked");
-    let picked: Option<&'static str> = ui.data(|d| d.get_temp(picked_id));
-    let shown = shown_name(*area, picked);
+    let shown = shown_name(*area, Some(picked.as_str()));
     egui::ComboBox::from_id_salt(ui.id().with("printer-preset"))
         .selected_text(shown)
         .width(ui.available_width())
@@ -73,7 +72,7 @@ pub fn area_editor(ui: &mut egui::Ui, area: &mut Area) -> bool {
                 );
                 if ui.selectable_label(shown == p.name, text).clicked() {
                     *area = p.area;
-                    ui.data_mut(|d| d.insert_temp(picked_id, p.name));
+                    *picked = p.name.to_string();
                 }
             }
         });
