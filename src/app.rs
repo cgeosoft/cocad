@@ -168,6 +168,7 @@ enum SettingsPage {
     Appearance,
     Sets,
     OpenScad,
+    Printer,
     Mcp,
     Updates,
     Privacy,
@@ -1780,6 +1781,13 @@ impl App {
             });
     }
 
+    /// The default print area from Settings > Printer, for a model that
+    /// has no print area of its own yet.
+    #[allow(dead_code)]
+    pub(crate) fn default_area(&self) -> crate::optimize::Area {
+        self.cfg.bed
+    }
+
     /// What the export buttons write, in one short line above them.
     pub(crate) fn export_summary(&self) -> String {
         "Model as built.".to_string()
@@ -3285,6 +3293,7 @@ impl App {
                 "OpenSCAD",
                 missing.then_some(ui::c().danger),
             ),
+            (SettingsPage::Printer, "Printer", None),
             (SettingsPage::Mcp, "MCP server", running.then_some(ui::GOOD)),
             (SettingsPage::Updates, "Updates", None),
         ];
@@ -3337,6 +3346,9 @@ impl App {
                                 }
                                 SettingsPage::OpenScad => {
                                     ui::card(ui, |ui| openscad_settings(ui, &mut edit, &probe));
+                                }
+                                SettingsPage::Printer => {
+                                    ui::card(ui, |ui| printer_settings(ui, &mut edit));
                                 }
                                 SettingsPage::Mcp => {
                                     ui::card(ui, |ui| mcp_settings(ui, &mut edit, running));
@@ -3438,6 +3450,21 @@ fn sets_settings(ui: &mut egui::Ui, edit: &mut openscad::Config) {
          of the sets file. The sets file is <model>.json next to the model, or the file that \
          you opened for the model.",
     ));
+}
+
+/// The Printer page of the Settings window: the default print area.
+fn printer_settings(ui: &mut egui::Ui, edit: &mut openscad::Config) {
+    ui::section(ui, "Print area");
+    ui.add_space(4.0);
+    ui.add(
+        egui::Label::new(ui::dim(
+            "The default print area of the printer, for a model that you open for the first \
+             time. Select a printer, or type the width, depth and height.",
+        ))
+        .wrap(),
+    );
+    ui.add_space(6.0);
+    crate::printer::area_editor(ui, &mut edit.bed);
 }
 
 /// The MCP server page of the Settings window.

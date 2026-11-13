@@ -16,6 +16,7 @@ mod params;
 mod parts;
 mod pathtrace;
 mod presets;
+mod printer;
 mod recent;
 mod render;
 mod slicer;

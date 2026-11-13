@@ -38,6 +38,9 @@ pub struct Config {
     /// The cards of the right panel that the user closed, by title. One
     /// choice for all models.
     pub closed_cards: BTreeSet<String>,
+    /// The default print area (Settings > Printer), for a model that has
+    /// no print area of its own yet.
+    pub bed: crate::optimize::Area,
 }
 
 impl Default for Config {
@@ -50,6 +53,7 @@ impl Default for Config {
             update_check: true,
             autosave_sets: false,
             closed_cards: BTreeSet::new(),
+            bed: crate::optimize::Area::default(),
         }
     }
 }
@@ -95,6 +99,17 @@ impl Config {
                     "mcp" => c.mcp = v != "false",
                     "update_check" => c.update_check = v != "false",
                     "autosave_sets" => c.autosave_sets = v == "true",
+                    "bed_w" | "bed_d" | "bed_h" => {
+                        let ok =
+                            |x: &f32| (crate::printer::MIN_MM..=crate::printer::MAX_MM).contains(x);
+                        if let Some(mm) = v.parse::<f32>().ok().filter(ok) {
+                            match k.trim() {
+                                "bed_w" => c.bed.w = mm,
+                                "bed_d" => c.bed.d = mm,
+                                _ => c.bed.h = mm,
+                            }
+                        }
+                    }
                     "closed_cards" => {
                         c.closed_cards = (v.split(','))
                             .map(str::trim)
@@ -122,14 +137,17 @@ impl Config {
         let closed: Vec<&str> = self.closed_cards.iter().map(String::as_str).collect();
         format!(
             "openscad = {}\nopenscad_args = {}\ntheme = {}\nmcp = {}\nupdate_check = {}\n\
-             autosave_sets = {}\nclosed_cards = {}\n",
+             autosave_sets = {}\nclosed_cards = {}\nbed_w = {}\nbed_d = {}\nbed_h = {}\n",
             self.binary,
             self.args,
             self.theme,
             self.mcp,
             self.update_check,
             self.autosave_sets,
-            closed.join(",")
+            closed.join(","),
+            self.bed.w,
+            self.bed.d,
+            self.bed.h
         )
     }
 
@@ -513,7 +531,16 @@ mod tests {
             ..Config::default()
         };
         c.closed_cards = ["Mesh", "Print settings"].map(String::from).into();
+        c.bed = crate::optimize::Area {
+            w: 250.0,
+            d: 210.0,
+            h: 220.5,
+        };
         let text = c.text();
+        assert!(
+            text.contains("bed_w = 250\nbed_d = 210\nbed_h = 220.5\n"),
+            "{text}"
+        );
         assert!(
             text.contains("closed_cards = Mesh,Print settings\n"),
             "{text}"
@@ -528,8 +555,12 @@ mod tests {
             "theme = light\nclosed_cards = , Build ,\nmanifold = false\nother = 1\nno equals sign\n",
         );
         assert_eq!(c.theme, "light");
-        assert!(!Config::default().text().contains("manifold"));
         assert_eq!(c.closed_cards, BTreeSet::from(["Build".to_string()]));
+        assert!(!Config::default().text().contains("manifold"));
+        // Print area values out of the limits keep the default.
+        let c = Config::parse("bed_w = 300\nbed_d = -5\nbed_h = x\n");
+        let default = crate::optimize::Area::default();
+        assert_eq!((c.bed.w, c.bed.d, c.bed.h), (300.0, default.d, default.h));
     }
 
     #[test]
