@@ -56,7 +56,8 @@ Environment:
   OPENSCAD_ARGS  Extra OpenSCAD arguments (overrides the saved setting)
 
 Settings are saved in $XDG_CONFIG_HOME/cocad/config (Settings window in the app).
---backend=manifold is added when the OpenSCAD binary supports it.
+CoCAD needs an OpenSCAD development snapshot with the Manifold backend, and adds
+--backend=manifold. Get one at https://openscad.org/downloads.html#snapshots
 ";
 
 fn main() -> Result<()> {
@@ -77,11 +78,18 @@ fn main() -> Result<()> {
             println!("cocad {}", env!("CARGO_PKG_VERSION"));
             Ok(())
         }
-        Some("mcp") => mcp::run(),
-        Some("params") => cmd_params(&args[1..]),
-        Some("export") => cmd_export(&args[1..]),
-        Some("slice") => cmd_slice(&args[1..]),
-        Some("photo") => cmd_photo(&args[1..]),
+        Some(cmd @ ("mcp" | "params" | "export" | "slice" | "photo")) => {
+            // These stop when OpenSCAD has no Manifold. The window shows a
+            // notice instead.
+            openscad::check(&openscad::Config::load())?;
+            match cmd {
+                "mcp" => mcp::run(),
+                "params" => cmd_params(&args[1..]),
+                "export" => cmd_export(&args[1..]),
+                "slice" => cmd_slice(&args[1..]),
+                _ => cmd_photo(&args[1..]),
+            }
+        }
         Some(a) if start_tab(a).is_some() => gui(
             args.get(1).map(PathBuf::from),
             start_tab(a).unwrap_or("model"),

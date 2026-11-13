@@ -185,6 +185,27 @@ impl App {
     }
 
     fn exec(&mut self, tool: &str, args: &Json, reply: &Reply) -> Outcome {
+        // Without Manifold, CoCAD does not build. The window shows the steps.
+        let builds = matches!(
+            tool,
+            "build"
+                | "render"
+                | "set_params"
+                | "reset_params"
+                | "load_parameter_set"
+                | "export_model"
+                | "view_model"
+                | "save_photo"
+                | "slice"
+        );
+        if builds && let Some((binary, probe)) = &self.no_manifold {
+            let problem = openscad::problem(binary, probe).unwrap_or_default();
+            return Err(format!(
+                "{problem} CoCAD needs an OpenSCAD development snapshot with the Manifold \
+                 backend: {}. The CoCAD window shows the steps.",
+                openscad::SNAPSHOTS_URL
+            ));
+        }
         match tool {
             "get_state" | STATE_WHEN_DONE => Ok(Some(self.state())),
             "get_params" => {
@@ -257,7 +278,9 @@ impl App {
     }
 
     fn state(&self) -> Json {
-        let status = if self.file.is_none() {
+        let status = if self.no_manifold.is_some() {
+            "no openscad with manifold"
+        } else if self.file.is_none() {
             "no model"
         } else if self.job.is_some() {
             "building"

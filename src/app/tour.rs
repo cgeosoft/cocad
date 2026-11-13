@@ -131,7 +131,7 @@ const STEPS: [Step; 10] = [
         points: &[
             "File > Settings sets the theme, auto save of sets, the OpenSCAD binary and your \
              privacy choices.",
-            "An OpenSCAD development build with Manifold is much faster.",
+            "CoCAD needs an OpenSCAD development snapshot with the Manifold backend.",
             "Help > About and shortcuts lists all keys.",
             "The CLI exports, slices and makes photos without the window. Run cocad --help.",
             "Help > Welcome tour shows this tour again.",

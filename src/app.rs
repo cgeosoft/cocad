@@ -366,7 +366,9 @@ pub struct App {
     cfg: openscad::Config,
     cfg_edit: Option<openscad::Config>,
     settings_page: SettingsPage,
-    engine: String,
+    /// The OpenSCAD binary and its probe, while it has no Manifold
+    /// backend. The window then shows a notice and CoCAD does not build.
+    no_manifold: Option<(String, openscad::Probe)>,
     renderer: Option<Arc<Mutex<Renderer>>>,
     toast: Option<(String, Instant)>,
     export_rx: Option<Receiver<Result<PathBuf, String>>>,
@@ -523,7 +525,7 @@ impl App {
             cfg,
             cfg_edit: None,
             settings_page: SettingsPage::Appearance,
-            engine: String::new(),
+            no_manifold: None,
             renderer,
             toast: None,
             export_rx: None,
@@ -540,6 +542,7 @@ impl App {
             show_changes: false,
         };
         app.sync_server(&cc.egui_ctx);
+        app.check_openscad();
         if let Some(f) = file {
             app.open(f);
         }
@@ -727,10 +730,27 @@ impl App {
         }
     }
 
+    /// Probes the OpenSCAD binary again. Without Manifold, the notice
+    /// shows. With it, a model without a mesh builds.
+    fn check_openscad(&mut self) {
+        openscad::forget();
+        let binary = self.cfg.binary();
+        let probe = openscad::probe(&binary);
+        let was_missing = self.no_manifold.is_some();
+        self.no_manifold = (!probe.manifold).then_some((binary, probe));
+        if was_missing && self.no_manifold.is_none() && self.mesh.is_none() {
+            self.start_render();
+        }
+    }
+
     fn start_render(&mut self) {
         let Some(file) = self.file.clone() else {
             return;
         };
+        // CoCAD needs Manifold. The notice tells how to get it.
+        if self.no_manifold.is_some() {
+            return;
+        }
         if let Some(j) = self.job.take() {
             j.cancel.store(true, Ordering::Relaxed);
         }
@@ -744,12 +764,6 @@ impl App {
         let (tx, rx) = channel();
         let c = cancel.clone();
         let cfg = self.cfg.clone();
-        let manifold = cfg.args().iter().any(|a| a == "--backend=manifold");
-        self.engine = if manifold {
-            "Manifold".into()
-        } else {
-            "CGAL".into()
-        };
         std::thread::spawn(move || {
             let r = openscad::render(&cfg, &file, &defines, &c).map_err(|e| e.to_string());
             if c.load(Ordering::Relaxed) {
@@ -1408,10 +1422,101 @@ impl App {
         });
     }
 
+    /// The notice when the OpenSCAD binary has no Manifold backend: what
+    /// CoCAD found and how to get a development snapshot. CoCAD does not
+    /// build while it shows. It waits while the Settings window is open.
+    fn openscad_notice(&mut self, ctx: &egui::Context) {
+        let Some((binary, probe)) = self.no_manifold.clone() else {
+            return;
+        };
+        if self.cfg_edit.is_some() {
+            return;
+        }
+        let (mut settings, mut again) = (false, false);
+        let frame = egui::Frame::NONE
+            .fill(ui::c().panel)
+            .corner_radius(14)
+            .inner_margin(egui::Margin::same(18))
+            .stroke(egui::Stroke::new(1.0_f32, ui::c().line));
+        egui::Modal::new(egui::Id::new("openscad_notice"))
+            .frame(frame)
+            .show(ctx, |ui| {
+                ui.set_width(520.0);
+                ui.heading("CoCAD needs OpenSCAD with Manifold");
+                ui.add_space(6.0);
+                ui.label(
+                    "CoCAD builds the models with the Manifold backend of OpenSCAD. The \
+                     development snapshots (nightly builds) of OpenSCAD have it. The release \
+                     2021.01 does not. CoCAD does not build a model until it finds a snapshot.",
+                );
+                ui.add_space(8.0);
+                let found = if probe.version == "not found" {
+                    "not found".to_string()
+                } else {
+                    probe.version.clone()
+                };
+                info_row(ui, "Found", &found);
+                info_row(ui, "Binary", &binary);
+                ui.add_space(8.0);
+                ui::section(ui, "Steps");
+                for (i, (step, line)) in openscad::install_steps().into_iter().enumerate() {
+                    ui.add(egui::Label::new(format!("{}. {step}", i + 1)).wrap());
+                    if let Some(line) = line {
+                        ui.horizontal(|ui| {
+                            ui.add_space(16.0);
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(line)
+                                        .monospace()
+                                        .size(12.0)
+                                        .color(ui::c().dim),
+                                )
+                                .wrap(),
+                            );
+                            if ui
+                                .add(ui::ghost("Copy", false))
+                                .on_hover_text("Copy this line")
+                                .clicked()
+                            {
+                                ui.ctx().copy_text(line.to_string());
+                            }
+                        });
+                    }
+                }
+                ui.add_space(4.0);
+                ui.hyperlink_to(
+                    "OpenSCAD downloads: development snapshots",
+                    openscad::SNAPSHOTS_URL,
+                );
+                ui.add_space(12.0);
+                let row = Vec2::new(ui.available_width(), 34.0);
+                let rtl = egui::Layout::right_to_left(egui::Align::Center);
+                ui.allocate_ui_with_layout(row, rtl, |ui| {
+                    ui.spacing_mut().button_padding = Vec2::new(16.0, 7.0);
+                    again = ui.add(ui::primary("Check again")).clicked();
+                    settings = ui
+                        .add(ui::ghost("OpenSCAD settings", false))
+                        .on_hover_text("Select the OpenSCAD binary")
+                        .clicked();
+                });
+            });
+        if settings {
+            self.open_settings();
+            self.settings_page = SettingsPage::OpenScad;
+        }
+        if again {
+            self.check_openscad();
+            if self.no_manifold.is_some() {
+                self.toast = Some(("No OpenSCAD with Manifold yet".to_string(), Instant::now()));
+            }
+        }
+    }
+
     /// A small notice at the bottom right. A click opens the list of changes.
     /// It waits while another window covers the app.
     fn update_notice(&mut self, ctx: &egui::Context) {
         let covered = self.consent.is_some()
+            || self.no_manifold.is_some()
             || self.tour.is_some()
             || self.cfg_edit.is_some()
             || self.show_changes
@@ -2215,7 +2320,7 @@ impl App {
         }
     }
 
-    /// Thin bar at the bottom: render state, engine, model, mode details.
+    /// Thin bar at the bottom: build state, OpenSCAD version, model, mode details.
     fn status_bar(&mut self, ui: &mut egui::Ui) {
         let small = |t: String| RichText::new(t).size(12.5);
         let dim = |t: String| RichText::new(t).size(12.5).color(ui::c().dim);
@@ -2245,6 +2350,8 @@ impl App {
                 if r.on_hover_text("Show the OpenSCAD output").clicked() {
                     self.show_log = true;
                 }
+            } else if self.no_manifold.is_some() {
+                ui.label(small("Not built: OpenSCAD has no Manifold".into()).color(ui::c().danger));
             } else if self.dirty_since.is_some() && !self.auto_render {
                 ui.label(small("Parameters changed. Press F5.".into()).color(ui::ACCENT));
             } else if self.file.is_some() {
@@ -2266,13 +2373,13 @@ impl App {
                 .version
                 .trim_start_matches("OpenSCAD version ")
                 .to_string();
-            let backend = if self.engine.is_empty() {
-                String::new()
+            let label = format!("OpenSCAD {version}");
+            if probe.manifold {
+                ui.label(dim(label)).on_hover_text(self.cfg.binary());
             } else {
-                format!("  ·  {}", self.engine)
-            };
-            ui.label(dim(format!("OpenSCAD {version}{backend}")))
-                .on_hover_text(self.cfg.binary());
+                ui.label(small(label).color(ui::c().danger))
+                    .on_hover_text(format!("{}: no Manifold backend", self.cfg.binary()));
+            }
 
             // Model.
             if let Some(i) = &self.info {
@@ -3064,7 +3171,7 @@ impl App {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
         // The tour uses the arrow keys, and the app waits behind it.
-        if self.tour.is_some() || self.consent.is_some() {
+        if self.tour.is_some() || self.consent.is_some() || self.no_manifold.is_some() {
             return;
         }
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::O)) {
@@ -3168,7 +3275,7 @@ impl App {
         let width = (screen.x - 80.0).clamp(420.0, 604.0);
         let height = (screen.y - 170.0).clamp(160.0, 360.0);
         let probe = settings_probe(ctx, &edit);
-        let missing = probe.as_ref().is_some_and(|p| p.version == "not found");
+        let missing = probe.as_ref().is_some_and(|p| !p.manifold);
         let mut page = self.settings_page;
         let mut pages = vec![
             (SettingsPage::Appearance, "Appearance", None),
@@ -3264,8 +3371,7 @@ impl App {
             if let Err(e) = edit.save() {
                 self.toast = Some((format!("Cannot save settings: {e}"), Instant::now()));
             }
-            let rerender = (&edit.binary, &edit.args, edit.manifold)
-                != (&self.cfg.binary, &self.cfg.args, self.cfg.manifold);
+            let rerender = (&edit.binary, &edit.args) != (&self.cfg.binary, &self.cfg.args);
             self.cfg = edit;
             if self.privacy.dirty() {
                 let p = &self.privacy;
@@ -3275,6 +3381,7 @@ impl App {
             }
             self.sync_server(ctx);
             if rerender {
+                self.check_openscad();
                 self.start_render();
             }
         } else if !close {
@@ -3397,7 +3504,8 @@ fn openscad_settings(
         Some(p) => {
             let version = p.version.trim_start_matches("OpenSCAD version ");
             let short: String = version.chars().take(32).collect();
-            card_header(ui, "OpenSCAD", ui::GOOD, &short);
+            let color = if p.manifold { ui::GOOD } else { ui::c().danger };
+            card_header(ui, "OpenSCAD", color, &short);
         }
     }
     ui.add_space(4.0);
@@ -3425,16 +3533,35 @@ fn openscad_settings(
             .desired_width(f32::INFINITY)
             .margin(Vec2::new(10.0, 6.0)),
     );
-    let manifold = probe.as_ref().is_none_or(|p| p.manifold);
-    let note = if manifold {
-        "Much faster renders with development builds."
-    } else {
-        "Needs an OpenSCAD development build, 2024 or later."
-    };
     ui.add_space(4.0);
-    ui.add_enabled_ui(manifold, |ui| {
-        toggle_row(ui, "Manifold backend", note, &mut edit.manifold);
-    });
+    if probe.as_ref().is_some_and(|p| !p.manifold) {
+        ui.label(
+            RichText::new(
+                "This binary has no Manifold backend. CoCAD needs an OpenSCAD development \
+                 snapshot.",
+            )
+            .size(12.5)
+            .color(ui::c().danger),
+        );
+        ui.hyperlink_to(
+            RichText::new("Development snapshots").size(12.5),
+            openscad::SNAPSHOTS_URL,
+        );
+    } else {
+        ui.label(ui::dim(
+            "CoCAD builds with the Manifold backend. It adds --backend=manifold.",
+        ));
+    }
+    if openscad::cgal_arg(&edit.args) {
+        ui.label(
+            RichText::new(
+                "--backend=cgal turns off Manifold. Builds are much slower, and CoCAD needs \
+                 Manifold.",
+            )
+            .size(12.5)
+            .color(ui::ACCENT),
+        );
+    }
     if std::env::var_os("OPENSCAD").is_some() || std::env::var_os("OPENSCAD_ARGS").is_some() {
         ui.label(ui::dim(
             "$OPENSCAD or $OPENSCAD_ARGS override these values.",
@@ -3569,6 +3696,8 @@ impl eframe::App for App {
         self.about_window(ctx);
         if self.consent.is_some() {
             self.consent_window(ctx);
+        } else if self.no_manifold.is_some() {
+            self.openscad_notice(ctx);
         } else {
             self.tour_window(ctx);
         }
