@@ -16,6 +16,7 @@ CoCAD (cgeosoft) is a Rust desktop app for OpenSCAD models. It edits Customizer 
 - `packaging/`: desktop entry, icon and MIME type for the `.deb`.
 - `assets/preview.png`: the only README image.
 - `assets/tour/`: the tour screenshots. The binary embeds them.
+- `assets/fixes/`: the pictures of the print fix info windows. The binary embeds them. `scripts/showcase-shots.sh` makes them.
 - `assets/examples/`: thumbnails of the examples. The binary embeds them. Run `scripts/example-thumbs.sh` when an example changes.
 - `extras/website/images/`: full-size screenshots and renders for the website.
 - `.github/workflows/build.yml`: builds Linux, Windows and macOS on a `v*` tag or a manual start. A tag also makes the release.
@@ -51,7 +52,7 @@ cargo check --target aarch64-apple-darwin
 7. Keep `Depends` in `scripts/package-deb.sh` in sync with new runtime libraries.
 8. The repo is public (MIT). Do not commit secrets, personal paths or host names.
 9. Git LFS stores JPG, PNG, MP4, STL and 3MF files. Keep them small.
-10. `/assets/preview.png`, `assets/tour/`, `assets/examples/`, `extras/website/images/` and website PNG files are plain git.
+10. `/assets/preview.png`, `assets/tour/`, `assets/fixes/`, `assets/examples/`, `extras/website/images/` and website PNG files are plain git.
 11. Warn before you delete files. Push only when the owner asks.
 12. `origin` is the private main repo. `github` is the public mirror. The branch is `main`.
 13. A release bumps the minor version by default. Bump the patch only when the owner says so.

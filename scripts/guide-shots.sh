@@ -73,6 +73,13 @@ before=$(mcp get_optimize '{}')
 shot app-2-before
 mcp set_optimize '{"fixes":{"teardrops":true,"hole_size":true,"bridges":true,"chamfer":true,"brim":true,"ears":true}}' >/dev/null
 shot app-3-fixes 4
+# The info window of a fix: the info button after "Teardrop holes", then the
+# Right key to the last fix, Mouse ears. The pointer goes off the buttons.
+xdotool mousemove 1220 505 sleep 0.5 click 1
+for _ in 1 2 3 4 5; do xdotool key Right sleep 0.3; done
+xdotool mousemove 700 17
+shot app-9-fix-info 2
+xdotool key Escape
 # Accept the split that CoCAD proposes for the base plate.
 split=$(printf '%s' "$before" | python3 -c '
 import json, sys

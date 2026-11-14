@@ -383,16 +383,7 @@ pub fn fold_header(
         let hit = Rect::from_center_size(center, vec2(20.0, 20.0));
         // Click sense, so that a click on the icon does not fold the card.
         let icon = ui.interact(hit, resp.id.with("info"), Sense::click());
-        let color = if icon.hovered() { c().text } else { c().dim };
-        let p = ui.painter();
-        p.circle_stroke(center, 6.5, Stroke::new(1.2_f32, color));
-        p.text(
-            center + vec2(0.0, 0.5),
-            Align2::CENTER_CENTER,
-            "i",
-            FontId::proportional(10.0),
-            color,
-        );
+        paint_info(ui.painter(), center, icon.hovered());
         icon.on_hover_ui(|ui| {
             ui.set_max_width(260.0);
             ui.label(info);
@@ -842,6 +833,29 @@ fn button_colors(ui: &egui::Ui, resp: &egui::Response, active: bool) -> (Color32
         c().text
     };
     (fill, fg)
+}
+
+/// The small info icon: an "i" in a circle, brighter on hover.
+fn paint_info(p: &egui::Painter, center: Pos2, hovered: bool) {
+    let color = if hovered { c().text } else { c().dim };
+    p.circle_stroke(center, 6.5, Stroke::new(1.2_f32, color));
+    p.text(
+        center + vec2(0.0, 0.5),
+        Align2::CENTER_CENTER,
+        "i",
+        FontId::proportional(10.0),
+        color,
+    );
+}
+
+/// The small info icon of `fold_header` as a button, for example after the
+/// name of a row.
+pub fn info_button(ui: &mut egui::Ui) -> egui::Response {
+    let (rect, resp) = ui.allocate_exact_size(vec2(20.0, 20.0), Sense::click());
+    if ui.is_rect_visible(rect) {
+        paint_info(ui.painter(), rect.center(), resp.hovered());
+    }
+    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
 /// Filled square button with a line icon. `active` shows it in the accent

@@ -85,6 +85,7 @@ Models with `// expect: error` on the first line must fail.
 | `src/app/thumb.rs` | Model thumbnails: drawn when a model opens and closes, start page cache of thumbnails, titles and descriptions |
 | `src/thumbs.rs` | Thumbnail files in the settings folder (`thumbs/`) |
 | `src/app/optimize_tab.rs` | The Optimize tab: cards, plate view, pipeline runs in the background, plate export, MCP Optimize state |
+| `src/app/fix_info.rs` | The info window of each print fix: text and the pictures in `assets/fixes/` |
 | `src/mcp.rs` | MCP server, tool list, window listener |
 | `src/app/view3d.rs` | 3D view options for the parts: part colors, explode, Parts and Explode cards, part colors window |
 | `src/app/state.rs` | State of each model: right panel settings and last parameter values, in `models.json` |

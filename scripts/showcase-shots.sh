@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Makes the before and after pictures of the Optimize fixes on
-# examples/desk-dock.scad in assets/guide/. Needs openscad-nightly and
+# examples/desk-dock.scad in assets/guide/, and the pictures of the fix info
+# windows in assets/fixes/. Needs openscad-nightly and
 # ImageMagick.
 #
 # Usage: scripts/showcase-shots.sh
@@ -14,4 +15,9 @@ mkdir -p assets/guide
 for f in "$work"/out/*.png; do
     convert "$f" -strip "assets/guide/$(basename "$f")"
 done
-ls -l assets/guide
+# The pictures of the fix info windows, which the binary embeds.
+mkdir -p assets/fixes
+for f in "$work"/out/app/*.png; do
+    convert "$f" -resize '1400x>' -strip "assets/fixes/$(basename "$f")"
+done
+ls -l assets/guide assets/fixes

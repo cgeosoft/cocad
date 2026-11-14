@@ -17,3 +17,5 @@ assets/guide/** -filter -diff -merge -text
 /assets/icon.png -filter -diff -merge -text
 # Built-in example thumbnails: plain git, so the build needs no LFS
 assets/examples/** -filter -diff -merge -text
+# Pictures of the print fix info windows: plain git, so the build needs no LFS
+assets/fixes/** -filter -diff -merge -text

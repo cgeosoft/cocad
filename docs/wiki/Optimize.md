@@ -128,6 +128,10 @@ The print fixes change the shape of the print parts, so that they print better. 
 | **Brim on small islands** | A small area of the first layer gets a brim of one layer, so that it stays on the bed. | **Width**: 1 to 20 mm, 5 mm by default. **Gap**: 0.2 to 5 mm, 1 mm by default |
 | **Mouse ears** | Each sharp corner of a large area of the first layer gets a disk of one layer. The disk holds the corner on the bed, so that the part does not lift there. | **Diameter**: 5 to 30 mm, 15 mm by default. **Min size**: 20 to 300 mm, 100 mm by default |
 
+Each fix has an info button after its name. Click it to open a window about the fix: what it does, why it is necessary and when to use it, with a picture of the desk dock example before and after the fix. **Back** and **Next**, or the Left and Right keys, go to the other fixes. Esc closes the window.
+
+![The info window of Mouse ears](https://raw.githubusercontent.com/cgeosoft/cocad/main/assets/guide/app-9-fix-info.jpg)
+
 With the bed chamfer on, the card shows "Set the elephant foot compensation of the slicer to 0." Without this, the bed edges get two corrections.
 
 **Hole size** changes round holes from 1 to 40 mm in diameter. OpenSCAD makes a round hole from flat faces, with the corners on the circle. The flat faces are inside the circle, so the hole is smaller than its diameter. The fix moves the flat faces out to the circle, and then adds the value. With 0, it only moves the faces. Some rules:

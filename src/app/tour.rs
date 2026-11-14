@@ -93,7 +93,7 @@ const STEPS: [Step; 10] = [
         points: &[
             "All parts go on one plate. Same parts show as one row with a count. Your slicer arranges the parts on its plates.",
             "CoCAD puts each part on its best face. You can also click the face that goes on the bed.",
-            "Turn on print fixes: teardrop holes, hole size, bridges, bed chamfer, brims and mouse ears.",
+            "Turn on print fixes: teardrop holes, hole size, bridges, bed chamfer, brims and mouse ears. The info button of a fix tells what it does and why.",
             "A part that is too large has a split button. Change the split later and click Apply. The Check card lists the problems.",
             "Layers, in the Layers card, shows the slice of the plate. Export 3MF at the bottom writes the plate.",
         ],

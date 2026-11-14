@@ -12,7 +12,7 @@
 //!   than the bed, the slicer arranges them on its plates.
 //! - The STL and 3MF exports write the plate. STEP writes the model.
 
-use super::{App, Mode, fmt_duration, rgb, setting, stat};
+use super::{App, Mode, fix_info, fmt_duration, rgb, setting, stat};
 use crate::assembly::{Assembly, PALETTE, Source};
 use crate::export::{self, Format, Meta};
 use crate::mesh::{Bounds, Mesh};
@@ -1321,6 +1321,7 @@ impl App {
         } else {
             format!("{on} on")
         };
+        let mut info = None;
         ui::card(ui, |ui| {
             if !self.card_head(ui, "Print fixes", &note) {
                 return;
@@ -1336,6 +1337,7 @@ impl App {
             let f = &mut self.opt.state.fixes;
             fix_row(
                 ui,
+                &mut info,
                 "Teardrop holes",
                 &mut f.teardrops,
                 &done(c.teardrops, "hole", "holes"),
@@ -1343,6 +1345,7 @@ impl App {
             );
             fix_row(
                 ui,
+                &mut info,
                 "Hole size",
                 &mut f.hole_size,
                 &done(c.holes, "hole", "holes"),
@@ -1366,6 +1369,7 @@ impl App {
             }
             fix_row(
                 ui,
+                &mut info,
                 "Bridges",
                 &mut f.bridges,
                 &done(c.bridges, "fixed", "fixed"),
@@ -1392,6 +1396,7 @@ impl App {
             }
             fix_row(
                 ui,
+                &mut info,
                 "Bed chamfer",
                 &mut f.chamfer,
                 &done(c.chamfers, "part", "parts"),
@@ -1417,6 +1422,7 @@ impl App {
             }
             fix_row(
                 ui,
+                &mut info,
                 "Brim on small islands",
                 &mut f.brim,
                 &done(c.brims, "brim", "brims"),
@@ -1443,6 +1449,7 @@ impl App {
             }
             fix_row(
                 ui,
+                &mut info,
                 "Mouse ears",
                 &mut f.ears,
                 &done(c.ears, "ear", "ears"),
@@ -1479,6 +1486,9 @@ impl App {
                 .on_hover_text(c.skipped.join("\n"));
             }
         });
+        if let Some(k) = info {
+            self.fix_info = Some(fix_info::FixInfo::new(k));
+        }
         ui.add_space(4.0);
     }
 
@@ -1858,11 +1868,29 @@ fn split_values(ui: &mut egui::Ui, sp: &mut split::Split, model: &Mesh, id: &str
 }
 
 /// One fix: the title, the switch and the count of the changed places.
-fn fix_row(ui: &mut egui::Ui, title: &str, on: &mut bool, count: &str, hint: &str) {
+/// A row of the Print fixes card: the name with an info button, the count
+/// and the switch. A click on the info button sets `info` to the index of
+/// the fix in `fix_info::FIXES`.
+fn fix_row(
+    ui: &mut egui::Ui,
+    info: &mut Option<usize>,
+    title: &str,
+    on: &mut bool,
+    count: &str,
+    hint: &str,
+) {
     ui.add_space(2.0);
     ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 4.0;
         ui.label(title).on_hover_text(hint);
+        if ui::info_button(ui)
+            .on_hover_text("What the fix does and why, with pictures")
+            .clicked()
+        {
+            *info = fix_info::index(title);
+        }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.spacing_mut().item_spacing.x = 8.0;
             ui::toggle(ui, on).on_hover_text(hint);
             if *on && !count.is_empty() {
                 ui.label(ui::dim(count));

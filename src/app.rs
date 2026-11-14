@@ -23,6 +23,7 @@ use std::sync::mpsc::{Receiver, channel};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
+mod fix_info;
 mod optimize_tab;
 mod remote;
 mod section;
@@ -421,6 +422,8 @@ pub struct App {
     show_about: bool,
     /// Welcome tour, while it is open.
     tour: Option<tour::Tour>,
+    /// The info window of a print fix, while it is open.
+    fix_info: Option<fix_info::FixInfo>,
     /// Privacy question, while it is open.
     consent: Option<ConsentPrompt>,
     /// Privacy card of the Settings window.
@@ -593,6 +596,7 @@ impl App {
             recent: recent::load(),
             show_about: false,
             tour: tour::first_start().then(tour::Tour::new),
+            fix_info: None,
             server: None,
             pending: Vec::new(),
             update: update::Checker::new(),
@@ -4191,6 +4195,7 @@ impl eframe::App for App {
         } else {
             self.tour_window(ctx);
         }
+        self.fix_info_window(ctx);
         self.changes_window(ctx);
         self.part_colors_window(ctx);
         self.part_color_window(ctx);

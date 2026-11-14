@@ -48,11 +48,11 @@ def render(tag, body, cam, size=(800, 600), ortho=False, bed=None, paint=ORANGE)
         print("FAILED", tag, r.stderr[-400:])
     return png
 
-def montage(name, panels, title):
+def montage(name, panels, title, folder=None):
     files = []
     for label, png in panels:
         files += ["-label", label, png]
-    target = os.path.join(out, name + ".png")
+    target = os.path.join(folder or out, name + ".png")
     subprocess.run(["montage"] + files + ["-tile", "%dx1" % len(panels), "-geometry", "+6+6",
                     "-pointsize", "26", "-font", "DejaVu-Sans", "-title", title, target], check=True)
     print("wrote", target)
@@ -190,3 +190,22 @@ montage("10-stand-mouse-ears", [
     # parts also has slivers on the faces that the fix did not change.
     ("The part with the ears", render("m-p", added(imp("stand-before"), cut("stand-ears", fl10)), cam_s, paint=None)),
 ], "Stand on its side: first layer and part")
+
+# The pictures of the fix info windows in the app: before and after of one
+# view for each fix. showcase-shots.sh makes them smaller and puts them in
+# assets/fixes/.
+app = os.path.join(out, "app")
+os.makedirs(app, exist_ok=True)
+W = os.path.join(work, "%s.png")
+montage("teardrops", [("Before: round hole", W % "s-bh"), ("Teardrop holes", W % "s-th")],
+        "Stand on its side: cable hole (section)", app)
+montage("hole-size", [("Before", W % "h-mb"), ("Hole size +0.2 mm (blue: removed)", W % "h-ma")],
+        "Base plate: magnet pocket (layer at z 1.5)", app)
+montage("bridges", [("Before", W % "p-b"), ("Sacrificial layers", W % "p-s"), ("Stepped", W % "p-t")],
+        "Base plate: screw counterbore, bed side down (section)", app)
+montage("bed-chamfer", [("Before", W % "e-b"), ("Bed chamfer 0.4 mm (2 layers)", W % "e-a")],
+        "Base plate: bed edge (section)", app)
+montage("brim", [("Before: thin front foot", W % "b-b"), ("Brim on the small island", W % "b-a")],
+        "Stand upright: first layer", app)
+montage("mouse-ears", [("Before", W % "m-b"), ("Mouse ears (blue)", W % "m-a")],
+        "Stand on its side: first layer", app)

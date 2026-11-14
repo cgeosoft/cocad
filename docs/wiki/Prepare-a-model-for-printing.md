@@ -51,7 +51,7 @@ Open the **Print fixes** card. Turn on all six fixes: **Teardrop holes**, **Hole
 
 ![All print fixes on](https://raw.githubusercontent.com/cgeosoft/cocad/main/assets/guide/app-3-fixes.jpg)
 
-Each fix shows the number of places that it changed. Hold the mouse on **Stand**: the status is now **Fits**, with no problems. The fixes removed all its problems. Hold the mouse on **Export 3MF** to see the fixes: "Bed chamfer, 4 teardrops, 6 bridge fixes, 6 mouse ears, 9 hole size fixes".
+Each fix shows the number of places that it changed. Click the info button after the name of a fix to see what the fix does and why, with a picture before and after the fix. Hold the mouse on **Stand**: the status is now **Fits**, with no problems. The fixes removed all its problems. Hold the mouse on **Export 3MF** to see the fixes: "Bed chamfer, 4 teardrops, 6 bridge fixes, 6 mouse ears, 9 hole size fixes".
 
 The sections below show each fix on a part of the desk dock. The parts are in print position. In the section pictures, the bed is at the bottom.
 
