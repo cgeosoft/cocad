@@ -230,6 +230,16 @@ input[type="range"]:disabled { opacity: 0.35; cursor: not-allowed; }
 .zoom img { transition: transform 0.5s var(--ease); }
 .zoom:hover { border-color: rgba(var(--accent-rgb), 0.4); }
 .zoom:hover img { transform: scale(1.025); }
+.fix-info { display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr); gap: 28px; align-items: center; margin: 56px 0 18px; }
+.fix-info-title { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 0 0 12px; font: 700 clamp(1.5rem, 3vw, 2.1rem)/1.15 var(--display); }
+.fix-info p { margin: 0; color: var(--muted); font-size: 16px; }
+.fix-gallery { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin: 0; padding: 0; list-style: none; }
+.fix-gallery li { padding: 12px 12px 18px; }
+.fix-gallery .zoom { border-radius: var(--radius-sm); background: #fff; }
+.fix-gallery img { display: block; width: 100%; height: auto; aspect-ratio: 1400 / 624; object-fit: contain; }
+.fix-gallery h3 { margin: 14px 4px 6px; font: 700 17px/1.25 var(--display); }
+.fix-gallery p { margin: 0 4px; color: var(--muted); font-size: 14px; }
+.fix-gallery .card:hover { border-color: rgba(var(--accent-rgb), 0.3); }
 
 /* Tour */
 .tour { padding-top: clamp(56px, 8vw, 100px); padding-bottom: 16px; }
@@ -329,7 +339,8 @@ input[type="range"]:disabled { opacity: 0.35; cursor: not-allowed; }
   .viewport { height: 560px; }
   .side { height: 520px; }
   .gallery { grid-template-columns: 1fr 1fr; }
-  .ledger-list { grid-template-columns: 1fr 1fr; }
+  .ledger-list, .fix-gallery { grid-template-columns: 1fr 1fr; }
+  .fix-info { grid-template-columns: minmax(0, 1fr); }
   .loop-head { grid-template-columns: 1fr; }
 }
 
@@ -352,7 +363,7 @@ input[type="range"]:disabled { opacity: 0.35; cursor: not-allowed; }
   .loop-stages { grid-template-columns: 1fr 1fr; }
   .stage-meta { display: none; }
   .stage-num { grid-row: auto; }
-  .rule-grid, .guard-list, .ledger-list { grid-template-columns: 1fr; }
+  .rule-grid, .guard-list, .ledger-list, .fix-gallery { grid-template-columns: 1fr; }
   .viewport { height: 480px; }
   .tools th { white-space: normal; overflow-wrap: anywhere; max-width: 150px; }
   .dl-row { grid-template-columns: 1fr; gap: 8px; }

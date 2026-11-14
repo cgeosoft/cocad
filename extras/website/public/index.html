@@ -201,13 +201,13 @@
         <div class="mcp-setup reveal">
           <figure class="shot">
             <button type="button" class="zoom" data-zoom="assets/img/screen-optimize.webp" aria-label="Enlarge screenshot">
-              <img src="assets/img/screen-optimize.webp" width="1600" height="1040" alt="The Optimize tab with the desk dock example. The base plate is split in two pieces with a dovetail joint. The stand and three clips are on the same plate." loading="lazy" decoding="async">
+              <img src="assets/img/screen-optimize.webp" width="1600" height="1040" alt="The Optimize tab with the desk dock example. The base plate is split in two pieces with a dovetail joint. The stand and three clips are on the same plate. All print fixes are on, so the stand and the plate pieces have mouse ears." loading="lazy" decoding="async">
             </button>
             <figcaption class="mono">The desk dock example: the base plate in two pieces, the print fixes on.</figcaption>
           </figure>
           <figure class="shot">
             <button type="button" class="zoom" data-zoom="assets/img/screen-fixes.webp" aria-label="Enlarge screenshot">
-              <img src="assets/img/screen-fixes.webp" width="1600" height="1040" alt="The Print fixes card: teardrop holes, bridges, bed chamfer and brim, each with a switch and the number of places. The Check card says that it found no problems." loading="lazy" decoding="async">
+              <img src="assets/img/screen-fixes.webp" width="1600" height="1040" alt="The Print fixes card: teardrop holes, hole size, bridges, bed chamfer, brim and mouse ears, each with a switch and the number of places. The Check card says that it found no problems." loading="lazy" decoding="async">
             </button>
             <figcaption class="mono">Each fix shows the number of places or parts that it changed.</figcaption>
           </figure>
@@ -217,7 +217,7 @@
             <caption class="sr-only">What the Optimize tab does</caption>
             <tbody>
               <tr><th>Plate</th><td>All parts or one part. Parts with the same shape are one row with a count. All parts go on one plate. Your slicer arranges them on its plates.</td></tr>
-              <tr><th>Orientation</th><td>Off by default. With custom orientation on, Auto puts a part on its best face, or you select the face for the bed.</td></tr>
+              <tr><th>Orientation</th><td>Auto by default: CoCAD puts each part on its best face. You can select the face for the bed, or keep the rotation of the model.</td></tr>
               <tr><th>Teardrop holes</th><td>Round holes with a horizontal axis get a 45 degree point at the top.</td></tr>
               <tr><th>Hole size</th><td>Round holes with a vertical axis get the diameter of the model, plus a set value.</td></tr>
               <tr><th>Bridges</th><td>Bridged ceilings start on straight edges. A hole above a bridge gets sacrificial layers or a stepped bridge.</td></tr>
@@ -225,7 +225,7 @@
               <tr><th>Brim</th><td>A one-layer brim on small bed islands, with a gap to the rest of the part.</td></tr>
               <tr><th>Mouse ears</th><td>A one-layer disk on each sharp bed corner of a large part.</td></tr>
               <tr><th>Check</th><td>Overhangs, long bridges, arcs in bridges, small islands and parts that are too large for the bed.</td></tr>
-              <tr><th>Auto split</th><td>For a part that is too large for the bed, CoCAD proposes cuts with a flat, pins or dovetail joint. You accept the split.</td></tr>
+              <tr><th>Auto split</th><td>For a part that is too large for the bed, CoCAD proposes cuts with a flat, pins or dovetail joint. You accept the split, and you can change it later.</td></tr>
               <tr><th>Layers</th><td>Walls, infill and skin of the plate, with a time, length and weight estimate.</td></tr>
             </tbody>
           </table>
@@ -234,8 +234,64 @@
       <ul class="guard-list reveal">
         <li><b>In the file.</b> The fixes change the mesh, so the exported STL or 3MF has them.</li>
         <li><b>Reference parts.</b> Parts with the <code class="inline">%</code> mark show in gray. They are not printed or exported.</li>
-        <li><b>Export 3MF.</b> The button at the bottom of the tab writes the print plate, with one object for each part. Its menu has STL and STEP of the model.</li>
+        <li><b>Export 3MF.</b> The button at the bottom of the tab writes the print plate, with one object for each part. Its menu has STL of the plate and STEP of the model.</li>
         <li><b>Printer presets.</b> File &gt; Settings &gt; Printer sets the default print area. Each model can have its own.</li>
+      </ul>
+      <div class="fix-info">
+        <div class="reveal">
+          <h3 class="fix-info-title">Each fix tells you why. <span class="pill pill-accent" data-since="0.8.0">Next release</span></h3>
+          <p>Click the info button after the name of a fix. A window tells what the fix does, why your printer needs it and when to use it, with a picture of the part before and after the fix. The pictures come from the desk dock example.</p>
+        </div>
+        <figure class="shot reveal">
+          <button type="button" class="zoom" data-zoom="assets/img/screen-fixinfo.webp" aria-label="Enlarge screenshot">
+            <img src="assets/img/screen-fixinfo.webp" width="1600" height="1040" alt="The info window of the Mouse ears fix over the Optimize tab. A picture shows the first layer of the stand before and after the fix. Below it are the sections What it does, Why and When to use it." loading="lazy" decoding="async">
+          </button>
+          <figcaption class="mono">The info window of Mouse ears.</figcaption>
+        </figure>
+      </div>
+      <ul class="fix-gallery">
+        <li class="card reveal">
+          <button type="button" class="zoom" data-zoom="assets/img/fix-teardrops.webp" aria-label="Enlarge the Teardrop holes picture">
+            <img src="assets/img/fix-teardrops.webp" width="1400" height="624" alt="A section through the cable hole of the stand: round before the fix, with a 45 degree point at the top after it." loading="lazy" decoding="async">
+          </button>
+          <h3>Teardrop holes</h3>
+          <p>The top of a horizontal hole is a ceiling in the air. A 45 degree point prints without support.</p>
+        </li>
+        <li class="card reveal">
+          <button type="button" class="zoom" data-zoom="assets/img/fix-hole-size.webp" aria-label="Enlarge the Hole size picture">
+            <img src="assets/img/fix-hole-size.webp" width="1400" height="624" alt="A layer through a magnet pocket of the base plate. After the fix, a thin blue ring shows the material that the fix removes." loading="lazy" decoding="async">
+          </button>
+          <h3>Hole size</h3>
+          <p>Vertical holes print too small. They get the diameter of the model, plus a value.</p>
+        </li>
+        <li class="card reveal">
+          <button type="button" class="zoom" data-zoom="assets/img/fix-bridges.webp" aria-label="Enlarge the Bridges picture">
+            <img src="assets/img/fix-bridges.webp" width="1400" height="416" alt="A section through a screw counterbore: before the fix, with sacrificial layers, and with a stepped bridge." loading="lazy" decoding="async">
+          </button>
+          <h3>Bridges</h3>
+          <p>A bridge from a round edge sags. The last layer under the ceiling gets straight edges.</p>
+        </li>
+        <li class="card reveal">
+          <button type="button" class="zoom" data-zoom="assets/img/fix-bed-chamfer.webp" aria-label="Enlarge the Bed chamfer picture">
+            <img src="assets/img/fix-bed-chamfer.webp" width="1400" height="624" alt="A section through the bed edge of the base plate: a square edge before the fix, two steps of 0.2 mm after it." loading="lazy" decoding="async">
+          </button>
+          <h3>Bed chamfer</h3>
+          <p>The first layers spread out on the bed. A chamfer of whole layers removes the elephant foot.</p>
+        </li>
+        <li class="card reveal">
+          <button type="button" class="zoom" data-zoom="assets/img/fix-brim.webp" aria-label="Enlarge the Brim on small islands picture">
+            <img src="assets/img/fix-brim.webp" width="1400" height="624" alt="The first layer of the upright stand: the thin front foot before the fix, with a brim around it after the fix." loading="lazy" decoding="async">
+          </button>
+          <h3>Brim on small islands</h3>
+          <p>A thin first layer can come loose. A brim of one layer holds it on the bed.</p>
+        </li>
+        <li class="card reveal">
+          <button type="button" class="zoom" data-zoom="assets/img/fix-mouse-ears.webp" aria-label="Enlarge the Mouse ears picture">
+            <img src="assets/img/fix-mouse-ears.webp" width="1400" height="624" alt="The first layer of the stand on its side, before the fix and with a blue disk on each of the six sharp corners." loading="lazy" decoding="async">
+          </button>
+          <h3>Mouse ears</h3>
+          <p>Large flat parts lift at the corners. A disk of one layer holds each sharp corner.</p>
+        </li>
       </ul>
     </section>
 
@@ -282,11 +338,11 @@
                 <tr><th class="mono">new_model</th><td>Write a new model and open it <span class="pill pill-accent" data-since="0.8.0">Next release</span></td></tr>
                 <tr><th class="mono">set_params<br>reset_params</th><td>Change or reset parameters, then build</td></tr>
                 <tr><th class="mono">build</th><td>Run OpenSCAD again. The old name <code class="inline">render</code> also works</td></tr>
-                <tr><th class="mono">get_optimize<br>set_optimize</th><td>Read or change the print preparation: print area, parts, copies, orientation, fixes and split <span class="pill pill-accent" data-since="0.7.0">Next release</span></td></tr>
+                <tr><th class="mono">get_optimize<br>set_optimize</th><td>Read or change the print preparation: print area, parts, orientation, fixes and split <span class="pill pill-accent" data-since="0.7.0">Next release</span></td></tr>
                 <tr><th class="mono">slice</th><td>Layers, filament, weight and a rough print time of the current plate</td></tr>
                 <tr><th class="mono">export_model</th><td>Write the print plate as STL or 3MF, or the model as STEP</td></tr>
                 <tr><th class="mono">save_photo</th><td>Write a path traced PNG</td></tr>
-                <tr><th class="mono">set_view</th><td>Tab (Model, Optimize, Render), camera, wireframe, grid and layer</td></tr>
+                <tr><th class="mono">set_view</th><td>Tab (Model, Optimize, Render), camera, projection, wireframe, grid, the Layers view and the layer</td></tr>
                 <tr><th class="mono">load_parameter_set<br>save_parameter_set</th><td>Load or save a named set</td></tr>
                 <tr><th class="mono">list_windows<br>select_window</th><td>Choose a window when more than one is open</td></tr>
               </tbody>
@@ -312,11 +368,11 @@
       </div>
       <div class="tour-tabs reveal" role="tablist" aria-label="Screens">
         <i class="tour-ink" aria-hidden="true"></i>
-        <button type="button" role="tab" class="tour-tab" data-shot="assets/img/screen-optimize.webp" data-text="Optimize tab. The print parts on the plate, with the count of same parts, the fit on the bed and a split for a part that is too large.">Optimize</button>
+        <button type="button" role="tab" class="tour-tab" data-shot="assets/img/screen-optimize.webp" data-text="Optimize tab. All print parts on one plate, with the count of same parts. A part that is too large gets a split button.">Optimize</button>
         <button type="button" role="tab" class="tour-tab" data-shot="assets/img/screen-layers.webp" data-text="Layers preview of the plate. Walls, infill and skin as round strands, with a layer slider and a time, length and weight estimate.">Layers</button>
         <button type="button" role="tab" class="tour-tab" data-shot="assets/img/screen-model.webp" data-text="Model tab. The Customizer panel reads the comments in your .scad file. Parts with the % mark show in gray and are not printed.">Model</button>
         <button type="button" role="tab" class="tour-tab" data-shot="assets/img/screen-render.webp" data-text="Render tab. Click Render, and a path tracer renders the current camera in a plastic color and finish you choose, on the GPU or on all CPU cores.">Render</button>
-        <button type="button" role="tab" class="tour-tab" data-shot="assets/img/screen-sets.webp" data-text="Parameter sets. Named sets in a .json file that OpenSCAD reads too.">Sets</button>
+        <button type="button" role="tab" class="tour-tab" data-shot="assets/img/screen-sets.webp" data-text="Parameter sets. Named sets in the model definition file next to the model, with the title and the part names.">Sets</button>
         <button type="button" role="tab" class="tour-tab" data-shot="assets/img/screen-export.webp" data-text="Export 3MF at the bottom of the Optimize tab writes the plate, with one object for each part. The arrow opens the other exports: STL of the plate and STEP of the model.">Export</button>
       </div>
       <div class="tour-frame reveal">
@@ -351,14 +407,14 @@
       <ol class="ledger-list">
         <li class="card reveal"><h3>Customizer panel</h3><p>It reads the same comments as OpenSCAD. The model builds again when you change a value.</p></li>
         <li class="card reveal"><h3>Live reload</h3><p>Keep your editor open. When the file changes on disk, the model reloads and your values stay.</p></li>
-        <li class="card reveal"><h3>Parameter sets</h3><p>Save named sets in the OpenSCAD <code class="inline">.json</code> format.</p></li>
+        <li class="card reveal"><h3>Parameter sets</h3><p>Save named sets in <code class="inline">&lt;model&gt;.yml</code> next to the model, with its title and part names. The CLI writes them in the <code class="inline">.json</code> format of OpenSCAD.</p></li>
         <li class="card reveal"><h3>Layers preview</h3><p>Walls, infill and skin of the print plate, with a time, length and weight estimate. It writes no G-code.</p></li>
         <li class="card reveal"><h3>Mesh check</h3><p>Size, volume, triangles and open edges. Back faces show in purple.</p></li>
         <li class="card reveal"><h3>Reference parts <span class="pill pill-accent" data-since="0.7.0">Next release</span></h3><p>Parts with the <code class="inline">%</code> mark show in gray, as in OpenSCAD. They are not printed or exported.</p></li>
         <li class="card reveal"><h3>Printer presets <span class="pill pill-accent" data-since="0.7.0">Next release</span></h3><p>Five printer presets and a default print area in the settings. Each model can have its own area.</p></li>
         <li class="card reveal"><h3>Real STEP export</h3><p>AP214 with planar faces. A closed mesh becomes one solid that CAD tools can edit.</p></li>
         <li class="card reveal"><h3>3MF with parameters</h3><p>The parameter values go in the metadata of the file. Each print part is a separate object.</p></li>
-        <li class="card reveal"><h3>Batch CLI</h3><p>Run <code class="inline">export</code>, <code class="inline">slice</code> and <code class="inline">photo</code> without the window. Export and slice take the print options: plate, part, print area, orientation and fixes.</p></li>
+        <li class="card reveal"><h3>Batch CLI</h3><p>Run <code class="inline">export</code>, <code class="inline">slice</code> and <code class="inline">photo</code> without the window. Export and slice take the print options: part, print area, orientation and fixes.</p></li>
         <li class="card reveal"><h3>Desk dock example <span class="pill pill-accent" data-since="0.7.0">Next release</span></h3><p>File &gt; Examples &gt; Desk dock shows each feature of the Optimize tab.</p></li>
         <li class="card reveal"><h3>Three systems</h3><p>Linux, Windows and macOS, with dark and light themes.</p></li>
       </ol>
