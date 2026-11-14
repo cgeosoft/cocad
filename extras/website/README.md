@@ -53,6 +53,7 @@ The files `images/screen-*.jpg` are screenshots of the app at 1600 × 1040, in t
 - The first prompt of the agent demo runs one time, when the demo reaches the middle of the viewport.
 - A click on a loop stage shows that stage of the current prompt at once and stops the run.
 - The lightbox opens when the image is ready.
+- `/assets/*` is cached for 7 days, in Cloudflare and in the browser. When an image changes and keeps its name, give its references in `index.html` a new `?v=` value, for example the release version.
 
 ## Analytics
 
